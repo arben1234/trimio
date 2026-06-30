@@ -44,6 +44,8 @@ router.put('/salons/:id', async (req, res) => {
   if (name && name !== salon.name) {
     const existingSlugs = db.prepare('SELECT slug FROM salons WHERE id != ?').all(req.params.id).map(r => r.slug);
     slug = uniqueSlug(name, existingSlugs);
+  }
+  if (baseUrl || (name && name !== salon.name)) {
     qr_code = await generateQR(buildSalonUrl(slug, baseUrl));
   }
 
