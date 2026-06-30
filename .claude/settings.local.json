@@ -35,7 +35,11 @@
       "PowerShell(cmd /c \"dir /b /s C:\\\\Users\\\\klajd\\\\Downloads\\\\TRIMIO\\\\\" 2>&1 | Select-Object -First 60)",
       "PowerShell(Copy-Item *)",
       "PowerShell(Get-Content *)",
-      "PowerShell(Invoke-RestMethod -Uri \"http://localhost:3001/api/health\" -Method GET | ConvertTo-Json)"
+      "PowerShell(Invoke-RestMethod -Uri \"http://localhost:3001/api/health\" -Method GET | ConvertTo-Json)",
+      "WebFetch(domain:railway.app)",
+      "WebFetch(domain:railway.com)",
+      "PowerShell(npm install *)",
+      "PowerShell(npm approve-scripts *)"
     ]
   }
 }

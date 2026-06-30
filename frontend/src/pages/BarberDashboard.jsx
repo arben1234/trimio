@@ -18,7 +18,7 @@ export default function BarberDashboard() {
   const { salonSlug } = useParams();
   const navigate = useNavigate();
   const salonId = useSalonId(salonSlug);
-  const { user, logout, isLoggedIn } = useSalonAuth(salonSlug, salonId);
+  const { user, logout, isLoggedIn, authReady } = useSalonAuth(salonSlug, salonId);
   const { toast, show: showToast } = useToast();
 
   const [tab, setTab] = useState('bookings');
@@ -28,11 +28,11 @@ export default function BarberDashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!salonId) return;
+    if (!salonId || !authReady) return;
     if (!isLoggedIn || user?.role !== 'barber') {
       navigate(`/s/${salonSlug}/login`, { replace: true });
     }
-  }, [isLoggedIn, user, salonId, salonSlug, navigate]);
+  }, [isLoggedIn, user, salonId, authReady, salonSlug, navigate]);
 
   useEffect(() => {
     if (!salonId || !isLoggedIn) return;

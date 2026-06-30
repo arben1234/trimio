@@ -65,9 +65,23 @@ router.get('/:salonSlug/barbers/:barberId/ratings', (req, res) => {
 
 // Profilo barber (per dashboard)
 router.get('/:salonSlug/barbers/:barberId', requireAuth(['owner', 'barber', 'super_admin']), (req, res) => {
-  const barber = db.prepare('SELECT id, name, username, role FROM users WHERE id = ? AND salon_id = ?').get(req.params.barberId, req.salonId || req.user.salonId);
+  const barber = db.prepare('SELECT id, name, username, role, photo_url, bio FROM users WHERE id = ? AND salon_id = ?').get(req.params.barberId, req.salonId || req.user.salonId);
   if (!barber) return res.status(404).json({ error: 'Barbiere non trovato' });
   res.json(barber);
+});
+
+// Aggiorna profilo barber (photo, bio) — barber solo il proprio, owner tutti
+router.put('/:salonSlug/barbers/:barberId/profile', requireAuth(['owner', 'barber', 'super_admin']), (req, res) => {
+  const barberId = parseInt(req.params.barberId);
+  if (req.user.role === 'barber' && req.user.userId !== barberId) {
+    return res.status(403).json({ error: 'Non autorizzato' });
+  }
+  const { photo_url, bio, name } = req.body;
+  const barber = db.prepare('SELECT * FROM users WHERE id = ?').get(barberId);
+  if (!barber) return res.status(404).json({ error: 'Barbiere non trovato' });
+  db.prepare('UPDATE users SET photo_url=?, bio=?, name=? WHERE id=?')
+    .run(photo_url ?? barber.photo_url, bio ?? barber.bio, name ?? barber.name, barberId);
+  res.json({ ok: true });
 });
 
 module.exports = router;

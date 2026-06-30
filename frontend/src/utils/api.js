@@ -38,6 +38,7 @@ export const api = {
   getBookings: (slug, params, salonId) => request(`/salons/${slug}/bookings?${new URLSearchParams(params)}`, {}, salonId),
   updateBooking: (slug, id, data, salonId) => request(`/salons/${slug}/bookings/${id}`, { method: 'PUT', body: data }, salonId),
   getStats: (slug, salonId) => request(`/salons/${slug}/stats`, {}, salonId),
+  updateBarberProfile: (slug, barberId, data, salonId) => request(`/salons/${slug}/barbers/${barberId}/profile`, { method: 'PUT', body: data }, salonId),
   getBarberHours: (slug, barberId) => request(`/salons/${slug}/barbers/${barberId}/hours`),
   updateBarberHours: (slug, barberId, hours, salonId) => request(`/salons/${slug}/barbers/${barberId}/hours`, { method: 'PUT', body: { hours } }, salonId),
   getHolidays: (slug, barberId) => request(`/salons/${slug}/barbers/${barberId}/holidays`),

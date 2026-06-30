@@ -13,4 +13,14 @@ db.exec('PRAGMA foreign_keys = ON');
 const schema = fs.readFileSync(SCHEMA_PATH, 'utf8');
 db.exec(schema);
 
+// Migrazioni colonne opzionali
+for (const sql of [
+  'ALTER TABLE users ADD COLUMN photo_url TEXT',
+  'ALTER TABLE users ADD COLUMN bio TEXT',
+  'ALTER TABLE salons ADD COLUMN description TEXT',
+  'ALTER TABLE salons ADD COLUMN cover_url TEXT',
+]) {
+  try { db.exec(sql); } catch {}
+}
+
 module.exports = db;

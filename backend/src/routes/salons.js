@@ -8,7 +8,7 @@ router.get('/:salonSlug', (req, res) => {
   if (!salon) return res.status(404).json({ error: 'Salone non trovato' });
 
   const barbers = db.prepare(
-    'SELECT id, name FROM users WHERE salon_id = ? AND role = ? ORDER BY name'
+    'SELECT id, name, photo_url, bio FROM users WHERE salon_id = ? AND role = ? ORDER BY name'
   ).all(salon.id, 'barber');
 
   const services = db.prepare(

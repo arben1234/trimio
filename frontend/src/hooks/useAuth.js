@@ -5,16 +5,17 @@ import { api } from '../utils/api';
 // Hook scoped al salone: legge/scrive solo il token del salone corrente
 export function useSalonAuth(salonSlug, salonId) {
   const [user, setUserState] = useState(() => salonId ? getUser(salonId) : null);
+  const [authReady, setAuthReady] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Se cambia salone, resetta lo stato - previene cross-salon bleed
   useEffect(() => {
     if (salonId) {
       setUserState(getUser(salonId));
     } else {
       setUserState(null);
     }
+    setAuthReady(!!salonId);
   }, [salonId]);
 
   async function login(username, password) {
@@ -40,7 +41,7 @@ export function useSalonAuth(salonSlug, salonId) {
   }
 
   const isLoggedIn = !!user && !!getToken(salonId);
-  return { user, login, logout, loading, error, isLoggedIn };
+  return { user, login, logout, loading, error, isLoggedIn, authReady };
 }
 
 export function useAdminAuth() {

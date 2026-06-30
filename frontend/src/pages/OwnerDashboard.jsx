@@ -19,7 +19,7 @@ export default function OwnerDashboard() {
   const { salonSlug } = useParams();
   const navigate = useNavigate();
   const { salon, barbers } = useSalonData(salonSlug);
-  const { user, logout, isLoggedIn } = useSalonAuth(salonSlug, salon?.id);
+  const { user, logout, isLoggedIn, authReady } = useSalonAuth(salonSlug, salon?.id);
   const { toast, show: showToast } = useToast();
 
   const [tab, setTab] = useState('bookings');
@@ -31,11 +31,11 @@ export default function OwnerDashboard() {
   const [newService, setNewService] = useState({ name: '', duration_minutes: 30, price: '' });
 
   useEffect(() => {
-    if (!salon) return;
+    if (!salon || !authReady) return;
     if (!isLoggedIn || user?.role !== 'owner') {
       navigate(`/s/${salonSlug}/login`, { replace: true });
     }
-  }, [isLoggedIn, user, salon, salonSlug, navigate]);
+  }, [isLoggedIn, user, salon, authReady, salonSlug, navigate]);
 
   useEffect(() => {
     if (!salon || !isLoggedIn) return;
@@ -81,6 +81,28 @@ export default function OwnerDashboard() {
   async function deleteService(id) {
     await api.deleteService(salonSlug, id, salon.id);
     setServices(s => s.filter(x => x.id !== id));
+  }
+
+  const [editBarber, setEditBarber] = useState(null);
+
+  async function saveBarberProfile(e) {
+    e.preventDefault();
+    await api.updateBarberProfile(salonSlug, editBarber.id, {
+      name: editBarber.name,
+      photo_url: editBarber.photo_url || null,
+      bio: editBarber.bio || null
+    }, salon.id);
+    const d = await api.getSalon(salonSlug);
+    setEditBarber(null);
+    showToast('Profilo aggiornato');
+  }
+
+  function handlePhotoUpload(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => setEditBarber(b => ({ ...b, photo_url: ev.target.result }));
+    reader.readAsDataURL(file);
   }
 
   if (!user || !salon) return <div className="spinner" />;
@@ -204,6 +226,53 @@ export default function OwnerDashboard() {
           </>
         )}
 
+        {tab === 'barbers' && (
+          <>
+            <h2 style={{ marginBottom: 16 }}>Profili Barbieri</h2>
+            {editBarber ? (
+              <form onSubmit={saveBarberProfile} className="card">
+                <p className="section-title">Modifica {editBarber.name}</p>
+                <div style={{ textAlign: 'center', marginBottom: 16 }}>
+                  {editBarber.photo_url
+                    ? <img src={editBarber.photo_url} alt="" style={{ width: 96, height: 96, borderRadius: '50%', objectFit: 'cover', border: '3px solid var(--gold)' }} />
+                    : <div style={{ width: 96, height: 96, borderRadius: '50%', background: 'var(--surface)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '2rem' }}>✂️</div>
+                  }
+                  <div style={{ marginTop: 10 }}>
+                    <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer', display: 'inline-block' }}>
+                      📷 Carica foto
+                      <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handlePhotoUpload} />
+                    </label>
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label>Nome</label>
+                  <input value={editBarber.name} onChange={e => setEditBarber(b => ({ ...b, name: e.target.value }))} required />
+                </div>
+                <div className="form-group">
+                  <label>Descrizione breve</label>
+                  <input placeholder="Es. Specializzato in tagli classici" value={editBarber.bio || ''} onChange={e => setEditBarber(b => ({ ...b, bio: e.target.value }))} />
+                </div>
+                <button className="btn btn-primary" type="submit">Salva</button>
+                <button type="button" className="btn btn-secondary" style={{ marginTop: 8 }} onClick={() => setEditBarber(null)}>Annulla</button>
+              </form>
+            ) : (
+              barbers.map(b => (
+                <div key={b.id} className="booking-item" style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                  {b.photo_url
+                    ? <img src={b.photo_url} alt={b.name} style={{ width: 56, height: 56, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} />
+                    : <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'var(--surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.5rem', flexShrink: 0 }}>✂️</div>
+                  }
+                  <div style={{ flex: 1 }}>
+                    <strong>{b.name}</strong>
+                    {b.bio && <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: 2 }}>{b.bio}</p>}
+                  </div>
+                  <button className="btn btn-secondary btn-sm" onClick={() => setEditBarber({ ...b })}>Modifica</button>
+                </div>
+              ))
+            )}
+          </>
+        )}
+
         {tab === 'qr' && (
           <div style={{ textAlign: 'center' }}>
             <h2 style={{ marginBottom: 16 }}>QR Code salone</h2>
@@ -225,10 +294,11 @@ export default function OwnerDashboard() {
       </div>
 
       <nav className="bottom-nav">
-        <a className={tab === 'bookings' ? 'active' : ''} onClick={() => setTab('bookings')}><span>📅</span>Prenotazioni</a>
-        <a className={tab === 'stats' ? 'active' : ''} onClick={() => setTab('stats')}><span>📊</span>Statistiche</a>
+        <a className={tab === 'bookings' ? 'active' : ''} onClick={() => setTab('bookings')}><span>📅</span>Appunt.</a>
+        <a className={tab === 'stats' ? 'active' : ''} onClick={() => setTab('stats')}><span>📊</span>Stats</a>
+        <a className={tab === 'barbers' ? 'active' : ''} onClick={() => setTab('barbers')}><span>👤</span>Barbieri</a>
         <a className={tab === 'services' ? 'active' : ''} onClick={() => setTab('services')}><span>✂️</span>Servizi</a>
-        <a className={tab === 'qr' ? 'active' : ''} onClick={() => setTab('qr')}><span>📲</span>QR Code</a>
+        <a className={tab === 'qr' ? 'active' : ''} onClick={() => setTab('qr')}><span>📲</span>QR</a>
       </nav>
     </div>
   );

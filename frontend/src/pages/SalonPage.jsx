@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../utils/api';
+import { setToken, setUser } from '../utils/storage';
 
 export default function SalonPage() {
   const { salonSlug } = useParams();
+  const navigate = useNavigate();
   const [data, setData] = useState(null);
-  const [step, setStep] = useState('barbers'); // barbers → service → slot → form → done
+  const [step, setStep] = useState('barbers');
   const [selected, setSelected] = useState({ barber: null, service: null, slot: null, date: '' });
   const [slots, setSlots] = useState([]);
   const [form, setForm] = useState({ name: '', phone: '', notes: '' });
@@ -13,6 +15,12 @@ export default function SalonPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [bookingId, setBookingId] = useState(null);
+
+  // Staff login modal
+  const [showLogin, setShowLogin] = useState(false);
+  const [loginForm, setLoginForm] = useState({ username: '', password: '' });
+  const [loginError, setLoginError] = useState(null);
+  const [loginLoading, setLoginLoading] = useState(false);
 
   useEffect(() => {
     api.getSalon(salonSlug)
@@ -48,6 +56,22 @@ export default function SalonPage() {
     }
   }
 
+  async function handleStaffLogin(e) {
+    e.preventDefault();
+    setLoginLoading(true);
+    setLoginError(null);
+    try {
+      const res = await api.salonLogin(salonSlug, loginForm);
+      setToken(res.user.salonId, res.token);
+      setUser(res.user.salonId, res.user);
+      navigate(`/s/${salonSlug}/${res.user.role === 'owner' ? 'owner' : 'barber'}`);
+    } catch (e) {
+      setLoginError(e.message);
+    } finally {
+      setLoginLoading(false);
+    }
+  }
+
   if (loading) return <div className="spinner" />;
   if (error) return <div className="page"><p className="error-msg">{error}</p></div>;
 
@@ -55,11 +79,51 @@ export default function SalonPage() {
 
   return (
     <div>
+      {/* Modal login staff */}
+      {showLogin && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
+          zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20
+        }} onClick={() => { setShowLogin(false); setLoginError(null); setLoginForm({ username: '', password: '' }); }}>
+          <div style={{
+            background: 'var(--card)', borderRadius: 16, padding: 24, width: '100%', maxWidth: 360
+          }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ marginBottom: 4, textAlign: 'center' }}>Accesso Staff</h3>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', marginBottom: 20 }}>
+              {salon.name}
+            </p>
+            <form onSubmit={handleStaffLogin}>
+              <div className="form-group">
+                <label>Nome utente</label>
+                <input autoComplete="username" placeholder="owner / nome.barbiere"
+                  value={loginForm.username}
+                  onChange={e => setLoginForm(f => ({ ...f, username: e.target.value }))} required />
+              </div>
+              <div className="form-group">
+                <label>Password</label>
+                <input type="password" autoComplete="current-password" placeholder="••••••••"
+                  value={loginForm.password}
+                  onChange={e => setLoginForm(f => ({ ...f, password: e.target.value }))} required />
+              </div>
+              {loginError && <p className="error-msg">{loginError}</p>}
+              <button className="btn btn-primary" type="submit" disabled={loginLoading}>
+                {loginLoading ? 'Accesso...' : 'Entra'}
+              </button>
+              <button type="button" className="btn btn-secondary" style={{ marginTop: 8 }}
+                onClick={() => { setShowLogin(false); setLoginError(null); }}>
+                Annulla
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
       <div className="header">
         <span className="header-logo">TRIMIO</span>
-        <Link to={`/s/${salonSlug}/login`} className="btn btn-secondary btn-sm" style={{ width: 'auto' }}>
+        <button className="btn btn-secondary btn-sm" style={{ width: 'auto' }}
+          onClick={() => setShowLogin(true)}>
           Staff
-        </Link>
+        </button>
       </div>
 
       <div className="page">
@@ -73,8 +137,12 @@ export default function SalonPage() {
             <div className="barber-grid">
               {barbers.map(b => (
                 <div key={b.id} className="barber-card" onClick={() => { setSelected(s => ({ ...s, barber: b })); setStep('service'); }}>
-                  <div className="barber-avatar">✂️</div>
+                  {b.photo_url
+                    ? <img src={b.photo_url} alt={b.name} style={{ width: 72, height: 72, borderRadius: '50%', objectFit: 'cover', marginBottom: 8, border: '2px solid var(--gold)' }} />
+                    : <div className="barber-avatar">✂️</div>
+                  }
                   <strong>{b.name}</strong>
+                  {b.bio && <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.3 }}>{b.bio}</p>}
                 </div>
               ))}
             </div>
@@ -84,7 +152,13 @@ export default function SalonPage() {
         {/* Step 2: Scegli servizio */}
         {step === 'service' && (
           <>
-            <p className="section-title">Servizio con {selected.barber.name}</p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+              {selected.barber.photo_url
+                ? <img src={selected.barber.photo_url} alt={selected.barber.name} style={{ width: 48, height: 48, borderRadius: '50%', objectFit: 'cover', border: '2px solid var(--gold)' }} />
+                : <div style={{ fontSize: '1.5rem' }}>✂️</div>
+              }
+              <p className="section-title" style={{ margin: 0 }}>Servizio con {selected.barber.name}</p>
+            </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {services.length === 0 && (
                 <div className="card" onClick={() => setStep('slot')} style={{ cursor: 'pointer' }}>
@@ -109,7 +183,7 @@ export default function SalonPage() {
           </>
         )}
 
-        {/* Step 3: Scegli data e slot */}
+        {/* Step 3: Data e slot */}
         {step === 'slot' && (
           <>
             <p className="section-title">Quando vuoi venire?</p>
@@ -174,7 +248,7 @@ export default function SalonPage() {
           </>
         )}
 
-        {/* Step 5: Conferma cliente */}
+        {/* Step 5: Conferma */}
         {step === 'done' && (
           <div style={{ textAlign: 'center', paddingTop: 24 }}>
             <div style={{ fontSize: '4rem', marginBottom: 12 }}>✅</div>
