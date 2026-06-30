@@ -1,0 +1,78 @@
+<svg width="300" height="400" viewBox="0 0 300 400" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><rect width="300" height="400" fill="#0d0d0d"/>
+
+  <defs>
+    <radialGradient id="lamp3a" cx="30%" cy="10%" r="35%">
+      <stop offset="0%" stop-color="#f5d070" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#0d0d0d" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="lamp3b" cx="70%" cy="10%" r="35%">
+      <stop offset="0%" stop-color="#f5d070" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#0d0d0d" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <!-- Sfondo ambiente -->
+  <rect width="300" height="400" fill="#0d0d0d"/>
+  <rect width="300" height="400" fill="url(#lamp3a)"/>
+  <rect width="300" height="400" fill="url(#lamp3b)"/>
+  <!-- Pavimento -->
+  <rect x="0" y="310" width="300" height="90" fill="#1a1512"/>
+  <!-- Mattonelle pavimento -->
+  <line x1="0" y1="330" x2="300" y2="330" stroke="#222" stroke-width="1"/>
+  <line x1="0" y1="355" x2="300" y2="355" stroke="#222" stroke-width="1"/>
+  <line x1="0" y1="380" x2="300" y2="380" stroke="#222" stroke-width="1"/>
+  <line x1="50" y1="310" x2="50" y2="400" stroke="#222" stroke-width="1"/>
+  <line x1="100" y1="310" x2="100" y2="400" stroke="#222" stroke-width="1"/>
+  <line x1="150" y1="310" x2="150" y2="400" stroke="#222" stroke-width="1"/>
+  <line x1="200" y1="310" x2="200" y2="400" stroke="#222" stroke-width="1"/>
+  <line x1="250" y1="310" x2="250" y2="400" stroke="#222" stroke-width="1"/>
+  <!-- Parete -->
+  <rect x="0" y="0" width="300" height="320" fill="#111"/>
+  <!-- Wainscoting (boiserie) -->
+  <rect x="0" y="240" width="300" height="80" fill="#1a1512"/>
+  <rect x="10" y="248" width="280" height="64" rx="2" fill="none" stroke="#333" stroke-width="1.5"/>
+  <rect x="15" y="253" width="270" height="54" rx="1" fill="none" stroke="#2a2a2a" stroke-width="1"/>
+  <!-- Specchio grande -->
+  <rect x="35" y="30" width="230" height="200" rx="6" fill="#1a1a1a" stroke="#555" stroke-width="2"/>
+  <rect x="40" y="35" width="220" height="190" rx="4" fill="#161616"/>
+  <!-- Riflesso luce sullo specchio -->
+  <ellipse cx="150" cy="130" rx="60" ry="50" fill="#f5d070" opacity="0.04"/>
+  <!-- Cornice specchio decorativa -->
+  <rect x="35" y="30" width="230" height="8" rx="2" fill="#3a3020"/>
+  <rect x="35" y="222" width="230" height="8" rx="2" fill="#3a3020"/>
+  <rect x="35" y="30" width="8" height="200" rx="2" fill="#3a3020"/>
+  <rect x="257" y="30" width="8" height="200" rx="2" fill="#3a3020"/>
+  <!-- Lampada sinistra -->
+  <line x1="90" y1="0" x2="90" y2="28" stroke="#555" stroke-width="2"/>
+  <path d="M70 28 Q90 18 110 28 L105 48 Q90 55 75 48Z" fill="#d4a030"/>
+  <ellipse cx="90" cy="28" rx="20" ry="6" fill="#f5d070" opacity="0.6"/>
+  <!-- Lampada destra -->
+  <line x1="210" y1="0" x2="210" y2="28" stroke="#555" stroke-width="2"/>
+  <path d="M190 28 Q210 18 230 28 L225 48 Q210 55 195 48Z" fill="#d4a030"/>
+  <ellipse cx="210" cy="28" rx="20" ry="6" fill="#f5d070" opacity="0.6"/>
+  <!-- Sedia barbiere sinistra -->
+  <rect x="28" y="260" width="90" height="12" rx="3" fill="#2a2a2a" stroke="#444" stroke-width="1"/>
+  <rect x="45" y="244" width="56" height="22" rx="4" fill="#1a1a1a" stroke="#333" stroke-width="1"/>
+  <rect x="40" y="272" width="8" height="38" fill="#222"/>
+  <rect x="100" y="272" width="8" height="38" fill="#222"/>
+  <rect x="30" y="308" width="88" height="6" rx="3" fill="#1a1a1a"/>
+  <!-- Sedia barbiere destra -->
+  <rect x="182" y="260" width="90" height="12" rx="3" fill="#2a2a2a" stroke="#444" stroke-width="1"/>
+  <rect x="199" y="244" width="56" height="22" rx="4" fill="#1a1a1a" stroke="#333" stroke-width="1"/>
+  <rect x="194" y="272" width="8" height="38" fill="#222"/>
+  <rect x="254" y="272" width="8" height="38" fill="#222"/>
+  <rect x="184" y="308" width="88" height="6" rx="3" fill="#1a1a1a"/>
+  <!-- Palo barbiere (barber pole) -->
+  <rect x="268" y="60" width="16" height="220" rx="4" fill="#1a1a1a" stroke="#333" stroke-width="1"/>
+  <path d="M268 70 Q276 80 284 90 Q276 100 268 110 Q276 120 284 130 Q276 140 268 150 Q276 160 284 170 Q276 180 268 190 Q276 200 284 210 Q276 220 268 230 Q276 240 284 250" fill="none" stroke="#cc2222" stroke-width="5"/>
+  <path d="M268 80 Q276 90 284 100 Q276 110 268 120 Q276 130 284 140 Q276 150 268 160 Q276 170 284 180 Q276 190 268 200 Q276 210 284 220 Q276 230 268 240 Q276 250 284 260" fill="none" stroke="white" stroke-width="3" opacity="0.7"/>
+  <ellipse cx="276" cy="60" rx="9" ry="6" fill="#cc2222"/>
+  <ellipse cx="276" cy="280" rx="9" ry="6" fill="#cc2222"/>
+  <defs>
+    <linearGradient id="grad_label3" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#000" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#000" stop-opacity="0.75"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="350" width="300" height="50" fill="url(#grad_label3)"/>
+  <text x="15" y="388" fill="white" font-family="system-ui,sans-serif" font-size="11" font-weight="700" letter-spacing="1">IL NOSTRO SALONE</text>
+</svg>

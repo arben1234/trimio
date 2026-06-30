@@ -1,0 +1,41 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(git *)",
+      "PowerShell(cmd /c dir /s /b \"C:\\\\Users\\\\klajd\\\\Documents\\\\Projektet\\\\TRIMIO\" 2>&1)",
+      "PowerShell(cmd /c \"cd C:\\\\Users\\\\klajd\\\\Documents\\\\Projektet\\\\TRIMIO\\\\backend && npm install 2>&1\")",
+      "PowerShell(cmd /c \"cd C:\\\\Users\\\\klajd\\\\Documents\\\\Projektet\\\\TRIMIO\\\\backend && node src/server.js 2>&1 &\")",
+      "PowerShell(cmd /c \"cd C:\\\\Users\\\\klajd\\\\Documents\\\\Projektet\\\\TRIMIO\\\\backend && npm install 2>&1 && echo INSTALL_OK\")",
+      "PowerShell(Start-Sleep -Seconds 4; cmd /c \"curl -s http://localhost:3001/api/health 2>&1\")",
+      "PowerShell(cmd /c \"cd C:\\\\Users\\\\klajd\\\\Documents\\\\Projektet\\\\TRIMIO\\\\frontend && npm install 2>&1\")",
+      "PowerShell(cmd /c \"cd C:\\\\Users\\\\klajd\\\\Documents\\\\Projektet\\\\TRIMIO\\\\frontend && npm approve-scripts esbuild 2>&1\")",
+      "PowerShell(cmd /c \"curl -s http://localhost:3001/api/health 2>&1\")",
+      "PowerShell(cmd /c \"cd C:\\\\Users\\\\klajd\\\\Documents\\\\Projektet\\\\TRIMIO\\\\backend && node -e \"\"const bcrypt=require\\('bcryptjs'\\); console.log\\(bcrypt.hashSync\\('admin123',10\\)\\);\"\" 2>&1\")",
+      "PowerShell(Start-Process -FilePath \"cmd\" -ArgumentList \"/c cd C:\\\\Users\\\\klajd\\\\Documents\\\\Projektet\\\\TRIMIO\\\\backend && node src/server.js > server.log 2>&1\" -WindowStyle Hidden; Start-Sleep -Seconds 3; cmd /c \"curl -s http://localhost:3001/api/health 2>&1\")",
+      "PowerShell(cmd /c \"curl -s -X POST http://localhost:3001/api/auth/admin/login -H \"\"Content-Type: application/json\"\" -d \"\"{\\\\\"username\\\\\":\\\\\"admin\\\\\",\\\\\"password\\\\\":\\\\\"admin123\\\\\"}\"\" 2>&1\")",
+      "PowerShell($body = '{\"username\":\"admin\",\"password\":\"admin123\"}'; cmd /c \"curl -s -X POST http://localhost:3001/api/auth/admin/login -H \"\"Content-Type: application/json\"\" -d \"\"$body\"\" 2>&1\")",
+      "PowerShell(cmd /c \"curl -s -o nul -w \"\"%{http_code}\"\" http://localhost:5173 2>&1\")",
+      "PowerShell(Start-Process -FilePath \"cmd\" -ArgumentList \"/c cd C:\\\\Users\\\\klajd\\\\Documents\\\\Projektet\\\\TRIMIO\\\\frontend && npm run dev > vite.log 2>&1\" -WindowStyle Hidden; Start-Sleep -Seconds 5; cmd /c \"curl -s -o nul -w \"\"%{http_code}\"\" http://localhost:5173 2>&1\")",
+      "PowerShell(cmd /c \"curl -s http://localhost:5173 2>&1\" | Select-Object -First 10)",
+      "WebFetch(domain:trimio-two.vercel.app)",
+      "PowerShell(cmd /c \"cd C:\\\\Users\\\\klajd\\\\Documents\\\\Projektet\\\\TRIMIO\\\\backend && node src/database/seed.js 2>&1\")",
+      "PowerShell(Stop-Process *)",
+      "PowerShell(cmd /c \"curl -s -o nul -w \"\"%{http_code}\"\" http://localhost:3001/api/health 2>&1\"; cmd /c \"curl -s -o nul -w \"\"%{http_code}\"\" http://localhost:5173 2>&1\")",
+      "PowerShell($b = cmd /c \"curl -s -o nul -w \"\"%{http_code}\"\" http://localhost:3001/api/health 2>&1\"; $f = cmd /c \"curl -s -o nul -w \"\"%{http_code}\"\" http://localhost:5173 2>&1\"; \"Backend: $b\"; \"Frontend: $f\")",
+      "PowerShell(Start-Sleep -Seconds 2; $r = cmd /c \"curl -s http://localhost:5173/api/health 2>&1\"; \"API proxy: $r\"; $r2 = cmd /c \"curl -s http://localhost:5173 2>&1\" | Select-Object -First 5; \"Page: $r2\")",
+      "PowerShell(cmd /c \"cd C:\\\\Users\\\\klajd\\\\Documents\\\\Projektet\\\\TRIMIO\\\\frontend && npm run build 2>&1\")",
+      "PowerShell($page = Invoke-WebRequest \"http://localhost:5173\" -UseBasicParsing; $page.Content)",
+      "PowerShell(cmd /c \"cd C:\\\\Users\\\\klajd\\\\Documents\\\\Projektet\\\\TRIMIO && npm install 2>&1\")",
+      "PowerShell(Start-Process -FilePath \"cmd\" -ArgumentList \"/k cd /d C:\\\\Users\\\\klajd\\\\Documents\\\\Projektet\\\\TRIMIO && npm start\" -WindowStyle Normal)",
+      "PowerShell(Start-Process -FilePath \"cmd\" -ArgumentList \"/c cd C:\\\\Users\\\\klajd\\\\Documents\\\\Projektet\\\\TRIMIO\\\\frontend && npx vite --host > C:\\\\Users\\\\klajd\\\\AppData\\\\Local\\\\Temp\\\\vite2.log 2>&1\" -WindowStyle Hidden)",
+      "PowerShell(cmd /c dir /b \"C:\\\\Users\\\\klajd\\\\Documents\\\\Projektet\\\\\" 2>&1; echo \"---\"; cmd /c dir /b \"C:\\\\Users\\\\klajd\\\\Documents\\\\Projektet\\\\TRIMIO\\\\\" 2>&1)",
+      "PowerShell(findstr *)",
+      "PowerShell(cmd /c dir /b \"C:\\\\Users\\\\klajd\\\\Desktop\\\\TRIMIO\\\\\" 2>&1)",
+      "PowerShell(cmd /c \"dir /b C:\\\\Users\\\\klajd\\\\\" 2>&1)",
+      "PowerShell(cmd /c \"dir /b /s C:\\\\Users\\\\klajd\\\\Downloads\\\\TRIMIO\\\\\" 2>&1 | Select-Object -First 60)",
+      "PowerShell(Copy-Item *)",
+      "PowerShell(Get-Content *)",
+      "PowerShell(Invoke-RestMethod -Uri \"http://localhost:3001/api/health\" -Method GET | ConvertTo-Json)"
+    ]
+  }
+}

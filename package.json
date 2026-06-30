@@ -1,0 +1,13 @@
+{
+  "name": "trimio",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "concurrently --names \"BACKEND,FRONTEND\" --prefix-colors \"yellow,cyan\" \"node backend/src/server.js\" \"npm run dev --prefix frontend -- --host\"",
+    "install:all": "cd backend && npm install && cd ../frontend && npm install",
+    "seed": "node backend/src/database/seed.js"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "terser": "^5.48.0"
+  }
+}

@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="description" content="TRIMIO — Sistema di prenotazione per barbieri">
+  <meta name="theme-color" content="#000000">
+  <title>TRIMIO</title>
+  <!-- Disable PWA features (no app downloads/installs allowed) -->
+  <meta name="apple-mobile-web-app-capable" content="no">
+  <link rel="stylesheet" href="css/style.css?v=202606271150">
+  <!-- Firebase Compatibility SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
+  <!-- Leaflet CSS & JS for Interactive Map -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+</head>
+<body>
+<!-- Toast Container for Real-time App Notifications -->
+<div id="toastContainer" style="position:fixed; top:20px; left:50%; transform:translateX(-50%); z-index:9999; display:flex; flex-direction:column; gap:10px; width:95%; max-width:365px; pointer-events:none;"></div>
+
+<div class="app">
+  <div class="head" style="display:flex; align-items:center; justify-content:space-between; padding: 10px 16px; position:relative; min-height: 52px; gap: 10px; background: linear-gradient(135deg, #000, #1f1f1f); border-bottom: 1px solid #27272a;">
+    <button class="gear" id="gear" style="display:none">⚙</button>
+    
+    <!-- Left: Logo & Title (with active salon name below) -->
+    <div id="hBrandLogoWrapper" style="display:flex; align-items:center; gap:8px; cursor:pointer;" onclick="location.hash='';">
+      <img src="./logo.svg" alt="TRIMIO" style="height:28px; width:28px; border-radius:6px; border:1px solid rgba(229,193,88,0.3); background:#000; flex-shrink:0;">
+      <div style="display:flex; flex-direction:column; text-align:left;">
+        <span style="font-family:'Cinzel', serif; font-weight:900; font-size:14px; letter-spacing:1.5px; color:#fff; line-height:1.2;">TRIMIO</span>
+        <span id="hBrand" style="font-size:11px; font-weight:700; color:#e5c158; line-height:1.2; display:none;">—</span>
+      </div>
+    </div>
+
+    <!-- Right: Slug & Menu -->
+    <div style="display:flex; align-items:center; gap:8px;">
+      <div class="salon-slug" id="hSlug" style="font-size:10px; color:#a1a1aa; background:#27272a; padding:3px 6px; border-radius:4px; font-weight:700; display:none; letter-spacing:0.5px;"></div>
+      <select id="navMenu" class="nav-select" style="margin-bottom:0; max-width:135px;"></select>
+    </div>
+  </div>
+
+  <div class="body" id="mainBody">
+    <!-- ===== HOMEPAGE ===== -->
+    <div class="view" id="vHome">
+      <div class="hp-wrap">
+
+        <!-- HERO con sfondo foto reale -->
+        <div class="hp-hero">
+          <div class="hp-hero-bg"></div>
+          <div class="hp-hero-content">
+            <img src="./logo.svg" alt="TRIMIO Logo" style="width: 90px; height: 90px; margin-bottom: 16px; border-radius: 20px; border: 2px solid #e5c158; box-shadow: 0 8px 24px rgba(0,0,0,0.6); background:#000;">
+            <div class="hp-logo-main" style="letter-spacing: 6px; font-size: 38px; font-weight: 800; font-family: 'Cinzel', serif; margin-bottom: 8px; text-transform: uppercase;">
+              TRIMIO
+            </div>
+            <div class="hp-title" style="font-size: 18px; letter-spacing: 1.5px; text-transform: uppercase; color: #fff; margin-bottom: 6px; font-family: 'Cinzel', serif;">Prenota. Taglia. Sorridi.</div>
+            <div class="hp-sub" style="font-size: 13px; opacity: 0.75; letter-spacing: 0.5px;">Il tuo barbiere in un tap</div>
+            <div class="hp-count" id="hpCount">— saloni</div>
+          </div>
+        </div>
+
+        <!-- MAPPA INTERATTIVA -->
+        <div class="hp-sec-title">Mappa dei Saloni</div>
+        <div id="mapContainer" style="margin: 0 16px 20px; border-radius: 16px; overflow: hidden; border: 1px solid #333; background: #222; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
+          <div id="map" style="height: 300px; width: 100%;"></div>
+        </div>
+
+        <!-- LISTA SALONI -->
+        <div class="hp-sec-title" id="secSaloniListHeader">Saloni disponibili</div>
+        <div id="hpSalonList"></div>
+
+        <!-- SPAZIO PUBBLICITARIO HOMEPAGE (Dinamico) -->
+        <div id="hpAdBannerContainer"></div>
+
+        <!-- ACCESSO ADMIN -->
+        <button class="hp-admin-btn" id="hpAdminBtn">
+          <span>⚙</span> Accesso staff / amministratori
+        </button>
+
+        <!-- GALLERIA FOTO INTERATTIVA -->
+        <div class="hp-sec-title">Portfolio & Ambienti</div>
+        <div style="font-size: 13px; color: #666; margin-top: -12px; margin-bottom: 20px; padding: 0 4px; line-height: 1.4;">
+          Esplora la qualità dei nostri tagli, la cura dei dettagli e l'atmosfera esclusiva dei nostri saloni di lusso.
+        </div>
+        
+        <!-- Tabs Filtro -->
+        <div class="gallery-filter-container">
+          <button class="filter-tab active" data-filter="all">Tutti</button>
+          <button class="filter-tab" data-filter="cut">Tagli & Styling</button>
+          <button class="filter-tab" data-filter="beard">Barba & Rasatura</button>
+          <button class="filter-tab" data-filter="treat">Trattamenti</button>
+          <button class="filter-tab" data-filter="color-kids">Colore & Kids</button>
+          <button class="filter-tab" data-filter="env">Ambienti & Saloni</button>
+        </div>
+        
+        <!-- Grid delle foto -->
+        <div class="gallery-grid" id="hpGalleryGrid" style="margin-bottom: 30px;">
+          <!-- Tagli -->
+          <div class="gallery-card" data-cat="cut">
+            <img src="https://images.unsplash.com/photo-1503951914875-452162b0f3f1?w=600&h=450&fit=crop" alt="Skin Fade Moderno" loading="lazy">
+            <div class="gallery-card-overlay">
+              <span class="gallery-card-tag">Tagli & Styling</span>
+              <span class="gallery-card-title">Skin Fade Moderno</span>
+            </div>
+          </div>
+          <div class="gallery-card" data-cat="cut">
+            <img src="https://images.unsplash.com/photo-1621605815971-fbc98d665033?w=600&h=450&fit=crop" alt="Taglio a Forbice" loading="lazy">
+            <div class="gallery-card-overlay">
+              <span class="gallery-card-tag">Tagli & Styling</span>
+              <span class="gallery-card-title">Taglio Classico a Forbice</span>
+            </div>
+          </div>
+          <div class="gallery-card" data-cat="cut">
+            <img src="https://images.unsplash.com/photo-1599351431202-1e0f0137899a?w=600&h=450&fit=crop" alt="Styling Premium" loading="lazy">
+            <div class="gallery-card-overlay">
+              <span class="gallery-card-tag">Tagli & Styling</span>
+              <span class="gallery-card-title">Styling & Finish Premium</span>
+            </div>
+          </div>
+          <div class="gallery-card" data-cat="cut">
+            <img src="https://images.unsplash.com/photo-1622286342621-4bd786c2447c?w=600&h=450&fit=crop" alt="Precision Line" loading="lazy">
+            <div class="gallery-card-overlay">
+              <span class="gallery-card-tag">Tagli & Styling</span>
+              <span class="gallery-card-title">Precision Line Art</span>
+            </div>
+          </div>
+          
+          <!-- Barba -->
+          <div class="gallery-card" data-cat="beard">
+            <img src="https://images.unsplash.com/photo-1585747860715-2ba37e788b70?w=600&h=450&fit=crop" alt="Modellatura Barba" loading="lazy">
+            <div class="gallery-card-overlay">
+              <span class="gallery-card-tag">Barba & Rasatura</span>
+              <span class="gallery-card-title">Modellatura Barba con Rasoio</span>
+            </div>
+          </div>
+          <div class="gallery-card" data-cat="beard">
+            <img src="https://images.unsplash.com/photo-1605497788044-5a32c7078486?w=600&h=450&fit=crop" alt="Rasatura Old School" loading="lazy">
+            <div class="gallery-card-overlay">
+              <span class="gallery-card-tag">Barba & Rasatura</span>
+              <span class="gallery-card-title">Rasatura Old School</span>
+            </div>
+          </div>
+          <div class="gallery-card" data-cat="beard">
+            <img src="https://images.unsplash.com/photo-1512864084360-7c0c4d0a0845?w=600&h=450&fit=crop" alt="Cura Barba" loading="lazy">
+            <div class="gallery-card-overlay">
+              <span class="gallery-card-tag">Barba & Rasatura</span>
+              <span class="gallery-card-title">Cura & Idratazione Barba</span>
+            </div>
+          </div>
+          
+          <!-- Trattamenti -->
+          <div class="gallery-card" data-cat="treat">
+            <img src="https://images.unsplash.com/photo-1517832606589-7a598b647192?w=600&h=450&fit=crop" alt="Panno Caldo" loading="lazy">
+            <div class="gallery-card-overlay">
+              <span class="gallery-card-tag">Trattamenti</span>
+              <span class="gallery-card-title">Panno Caldo Rivitalizzante</span>
+            </div>
+          </div>
+          <div class="gallery-card" data-cat="treat">
+            <img src="https://images.unsplash.com/photo-1534723328310-e82dad3ee43f?w=600&h=450&fit=crop" alt="Shampoo & Cute" loading="lazy">
+            <div class="gallery-card-overlay">
+              <span class="gallery-card-tag">Trattamenti</span>
+              <span class="gallery-card-title">Shampoo & Massaggio Cute</span>
+            </div>
+          </div>
+          <div class="gallery-card" data-cat="treat">
+            <img src="https://images.unsplash.com/photo-1608248597481-496100c8c836?w=600&h=450&fit=crop" alt="Oli Essenziali" loading="lazy">
+            <div class="gallery-card-overlay">
+              <span class="gallery-card-tag">Trattamenti</span>
+              <span class="gallery-card-title">Oli Essenziali & Grooming</span>
+            </div>
+          </div>
+          
+          <!-- Colore & Kids -->
+          <div class="gallery-card" data-cat="color-kids">
+            <img src="https://images.unsplash.com/photo-1562322140-8baeececf3df?w=600&h=450&fit=crop" alt="Colorazione" loading="lazy">
+            <div class="gallery-card-overlay">
+              <span class="gallery-card-tag">Colore & Kids</span>
+              <span class="gallery-card-title">Copertura Grigi & Colore</span>
+            </div>
+          </div>
+          <div class="gallery-card" data-cat="color-kids">
+            <img src="https://images.unsplash.com/photo-1518837695005-2083093ee35b?w=600&h=450&fit=crop" alt="Taglio Bambino" loading="lazy">
+            <div class="gallery-card-overlay">
+              <span class="gallery-card-tag">Colore & Kids</span>
+              <span class="gallery-card-title">Tagli alla Moda per Bambini</span>
+            </div>
+          </div>
+          
+          <!-- Ambienti -->
+          <div class="gallery-card" data-cat="env">
+            <img src="https://images.unsplash.com/photo-1521590832167-7bcbfaa6381f?w=600&h=450&fit=crop" alt="Poltrone Pelle" loading="lazy">
+            <div class="gallery-card-overlay">
+              <span class="gallery-card-tag">Ambiente & Salone</span>
+              <span class="gallery-card-title">Poltrone in Pelle Vintage</span>
+            </div>
+          </div>
+          <div class="gallery-card" data-cat="env">
+            <img src="https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?w=600&h=450&fit=crop" alt="Atmosfera Lusso" loading="lazy">
+            <div class="gallery-card-overlay">
+              <span class="gallery-card-tag">Ambiente & Salone</span>
+              <span class="gallery-card-title">Atmosfera di Lusso</span>
+            </div>
+          </div>
+          <div class="gallery-card" data-cat="env">
+            <img src="https://images.unsplash.com/photo-1532710093739-9470acff878f?w=600&h=450&fit=crop" alt="Dettagli Design" loading="lazy">
+            <div class="gallery-card-overlay">
+              <span class="gallery-card-tag">Ambiente & Salone</span>
+              <span class="gallery-card-title">Dettagli di Design Classico</span>
+            </div>
+          </div>
+          <div class="gallery-card" data-cat="env">
+            <img src="https://images.unsplash.com/photo-1507089947368-19c1da9775ae?w=600&h=450&fit=crop" alt="Lounge Area" loading="lazy">
+            <div class="gallery-card-overlay">
+              <span class="gallery-card-tag">Ambiente & Salone</span>
+              <span class="gallery-card-title">Lounge Area & Drink Bar</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- FOOTER DI TRIMIO -->
+        <div class="global-footer" style="text-align: center; margin-top: 40px; padding: 32px 16px 24px; border-top: 1px solid #333; background: #111; color: #888;">
+          <div style="font-family: 'Cinzel', serif; font-size: 15px; font-weight: 700; letter-spacing: 2px; color: #fff; margin-bottom: 8px;">
+            TRIMIO <span style="color: #e5c158;">THE ART OF THE CUT</span> - ITALY
+          </div>
+          <div style="font-size: 11px; color: #666; line-height: 1.5; max-width: 380px; margin: 0 auto; letter-spacing: 0.2px;">
+            © 2008-2026 Questo programma software è riservato e protetto da copyright. Non è consentita la sua ridistribuzione, riproduzione o copia non autorizzata.
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+
+    <!-- ===== LIVELLO 4: CLIENTE ===== -->
+    <div class="view" id="vCustomer">
+      <!-- Salon Hero Banner -->
+      <div id="custHero" class="hp-hero" style="min-height: 160px; margin-bottom: 20px; padding: 24px 16px; border-radius: 0 0 24px 24px; position:relative; overflow:hidden;">
+        <div id="custHeroBg" class="hp-hero-bg" style="opacity: 0.20; position:absolute; inset:0; background-size:cover; background-position:center;"></div>
+        <div class="hp-hero-content" style="position:relative; z-index:1; text-align: center;">
+          <h2 id="custHeroTitle" style="font-family: 'Cinzel', serif; font-size: 28px; font-weight: 800; color: #18181b; margin-bottom: 4px; text-shadow: 0 1px 2px rgba(255,255,255,0.8); text-transform:uppercase;">—</h2>
+          <p id="custHeroAddress" style="font-size: 13px; color: #b45309; text-shadow: 0 1px 1px rgba(255,255,255,0.8); font-weight: 700;">📍 —</p>
+        </div>
+      </div>
+      <div class="dots" style="margin-top: 10px;"><div class="dot on"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+      <div class="err" id="cErr"></div>
+      <div class="info-box" id="cInfo"></div>
+
+      <div class="step on" id="s0">
+        <div class="title">Chi vuoi come barbiere?</div>
+        <div class="barber-grid" id="barberGrid"></div>
+      </div>
+
+      <div class="step" id="s1">
+        <div class="title">Quando vuoi venire?</div>
+        <div class="dates" id="dates"></div>
+        <div class="eyebrow">Orari disponibili</div>
+        <div class="times" id="times"></div>
+      </div>
+
+      <div class="step" id="s2">
+        <div class="title">Che servizio desideri?</div>
+        <div class="svc" id="svc"></div>
+      </div>
+
+      <div class="step" id="s3">
+        <div class="title">Conferma prenotazione</div>
+        <div class="recap">
+          <div class="r-row"><span class="r-lbl">✂️ Barbiere</span><span class="r-val" id="rB">—</span></div>
+          <div class="r-row"><span class="r-lbl">📅 Data</span><span class="r-val" id="rD">—</span></div>
+          <div class="r-row"><span class="r-lbl">🕐 Ora</span><span class="r-val" id="rT">—</span></div>
+          <div class="r-row"><span class="r-lbl">🔖 Servizio</span><span class="r-val" id="rS">—</span></div>
+          <div class="r-div"></div>
+          <div class="r-row r-total"><span class="r-lbl">Totale</span><span class="r-val" id="rP">€0</span></div>
+        </div>
+        <div class="field" style="margin-bottom:0"><label>Il tuo nome <span style="color:#e5c158">*</span></label><input type="text" id="cname" placeholder="Es. Marco" autocomplete="name" required></div>
+        <div class="field" style="margin-top:12px; margin-bottom:0"><label>Numero di telefono <span style="color:#71717a; font-size:11px;">(Facoltativo)</span></label><input type="tel" id="cphone" placeholder="Es. +39 345 678 9012" autocomplete="tel"></div>
+      </div>
+
+      <div class="step" id="sDone">
+        <div class="done">
+          <div class="done-ic">✅</div>
+          <div class="done-t">Prenotazione confermata!</div>
+          <div class="done-x">Appuntamento registrato. Ci vediamo presto!</div>
+          <div class="recap" style="text-align:left;margin-bottom:24px">
+            <div class="r-row"><span class="r-lbl">✂️</span><span class="r-val" id="dB"></span></div>
+            <div class="r-row"><span class="r-lbl">📅</span><span class="r-val" id="dD"></span></div>
+            <div class="r-row"><span class="r-lbl">🕐</span><span class="r-val" id="dT"></span></div>
+            <div class="r-row"><span class="r-lbl">🔖</span><span class="r-val" id="dS"></span></div>
+          </div>
+          <button class="link" id="again">Fai un'altra prenotazione</button>
+        </div>
+      </div>
+
+      <div class="actions" id="cActions">
+        <button class="btn btn-ghost" id="cBack" style="display:none">←</button>
+        <button class="btn btn-main" id="cNext">Avanti →</button>
+      </div>
+      <div class="footer-link" id="cFooter" style="display:none"><button id="toStaff">Sei staff? Accedi →</button></div>
+      
+      <!-- FOOTER DI TRIMIO -->
+      <div class="global-footer" style="text-align: center; margin-top: 40px; padding: 24px 16px; border-top: 1px solid #eee; background: #fcfcfc; color: #888; border-radius: 0 0 16px 16px;">
+        <div style="font-family: 'Cinzel', serif; font-size: 13px; font-weight: 700; letter-spacing: 2px; color: #000; margin-bottom: 6px;">
+          TRIMIO <span style="color: #b48a1c;">THE ART OF THE CUT</span> - ITALY
+        </div>
+        <div style="font-size: 10px; color: #999; line-height: 1.5; max-width: 320px; margin: 0 auto; letter-spacing: 0.2px;">
+          © 2008-2026 Questo programma software è riservato e protetto da copyright. Non è consentita la sua ridistribuzione, riproduzione o copia non autorizzata.
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== LOGIN (Livelli 1-2-3) ===== -->
+    <div class="view" id="vLogin">
+      <div class="title" style="margin-top:10px">Accesso Staff</div>
+      <div class="err" id="lErr"></div>
+      <div class="login">
+        <div class="field"><label>Username</label><input type="text" id="lusr" placeholder="username" autocomplete="username"></div>
+        <div class="field"><label>Password</label><input type="password" id="lpw" placeholder="••••••••"></div>
+        <button class="btn btn-main" id="loginBtn">Accedi</button>
+        <button class="link" id="toCustomer" style="text-align:center">← Torna alla prenotazione</button>
+      </div>
+    </div>
+
+    <!-- ===== DASHBOARD (Livelli 1-2-3) ===== -->
+    <div class="view" id="vDash">
+      <div class="d-top">
+        <button class="d-hamb" id="hamb">☰</button>
+        <div class="d-ttl">
+          <h2 id="dTitle">Dashboard</h2>
+          <button class="d-status open" id="statusBadge" style="display:none">● Aperto</button>
+        </div>
+        <button class="d-new" id="newBtn" style="display:none">+ Nuovo</button>
+      </div>
+
+      <div class="d-pad">
+        <!-- Audio Autoplay Unlock Banner -->
+        <div id="audioUnlockBanner" style="background:#18181b; border:1px solid #27272a; border-radius:12px; padding:10px 14px; margin-bottom:16px; display:flex; align-items:center; justify-content:space-between; gap:10px; box-shadow:0 4px 12px rgba(0,0,0,0.2);">
+          <div style="display:flex; align-items:center; gap:8px; font-size:12.5px; color:#e4e4e7;">
+            <span>🔊</span>
+            <span style="font-size: 11px;">Abilita gli avvisi sonori per le nuove prenotazioni in tempo reale</span>
+          </div>
+          <button id="audioUnlockBtn" style="background:#e5c158; color:#000; border:none; border-radius:6px; padding:6px 12px; font-size:11.5px; font-weight:700; cursor:pointer; flex-shrink:0;">Attiva</button>
+        </div>
+
+        <!-- New Bookings Inbox Panel -->
+        <div id="newBookingsPanel" style="display:none; margin-bottom:16px;"></div>
+
+        <!-- OGGI -->
+        <section class="d-sec" id="secOggi">
+          <div class="notif-banner" id="notifBanner" style="display:none"></div>
+          <div class="d-dates" id="oggiDates"></div>
+          <div class="kpi-big"><div class="l">Incasso previsto</div><div class="v" id="kIncasso">€0</div></div>
+          <div class="kpi-row">
+            <div class="kpi"><div class="v" id="kAppt">0</div><div class="l">Appuntamenti</div></div>
+            <div class="kpi"><div class="v amber" id="kWait">0</div><div class="l">Da servire</div></div>
+          </div>
+          <div class="sec-h" id="oggiHdr">Appuntamenti</div>
+          <div id="oggiList"></div>
+        </section>
+
+        <!-- CALENDARIO -->
+        <section class="d-sec" id="secCalendario">
+          <div class="cal-top">
+            <button class="cal-nav" id="calPrev">‹</button>
+            <div class="cal-title" id="calTitle">—</div>
+            <button class="cal-nav" id="calNext">›</button>
+          </div>
+          <div class="cal-week"><div>Lun</div><div>Mar</div><div>Mer</div><div>Gio</div><div>Ven</div><div>Sab</div><div>Dom</div></div>
+          <div class="cal-grid" id="calGrid"></div>
+          <div class="sec-h" id="calDayH" style="margin-top:22px">—</div>
+          <div id="calDayList"></div>
+        </section>
+
+        <!-- PROSSIMI -->
+        <section class="d-sec" id="secProssimi">
+          <div class="sec-h">Prossimi appuntamenti</div>
+          <div id="prossimiList"></div>
+        </section>
+
+        <!-- CLIENTI -->
+        <section class="d-sec" id="secClienti">
+          <div class="sec-h">Clienti</div>
+          <div class="cal-top" style="margin-bottom:14px">
+            <button class="cal-nav" id="cliPrev">‹</button>
+            <div class="cal-title" id="cliMonthLabel">—</div>
+            <button class="cal-nav" id="cliNext">›</button>
+          </div>
+          <div id="clientiList"></div>
+        </section>
+
+        <!-- SERVIZI (Livello 1 admin modifica global, Livello 2 modifica per salone) -->
+        <section class="d-sec" id="secServizi">
+          <div class="sec-h">Servizi & prezzi</div>
+          <div id="serviziList"></div>
+          <button class="add-srv" id="addSrvBtn">+ Aggiungi servizio</button>
+        </section>
+
+        <!-- DIPENDENTI — Livello 1 (admin) & Livello 2 (owner) -->
+        <section class="d-sec" id="secDipendenti">
+          <div class="sec-h">Dipendenti</div>
+          <div id="dipendentiList"></div>
+          <button class="add-srv" id="addWorkerBtn">+ Aggiungi dipendente</button>
+        </section>
+
+        <!-- STATISTICHE — Livelli 1, 2, 3 (con scope diverso) -->
+        <section class="d-sec" id="secStats">
+          <div class="sec-h">Statistiche</div>
+          <div class="period-row" id="periodRow">
+            <button class="period-btn active" data-p="oggi">Oggi</button>
+            <button class="period-btn" data-p="settimana">Settimana</button>
+            <button class="period-btn" data-p="mese">Mese</button>
+            <button class="period-btn" data-p="anno">Anno</button>
+            <button class="period-btn" data-p="custom">Periodo</button>
+          </div>
+          <div id="customPeriod" style="display:none;gap:10px;margin-bottom:16px;display:none;">
+            <input type="date" id="statFrom" class="minput" style="margin-bottom:0">
+            <input type="date" id="statTo" class="minput" style="margin-bottom:0">
+            <button class="btn btn-main" id="applyCustom" style="padding:12px;font-size:13px">Applica</button>
+          </div>
+          <div id="statsContent"></div>
+        </section>
+
+        <!-- SALONI — Solo Livello 1 (admin) -->
+        <section class="d-sec" id="secSaloni">
+          <div class="sec-h">Gestione Saloni</div>
+          <div id="saloniList"></div>
+          <button class="add-srv" id="addSalonBtn">+ Crea nuovo salone</button>
+          
+          <!-- EDIT HOMEPAGE PROMOTION (SOLO ADMIN) -->
+          <div class="sub-sec-h" style="margin-top:28px;">Annuncio Promozionale Homepage</div>
+          <div class="srv" style="margin-top:10px;">
+            <div class="srv-edit" style="display:flex; flex-direction:column; gap:10px;">
+              <label class="d-lbl" style="margin-bottom:2px;">Titolo Promozione</label>
+              <input class="minput" id="adTitleInput" placeholder="Es. Trimio Pro Care">
+              <label class="d-lbl" style="margin-bottom:2px;">Testo Descrizione (Lascia vuoto per nascondere l'annuncio)</label>
+              <textarea class="minput" id="adDescInput" placeholder="Usa il codice..." rows="2" style="resize:none;"></textarea>
+              <div class="row2">
+                <div style="flex:1;">
+                  <label class="d-lbl" style="margin-bottom:2px;">Testo Bottone</label>
+                  <input class="minput" id="adBtnInput" placeholder="Es. Copia Codice">
+                </div>
+                <div style="flex:1;">
+                  <label class="d-lbl" style="margin-bottom:2px;">Codice Promozionale</label>
+                  <input class="minput" id="adCodeInput" placeholder="Es. TRIMIO15">
+                </div>
+              </div>
+              <button class="b-save" id="saveAdBtn" style="padding:12px; margin-top:8px; width:100%; border:none; border-radius:10px; cursor:pointer;">Salva Annuncio Homepage</button>
+            </div>
+            
+            <!-- CONFIGURAZIONE FIREBASE (SOLO ADMIN) -->
+            <div class="sub-sec-h" style="margin-top:28px;">Sincronizzazione Database (Multi-dispositivo)</div>
+            <div class="srv" style="margin-top:10px; padding:16px;">
+              <div style="font-size:13px; color:#444; line-height:1.5; margin-bottom:14px;">
+                Per abilitare la sincronizzazione in tempo reale per tutti i telefoni, scanner di barkod e browser (Mozilla, Edge, Safari, Chrome) contemporaneamente, configura un database **Firebase**. 
+                Modifica i dati del database in <code style="font-weight:700; background:#f4f4f5; padding:2px 6px; border-radius:4px; font-size:12px; color:#1f1f1f;">firebaseConfig</code> all'interno del file JavaScript.
+              </div>
+              <div id="adminSyncStatusBox" style="background:#f4f4f5; border:1px solid #e4e4e7; border-radius:12px; padding:14px; display:flex; align-items:center; gap:10px;">
+                <div id="adminSyncStatusDot" style="width:10px; height:10px; border-radius:50%; background:#888; flex-shrink:0;"></div>
+                <div>
+                  <div style="font-size:13px; font-weight:700; color:#18181b;" id="adminSyncStatusTitle">Verifica configurazione...</div>
+                  <div style="font-size:11px; color:#71717a; margin-top:2px;" id="adminSyncStatusDesc">Controllo della connessione a Firebase Realtime Database.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- UTENTI — Solo Livello 1 (admin): gestisce proprietari e barbieri -->
+        <section class="d-sec" id="secUtenti">
+          <div class="sec-h">Gestione Utenti</div>
+          <div id="utentiList"></div>
+        </section>
+
+        <!-- RECENSIONI — Livello 2 (owner) & Livello 3 (barber) -->
+        <section class="d-sec" id="secRecensioni">
+          <div class="sec-h">Recensioni Ricevute</div>
+          <div id="recensioniList"></div>
+        </section>
+
+      </div><!-- /d-pad -->
+
+      <!-- SIDEBAR -->
+      <div class="ov" id="ov"></div>
+      <aside class="side" id="side">
+        <div class="side-top">
+          <div class="side-salon" id="sideSalon">TRIMIO</div>
+          <div class="side-slug" id="sideSlug"></div>
+          <div class="side-role-badge" id="sideRoleBadge">—</div>
+        </div>
+        <nav class="side-nav" id="sideNav"></nav>
+        <div class="side-bot">
+          <div class="side-av" id="sideAv">?</div>
+          <div class="side-prof">
+            <div class="n" id="sideProfName">—</div>
+            <div class="s" id="syncStatusBadge" style="display:flex; align-items:center; gap:4px; font-size:10px; font-weight:700; color:#888;">
+              <span class="dot-indicator" style="width:6px; height:6px; border-radius:50%; background:#888; display:inline-block;"></span>
+              <span class="status-lbl">Verifica...</span>
+            </div>
+          </div>
+          <button class="side-out" id="sideOut">Esci</button>
+        </div>
+      </aside>
+
+      <!-- MODAL: Nuovo appuntamento (Livello 2 + 3) -->
+      <div class="modal" id="modal">
+        <div class="modal-ov" id="modalOv"></div>
+        <div class="modal-sheet">
+          <div class="modal-h">Nuovo appuntamento</div>
+          <div class="err" id="mErr"></div>
+          <label class="d-lbl">Cliente</label>
+          <input class="minput" id="mName" placeholder="Nome cliente" style="margin-bottom:14px">
+          <div id="mBarberWrap">
+            <label class="d-lbl">Barbiere</label>
+            <select class="msel" id="mBarber"></select>
+          </div>
+          <label class="d-lbl">Data</label>
+          <select class="msel" id="mDate"></select>
+          <label class="d-lbl">Servizio</label>
+          <select class="msel" id="mSrv"></select>
+          <label class="d-lbl">Ora</label>
+          <select class="msel" id="mTime"></select>
+          <div class="srv-save">
+            <button class="b-cancel" id="mCancel">Annulla</button>
+            <button class="b-save" id="mSave">Salva appuntamento</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- MODAL: Dipendente (Livello 1 + 2) -->
+      <div class="modal" id="workerModal">
+        <div class="modal-ov" id="workerModalOv"></div>
+        <div class="modal-sheet">
+          <div class="modal-h" id="workerModalH">Dipendente</div>
+          <div class="err" id="wErr"></div>
+          <label class="d-lbl">Nome completo</label>
+          <input class="minput" id="wName" placeholder="Es. Shqipe Berisha" style="margin-bottom:14px">
+          <label class="d-lbl">Username</label>
+          <input class="minput" id="wUser" placeholder="es. shqipe" style="margin-bottom:14px">
+          <label class="d-lbl">Password</label>
+          <input class="minput" id="wPwd" placeholder="lascia vuoto per non cambiare" type="password" style="margin-bottom:14px">
+          <label class="d-lbl">Ferie dal</label>
+          <input class="minput" id="wVacFrom" type="date" style="margin-bottom:14px">
+          <label class="d-lbl">Ferie al</label>
+          <input class="minput" id="wVacTo" type="date" style="margin-bottom:14px">
+          <div class="srv-save">
+            <button class="b-cancel" id="wCancel">Annulla</button>
+            <button class="b-save" id="wSave">Salva</button>
+          </div>
+          <button class="b-cancel" id="wDelete" style="width:100%;margin-top:8px;color:#c0392b;display:none">🗑 Elimina dipendente</button>
+        </div>
+      </div>
+
+      <!-- MODAL: Salone (Livello 1 admin) -->
+      <div class="modal" id="salonModal">
+        <div class="modal-ov" id="salonModalOv"></div>
+        <div class="modal-sheet" style="max-height:85%;">
+          <div class="modal-h" id="salonModalH">Salone</div>
+          <div class="err" id="smErr"></div>
+          
+          <!-- TAB HEADER -->
+          <div style="display:flex; border-bottom:1px solid #e4e4e7; margin-bottom:16px; gap:8px; overflow-x:auto;">
+            <button id="tabSalonInfo" class="modal-tab active">Dati Principali</button>
+            <button id="tabSalonStaff" class="modal-tab">Staff & Barbieri</button>
+            <button id="tabSalonServices" class="modal-tab">Servizi & Prezzi</button>
+          </div>
+          
+          <!-- TAB 1: DATI PRINCIPALI -->
+          <div id="panelSalonInfo">
+            <label class="d-lbl">Nome salone</label>
+            <input class="minput" id="smName" placeholder="Es. Barber Art" style="margin-bottom:14px">
+            <label class="d-lbl">Slug / link (lettere, numeri, _)</label>
+            <input class="minput" id="smSlug" placeholder="BARBER_ART" style="margin-bottom:14px">
+            <label class="d-lbl">Città</label>
+            <input class="minput" id="smCity" placeholder="Es. Milano" style="margin-bottom:14px">
+            <label class="d-lbl">Indirizzo</label>
+            <input class="minput" id="smAddress" placeholder="Es. Via Sentierone 12" style="margin-bottom:14px">
+            <label class="d-lbl">Telefono</label>
+            <input class="minput" id="smPhone" placeholder="Es. +39 035 123 4567" style="margin-bottom:14px">
+            <label class="d-lbl">Testo Promozione Salone (ADV)</label>
+            <input class="minput" id="smPromo" placeholder="Es. Mostra questo banner per..." style="margin-bottom:14px">
+            <label class="d-lbl">Username proprietario</label>
+            <input class="minput" id="smOwnerUser" placeholder="es. owner_barberart" style="margin-bottom:14px">
+            <label class="d-lbl">Password proprietario</label>
+            <input class="minput" id="smOwnerPwd" placeholder="password" type="password" style="margin-bottom:14px">
+            <label class="d-lbl">URL Immagine di Sfondo (Foto Salone)</label>
+            <input class="minput" id="smBgImage" placeholder="Es. https://images.unsplash.com/... (lascia vuoto per default)" style="margin-bottom:14px">
+          </div>
+          
+          <!-- TAB 2: STAFF & BARBIERI -->
+          <div id="panelSalonStaff" style="display:none;">
+            <div style="font-size:12px; color:#71717a; margin-bottom:10px;">Gestisci i barbieri di questo salone:</div>
+            <div id="smWorkersList" style="margin-bottom:14px; max-height:240px; overflow-y:auto; border:1px solid #e4e4e7; border-radius:12px; padding:6px; background:#fafafa;"></div>
+            <button class="add-srv" id="smAddWorkerBtn" style="margin-bottom:14px; width:100%; border-radius:10px; padding:12px;">+ Aggiungi Barbiere a questo salone</button>
+          </div>
+          
+          <!-- TAB 3: SERVIZI & LISTINO PREZZI -->
+          <div id="panelSalonServices" style="display:none;">
+            <div style="font-size:12px; color:#71717a; margin-bottom:10px;">Gestisci i prezzi e le durate dei servizi specifici per questo salone:</div>
+            <div id="smServicesList" style="margin-bottom:14px; max-height:260px; overflow-y:auto; border:1px solid #e4e4e7; border-radius:12px; padding:10px; background:#fafafa;"></div>
+          </div>
+          
+          <div class="srv-save">
+            <button class="b-cancel" id="smCancel">Annulla</button>
+            <button class="b-save" id="smSave">Salva salone</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- MODAL: Utente admin edit -->
+      <div class="modal" id="userModal">
+        <div class="modal-ov" id="userModalOv"></div>
+        <div class="modal-sheet">
+          <div class="modal-h" id="userModalH">Modifica utente</div>
+          <div class="err" id="umErr"></div>
+          <div id="umFields"></div>
+          <div class="srv-save">
+            <button class="b-cancel" id="umCancel">Annulla</button>
+            <button class="b-save" id="umSave">Salva</button>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /vDash -->
+  </div><!-- /body -->
+</div><!-- /app -->
+
+<!-- Alt barber popup -->
+<div class="alt-modal" id="altModal">
+  <div class="modal-ov" id="altOv"></div>
+  <div class="modal-sheet">
+    <div class="alt-title">⏰ Orario non disponibile</div>
+    <div class="alt-sub" id="altSub"></div>
+    <div class="alt-list" id="altList"></div>
+    <button class="alt-skip" id="altSkip">Scegli un altro orario</button>
+  </div>
+</div>
+
+<!-- Modal: Recensioni Barber -->
+<div class="modal" id="reviewsModal">
+  <div class="modal-ov" id="reviewsModalOv" onclick="closeModal('reviewsModal')"></div>
+  <div class="modal-sheet">
+    <div class="modal-h" id="reviewsModalH">Recensioni Barber</div>
+    <div class="err" id="revErr"></div>
+    
+    <div class="reviews-list" id="reviewsList">
+      <!-- Inseriti dinamicamente via JS -->
+    </div>
+    
+    <div class="reviews-form">
+      <h4>Lascia una recensione</h4>
+      <div class="rating-input" id="ratingInput">
+        <span class="star-select" data-val="1" onclick="selectReviewStar(1)">★</span>
+        <span class="star-select" data-val="2" onclick="selectReviewStar(2)">★</span>
+        <span class="star-select" data-val="3" onclick="selectReviewStar(3)">★</span>
+        <span class="star-select" data-val="4" onclick="selectReviewStar(4)">★</span>
+        <span class="star-select" data-val="5" onclick="selectReviewStar(5)">★</span>
+      </div>
+      <input type="text" class="minput" id="revAuthor" placeholder="Il tuo nome" style="margin-bottom: 10px;">
+      <textarea class="minput" id="revComment" placeholder="Scrivi un commento..." rows="3" style="margin-bottom: 12px; resize: none;"></textarea>
+      <div class="srv-save">
+        <button class="b-cancel" onclick="closeModal('reviewsModal')">Chiudi</button>
+        <button class="b-save" id="submitReviewBtn">Invia</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: QR Code Salone -->
+<div class="modal" id="qrModal">
+  <div class="modal-ov" id="qrModalOv" onclick="closeModal('qrModal')"></div>
+  <div class="modal-sheet" style="text-align:center; padding:24px 20px;">
+    <div class="modal-h" id="qrModalH" style="margin-bottom:8px;">QR Code Salone</div>
+    <div id="qrModalSub" style="font-size:13px; color:#666; margin-bottom:18px;">Scansiona per prenotare direttamente su smartphone</div>
+    
+    <div style="background:#fff; padding:16px; border-radius:16px; display:inline-block; border:1px solid #eaeaea; box-shadow:0 4px 12px rgba(0,0,0,0.05); margin-bottom:18px;">
+      <img id="qrCodeImg" src="" alt="QR Code" style="width:200px; height:200px; display:block; margin:0 auto;">
+    </div>
+    
+    <div class="field" style="margin-bottom:18px;">
+      <label class="d-lbl">Link di prenotazione</label>
+      <input type="text" class="minput" id="qrLinkInput" readonly style="text-align:center; background:#f5f5f5; font-size:13px; font-weight:600; color:#4f46e5; border-color:#e4e4e7;">
+    </div>
+    
+    <div class="srv-save">
+      <button class="b-cancel" onclick="closeModal('qrModal')" style="width:100%;">Chiudi</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/app.min.js?v=20260630_4" type="module"></script>
+</body>
+</html>

@@ -1,0 +1,69 @@
+<svg width="300" height="400" viewBox="0 0 300 400" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><rect width="300" height="400" fill="#0a1520"/>
+
+  <defs>
+    <radialGradient id="bg4" cx="50%" cy="30%" r="60%">
+      <stop offset="0%" stop-color="#1a3a5a" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#0a1520" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="face4" cx="50%" cy="45%" r="55%">
+      <stop offset="0%" stop-color="#e0a870"/>
+      <stop offset="100%" stop-color="#a06838"/>
+    </radialGradient>
+  </defs>
+  <rect width="300" height="400" fill="#0a1520"/>
+  <rect width="300" height="400" fill="url(#bg4)"/>
+  <!-- Lavandino (veduto dall alto) -->
+  <ellipse cx="152" cy="330" rx="110" ry="50" fill="#1a2535"/>
+  <ellipse cx="152" cy="330" rx="100" ry="44" fill="#0f1e30"/>
+  <ellipse cx="152" cy="330" rx="85" ry="36" fill="#0a1825"/>
+  <!-- Acqua nel lavandino -->
+  <ellipse cx="152" cy="335" rx="70" ry="28" fill="#0d2a44"/>
+  <!-- Riflessi acqua -->
+  <path d="M100 330 Q130 320 165 325 Q190 328 200 335" fill="none" stroke="#2a6090" stroke-width="1.5" opacity="0.5"/>
+  <path d="M110 342 Q140 336 170 339 Q185 341 195 348" fill="none" stroke="#2a6090" stroke-width="1" opacity="0.4"/>
+  <!-- Persona reclinata (testa verso il basso) -->
+  <!-- Spalle -->
+  <path d="M50 280 Q100 265 152 262 Q204 265 254 280 L260 310 Q200 298 152 296 Q104 298 44 310Z" fill="#1a2030"/>
+  <!-- Collo -->
+  <path d="M130 262 Q152 255 174 262 L172 310 Q152 315 132 310Z" fill="url(#face4)"/>
+  <!-- Testa reclinata -->
+  <ellipse cx="152" cy="240" rx="52" ry="40" fill="url(#face4)"/>
+  <!-- Capelli bagnati -->
+  <ellipse cx="152" cy="228" rx="50" ry="28" fill="#1a0f05"/>
+  <path d="M102 235 Q120 215 152 210 Q184 215 202 235" fill="#1a0f05"/>
+  <!-- Schizzi d acqua -->
+  <path d="M152 260 Q165 290 170 310" fill="none" stroke="#4a90c4" stroke-width="2" stroke-dasharray="3,3" opacity="0.6"/>
+  <path d="M152 260 Q138 295 135 315" fill="none" stroke="#4a90c4" stroke-width="2" stroke-dasharray="3,3" opacity="0.5"/>
+  <path d="M152 260 Q180 285 185 300" fill="none" stroke="#5aA0d4" stroke-width="1.5" stroke-dasharray="2,4" opacity="0.4"/>
+  <!-- Occhi chiusi (relax) -->
+  <path d="M128 238 Q140 233 150 237" fill="none" stroke="#6a3a1a" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M158 237 Q168 233 178 238" fill="none" stroke="#6a3a1a" stroke-width="2.5" stroke-linecap="round"/>
+  <!-- Ciglia -->
+  <line x1="131" y1="240" x2="130" y2="243" stroke="#3a1a05" stroke-width="1"/>
+  <line x1="136" y1="238" x2="135" y2="241" stroke="#3a1a05" stroke-width="1"/>
+  <line x1="141" y1="237" x2="140" y2="240" stroke="#3a1a05" stroke-width="1"/>
+  <line x1="162" y1="237" x2="161" y2="240" stroke="#3a1a05" stroke-width="1"/>
+  <line x1="167" y1="238" x2="166" y2="241" stroke="#3a1a05" stroke-width="1"/>
+  <line x1="172" y1="240" x2="171" y2="243" stroke="#3a1a05" stroke-width="1"/>
+  <!-- Naso -->
+  <path d="M147 248 Q150 258 155 248" fill="none" stroke="#8a5830" stroke-width="1.5"/>
+  <!-- Bocca rilassata -->
+  <path d="M138 265 Q152 270 166 265" fill="none" stroke="#8a5830" stroke-width="2" stroke-linecap="round"/>
+  <!-- Mani del barbiere (sopra) -->
+  <path d="M60 200 Q90 190 105 210" stroke="#d4a070" stroke-width="18" stroke-linecap="round" fill="none"/>
+  <path d="M240 200 Q210 190 195 210" stroke="#d4a070" stroke-width="18" stroke-linecap="round" fill="none"/>
+  <!-- Schiuma shampoo -->
+  <circle cx="140" cy="220" r="8" fill="white" opacity="0.7"/>
+  <circle cx="158" cy="215" r="6" fill="white" opacity="0.6"/>
+  <circle cx="168" cy="225" r="5" fill="white" opacity="0.5"/>
+  <circle cx="135" cy="230" r="4" fill="white" opacity="0.6"/>
+  <circle cx="148" cy="208" r="7" fill="white" opacity="0.5"/>
+  <defs>
+    <linearGradient id="grad_label4" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#000" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#000" stop-opacity="0.7"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="350" width="300" height="50" fill="url(#grad_label4)"/>
+  <text x="15" y="388" fill="white" font-family="system-ui,sans-serif" font-size="11" font-weight="700" letter-spacing="1">SHAMPOO & CURA</text>
+</svg>
