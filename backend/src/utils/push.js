@@ -32,11 +32,12 @@ function notifyNewBooking(salonId, booking) {
 
   const salonSlug = db.prepare('SELECT slug FROM salons WHERE id = ?').get(salonId)?.slug;
   const body = `${enriched.client_name} · ${enriched.time}`;
+  const base = process.env.APP_URL || 'https://trimio-app.vercel.app';
 
   // Barber prenotato
   const barber = db.prepare('SELECT push_sub FROM users WHERE id = ?').get(enriched.barber_id);
   if (barber?.push_sub) {
-    sendPush(barber.push_sub, 'Nuova prenotazione', body, salonSlug ? `/s/${salonSlug}/barber` : '/');
+    sendPush(barber.push_sub, 'Nuova prenotazione ✂️', body, salonSlug ? `${base}/s/${salonSlug}/barber` : base);
   }
 
   // Tutti gli owner del salone
@@ -44,7 +45,7 @@ function notifyNewBooking(salonId, booking) {
     "SELECT push_sub FROM users WHERE salon_id = ? AND role = 'owner' AND push_sub IS NOT NULL"
   ).all(salonId);
   owners.forEach(o => {
-    sendPush(o.push_sub, `Nuova prenotazione · ${enriched.barber_name || ''}`, body, salonSlug ? `/s/${salonSlug}/owner` : '/');
+    sendPush(o.push_sub, `Prenotazione · ${enriched.barber_name || ''}`, body, salonSlug ? `${base}/s/${salonSlug}/owner` : base);
   });
 }
 
