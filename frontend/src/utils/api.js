@@ -1,6 +1,8 @@
 import { getToken, getAdminToken } from './storage';
 
-const BASE = '/api';
+const BASE = window.location.hostname === 'localhost'
+  ? '/api'
+  : 'https://trimio-backend-production-293c.up.railway.app/api';
 
 async function request(url, options = {}, salonId = null) {
   const token = salonId ? getToken(salonId) : getAdminToken();

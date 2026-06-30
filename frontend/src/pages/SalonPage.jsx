@@ -17,7 +17,7 @@ export default function SalonPage() {
   useEffect(() => {
     api.getSalon(salonSlug)
       .then(setData)
-      .catch(() => setError('Salone non trovato'))
+      .catch((e) => setError(e.message || 'Errore di rete'))
       .finally(() => setLoading(false));
   }, [salonSlug]);
 
