@@ -28,4 +28,12 @@ app.use('/api/salons', require('./routes/barbers'));
 app.get('/api/health', (_, res) => res.json({ ok: true }));
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`TRIMIO backend → http://localhost:${PORT}`));
+app.listen(PORT, async () => {
+  console.log(`TRIMIO backend → http://localhost:${PORT}`);
+  const db = require('./database');
+  const count = db.prepare('SELECT COUNT(*) as c FROM salons').get().c;
+  if (count === 0) {
+    console.log('Database vuoto — eseguo seed automatico...');
+    try { require('./database/seed'); } catch (e) { console.error('Seed error:', e.message); }
+  }
+});
