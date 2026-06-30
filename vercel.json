@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "RAILWAY_URL_PLACEHOLDER/api/:path*"
+      "destination": "https://trimio-backend-production-293c.up.railway.app/api/:path*"
     },
     {
       "source": "/(.*)",
