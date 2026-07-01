@@ -1,0 +1,80 @@
+<svg width="300" height="400" viewBox="0 0 300 400" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><rect width="300" height="400" fill="#0f0f0f"/>
+
+  <defs>
+    <radialGradient id="bg6" cx="50%" cy="35%" r="55%">
+      <stop offset="0%" stop-color="#3a2a0a" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#0f0f0f" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="face6" cx="50%" cy="42%" r="52%">
+      <stop offset="0%" stop-color="#d8a060"/>
+      <stop offset="100%" stop-color="#9a6030"/>
+    </radialGradient>
+    <radialGradient id="shirt6" cx="50%" cy="30%" r="60%">
+      <stop offset="0%" stop-color="#3a3a3a"/>
+      <stop offset="100%" stop-color="#1a1a1a"/>
+    </radialGradient>
+  </defs>
+  <rect width="300" height="400" fill="#0f0f0f"/>
+  <rect width="300" height="400" fill="url(#bg6)"/>
+  <!-- Corpo / spalle -->
+  <path d="M30 400 Q60 320 100 295 Q130 282 152 280 Q174 282 200 295 Q240 320 270 400Z" fill="url(#shirt6)"/>
+  <!-- Cravatta/dettaglio camicia -->
+  <path d="M142 296 L152 380 L162 296 Q157 286 152 284 Q147 286 142 296Z" fill="#1a0a0a"/>
+  <rect x="148" y="284" width="8" height="5" rx="2" fill="#2a0a0a"/>
+  <!-- Colletto -->
+  <path d="M132 284 Q152 278 172 284 Q160 296 152 298 Q144 296 132 284Z" fill="#2a2a2a"/>
+  <!-- Collo -->
+  <path d="M132 284 Q152 278 172 284 L168 258 Q152 252 136 258Z" fill="url(#face6)"/>
+  <!-- Viso -->
+  <ellipse cx="152" cy="198" rx="60" ry="72" fill="url(#face6)"/>
+  <!-- Mascella definita -->
+  <path d="M92 205 Q90 240 95 260 Q115 300 152 305 Q189 300 209 260 Q214 240 212 205 Q195 185 152 182 Q109 185 92 205Z" fill="url(#face6)"/>
+  <!-- Barba corta / fade -->
+  <path d="M92 220 Q90 260 100 280 Q120 305 152 308 Q184 305 204 280 Q214 260 212 220" fill="#1a0f05" opacity="0.5"/>
+  <!-- Fade ai lati (capelli rasati) -->
+  <path d="M92 200 Q85 185 90 165 Q100 148 115 142" fill="#1a0f05" opacity="0.4"/>
+  <path d="M212 200 Q219 185 214 165 Q204 148 189 142" fill="#1a0f05" opacity="0.4"/>
+  <!-- Capelli (acconciatura moderna) -->
+  <path d="M92 190 Q88 155 100 125 Q120 85 152 78 Q184 85 204 125 Q216 155 212 190 Q195 165 170 155 Q152 148 134 155 Q109 165 92 190Z" fill="#1a0f05"/>
+  <!-- Ciuffo / texture capelli -->
+  <path d="M130 90 Q152 75 174 90 Q168 82 152 78 Q136 82 130 90Z" fill="#2a1f0a"/>
+  <path d="M100 125 Q110 100 130 90 Q125 110 118 130" fill="#0f0a02"/>
+  <path d="M204 125 Q194 100 174 90 Q179 110 182 130" fill="#0f0a02"/>
+  <!-- Linea di contorno capelli precisa (fade) -->
+  <path d="M92 190 Q90 165 98 145 Q108 125 125 115" fill="none" stroke="#2a1a08" stroke-width="3" stroke-linecap="round"/>
+  <path d="M212 190 Q214 165 206 145 Q196 125 179 115" fill="none" stroke="#2a1a08" stroke-width="3" stroke-linecap="round"/>
+  <!-- Orecchie -->
+  <ellipse cx="92" cy="215" rx="9" ry="14" fill="#c09050"/>
+  <ellipse cx="94" cy="215" rx="6" ry="10" fill="#a07840"/>
+  <ellipse cx="212" cy="215" rx="9" ry="14" fill="#c09050"/>
+  <ellipse cx="210" cy="215" rx="6" ry="10" fill="#a07840"/>
+  <!-- Occhi -->
+  <ellipse cx="126" cy="200" rx="16" ry="10" fill="#0f0f0f"/>
+  <ellipse cx="126" cy="200" rx="12" ry="8" fill="#3a2a5a"/>
+  <ellipse cx="128" cy="198" rx="5" ry="5" fill="#0f0f0f"/>
+  <ellipse cx="130" cy="196" rx="2" ry="2" fill="white" opacity="0.7"/>
+  <ellipse cx="178" cy="200" rx="16" ry="10" fill="#0f0f0f"/>
+  <ellipse cx="178" cy="200" rx="12" ry="8" fill="#3a2a5a"/>
+  <ellipse cx="180" cy="198" rx="5" ry="5" fill="#0f0f0f"/>
+  <ellipse cx="182" cy="196" rx="2" ry="2" fill="white" opacity="0.7"/>
+  <!-- Sopracciglia -->
+  <path d="M112 188 Q126 182 140 186" fill="none" stroke="#1a0f05" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M164 186 Q178 182 192 188" fill="none" stroke="#1a0f05" stroke-width="3.5" stroke-linecap="round"/>
+  <!-- Naso -->
+  <path d="M148 215 Q142 238 145 248 Q152 254 159 248 Q162 238 156 215" fill="none" stroke="#a07040" stroke-width="1.5"/>
+  <ellipse cx="148" cy="248" rx="6" ry="4" fill="#b08050" opacity="0.5"/>
+  <ellipse cx="156" cy="248" rx="6" ry="4" fill="#b08050" opacity="0.5"/>
+  <!-- Bocca (sorriso leggero) -->
+  <path d="M136 268 Q152 278 168 268" fill="none" stroke="#8a5030" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M142 270 Q152 274 162 270" fill="#c07858" opacity="0.6"/>
+  <!-- Luce sul viso -->
+  <ellipse cx="130" cy="180" rx="20" ry="25" fill="#f5d070" opacity="0.04"/>
+  <defs>
+    <linearGradient id="grad_label6" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#000" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#000" stop-opacity="0.7"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="350" width="300" height="50" fill="url(#grad_label6)"/>
+  <text x="15" y="388" fill="white" font-family="system-ui,sans-serif" font-size="11" font-weight="700" letter-spacing="1">IL RISULTATO FINALE</text>
+</svg>

@@ -1,0 +1,67 @@
+<svg width="300" height="400" viewBox="0 0 300 400" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><rect width="300" height="400" fill="#111"/>
+
+  <defs>
+    <radialGradient id="warm2" cx="45%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="#c8742a" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#111" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="face2" cx="50%" cy="45%" r="50%">
+      <stop offset="0%" stop-color="#d4956a"/>
+      <stop offset="100%" stop-color="#9a6040"/>
+    </radialGradient>
+    <linearGradient id="razor_g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#e8e8e8"/>
+      <stop offset="40%" stop-color="#aaa"/>
+      <stop offset="100%" stop-color="#666"/>
+    </linearGradient>
+    <linearGradient id="blade_g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#d4d4d4"/>
+      <stop offset="100%" stop-color="#888"/>
+    </linearGradient>
+  </defs>
+  <rect width="300" height="400" fill="url(#warm2)"/>
+  <!-- Volto in primo piano, laterale -->
+  <!-- Collo -->
+  <path d="M100 380 Q120 280 148 240 Q152 235 156 240 Q184 280 200 380Z" fill="url(#face2)"/>
+  <!-- Orecchio -->
+  <ellipse cx="100" cy="240" rx="10" ry="16" fill="#c07850"/>
+  <ellipse cx="102" cy="240" rx="6" ry="12" fill="#a86040"/>
+  <!-- Guancia / jaw -->
+  <path d="M100 200 Q90 260 100 310 Q130 360 152 365 Q174 360 200 310 Q210 260 200 200 Q175 160 152 158 Q129 160 100 200Z" fill="url(#face2)"/>
+  <!-- Barba (zona rasatura) -->
+  <path d="M100 240 Q98 300 110 340 Q130 370 152 372 Q174 370 192 340 Q204 300 200 240 Q180 228 152 226 Q122 228 100 240Z" fill="#2a1a10"/>
+  <!-- Crema da barba (parte rasata) -->
+  <path d="M100 240 Q100 280 115 315 Q130 345 152 350 Q174 345 186 315 Q200 280 200 240" fill="#e8e4dc" opacity="0.85"/>
+  <!-- Rughe/texture viso -->
+  <path d="M120 200 Q128 195 138 198" fill="none" stroke="#b87050" stroke-width="0.8" opacity="0.5"/>
+  <!-- Occhio (laterale) -->
+  <ellipse cx="118" cy="210" rx="14" ry="9" fill="#1a1a1a"/>
+  <ellipse cx="118" cy="210" rx="10" ry="7" fill="#2d4a6a"/>
+  <ellipse cx="120" cy="208" rx="4" ry="4" fill="#1a1a1a"/>
+  <ellipse cx="121" cy="207" rx="1.5" ry="1.5" fill="white"/>
+  <!-- Sopracciglio -->
+  <path d="M106 200 Q118 195 130 198" fill="none" stroke="#1a0f05" stroke-width="3" stroke-linecap="round"/>
+  <!-- Naso (profilo) -->
+  <path d="M152 218 Q162 230 168 250 Q164 258 158 255" fill="none" stroke="#b87050" stroke-width="2" stroke-linecap="round"/>
+  <!-- Mano con rasoio -->
+  <path d="M235 160 Q240 180 238 210 Q236 230 230 240" stroke="#c4956a" stroke-width="22" stroke-linecap="round" fill="none"/>
+  <path d="M240 155 Q245 175 243 205 Q241 225 235 235" stroke="#d4a570" stroke-width="14" stroke-linecap="round" fill="none"/>
+  <!-- Dita -->
+  <path d="M230 148 Q245 140 255 148" stroke="#c4956a" stroke-width="8" stroke-linecap="round" fill="none"/>
+  <path d="M232 140 Q248 130 258 140" stroke="#c4956a" stroke-width="7" stroke-linecap="round" fill="none"/>
+  <!-- Rasoio a mano libera -->
+  <g transform="rotate(-35, 240, 200)">
+    <rect x="215" y="175" width="55" height="16" rx="3" fill="url(#razor_g)"/>
+    <rect x="215" y="187" width="55" height="5" rx="1" fill="url(#blade_g)"/>
+    <rect x="264" y="173" width="22" height="20" rx="4" fill="#333"/>
+    <rect x="265" y="174" width="20" height="18" rx="3" fill="#444"/>
+  </g>
+  <defs>
+    <linearGradient id="grad_label2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#000" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#000" stop-opacity="0.7"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="350" width="300" height="50" fill="url(#grad_label2)"/>
+  <text x="15" y="388" fill="white" font-family="system-ui,sans-serif" font-size="11" font-weight="700" letter-spacing="1">RASATURA CLASSICA</text>
+</svg>
