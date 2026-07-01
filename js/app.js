@@ -965,7 +965,7 @@ async function getPushNotifStatus() {
 async function renderPushNotifBanner() {
   const banner = $('pushNotifBanner');
   if (!banner) return;
-  if (!SESSION || SESSION.role !== 'owner') { banner.style.display = 'none'; return; }
+  if (!SESSION || (SESSION.role !== 'owner' && SESSION.role !== 'barber')) { banner.style.display = 'none'; return; }
 
   const status = await getPushNotifStatus();
   const icon = $('pushNotifIcon'), msg = $('pushNotifMsg'), btn = $('pushNotifBtn');
