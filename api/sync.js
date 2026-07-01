@@ -11,7 +11,10 @@ import {
 // (VAPID_PRIVATE_KEY in .env.local locally, or Vercel project env vars in
 // production) — never hardcoded here.
 const VAPID_PUBLIC_KEY = 'BLLKr1SroPRHybfSN2OunQUzy6yd5hggq2fmAmT90LL32Pgyaa_VkoESjUq3DGk0bgD2a5tb17bSZHc2heLJXGo';
-const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY;
+// .trim() guards against stray whitespace/newline characters that can sneak
+// into an env var value depending on how it was set (e.g. piping a value
+// through a shell), which web-push's base64url validation rejects outright.
+const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY?.trim();
 
 if (VAPID_PRIVATE_KEY) {
   webPush.setVapidDetails('mailto:trimio@example.com', VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
