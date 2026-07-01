@@ -945,6 +945,49 @@ async function initPushNotifications() {
   }
 }
 
+// Read-only status check (never registers/subscribes) used to render the
+// owner dashboard's push-notification banner.
+async function getPushNotifStatus() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+    return 'unsupported';
+  }
+  if (Notification.permission === 'denied') return 'blocked';
+  if (Notification.permission !== 'granted') return 'inactive';
+  try {
+    const registration = await navigator.serviceWorker.getRegistration('/sw.js');
+    const subscription = registration ? await registration.pushManager.getSubscription() : null;
+    return subscription ? 'active' : 'inactive';
+  } catch (e) {
+    return 'inactive';
+  }
+}
+
+async function renderPushNotifBanner() {
+  const banner = $('pushNotifBanner');
+  if (!banner) return;
+  if (!SESSION || SESSION.role !== 'owner') { banner.style.display = 'none'; return; }
+
+  const status = await getPushNotifStatus();
+  const icon = $('pushNotifIcon'), msg = $('pushNotifMsg'), btn = $('pushNotifBtn');
+
+  if (status === 'unsupported') { banner.style.display = 'none'; return; }
+
+  banner.style.display = 'flex';
+  if (status === 'active') {
+    icon.textContent = '🔔';
+    msg.textContent = 'Notifiche push attive per le nuove prenotazioni';
+    btn.style.display = 'none';
+  } else if (status === 'blocked') {
+    icon.textContent = '⚠️';
+    msg.textContent = 'Notifiche bloccate dal browser — abilitale nelle impostazioni del sito';
+    btn.style.display = 'none';
+  } else {
+    icon.textContent = '🔕';
+    msg.textContent = 'Attiva le notifiche push per le nuove prenotazioni';
+    btn.style.display = 'inline-block';
+  }
+}
+
 async function syncPushSubscriptionToServer(subscription) {
   if (!SESSION || !SESSION.role) return;
 
@@ -1786,6 +1829,8 @@ function initDash(){
 
   const firstSec=navItems()[0].sec;
   showSec(firstSec);
+
+  renderPushNotifBanner();
 }
 
 function navItems(){
@@ -3282,6 +3327,16 @@ async function boot(){
       }
       const banner = $('audioUnlockBanner');
       if (banner) banner.style.display = 'none';
+    });
+  }
+
+  // Wire push-notifications banner button (owner dashboard)
+  const pushBtn = $('pushNotifBtn');
+  if (pushBtn) {
+    pushBtn.addEventListener('click', async () => {
+      pushBtn.textContent = '…';
+      await initPushNotifications();
+      await renderPushNotifBanner();
     });
   }
 
