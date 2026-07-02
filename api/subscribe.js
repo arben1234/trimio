@@ -15,7 +15,7 @@ export default async function handler(req, res) {
 
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
-    const { subscription, role, salonId, workerId } = body;
+    const { subscription, role, salonId, workerId, bookingId } = body;
 
     if (!subscription || !subscription.endpoint) {
       return res.status(400).json({ error: 'Missing subscription details' });
@@ -51,6 +51,7 @@ export default async function handler(req, res) {
       role: role || null,
       salonId: salonId || null,
       workerId: workerId || null,
+      bookingId: bookingId || null,
       updatedAt: new Date().toISOString()
     });
 

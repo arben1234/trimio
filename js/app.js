@@ -1074,6 +1074,60 @@ async function syncPushSubscriptionToServer(subscription) {
   }
 }
 
+// Customer-side reminder opt-in (24h-before push), separate from the staff
+// (owner/barber/admin) flow above since a customer has no SESSION.role — the
+// subscription is tied to this specific bookingId instead, and is what
+// api/send-reminders.js (daily cron) looks up the day before the appointment.
+async function initCustomerPushNotifications(bookingId) {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return false;
+  try {
+    const registration = await navigator.serviceWorker.register('/sw.js');
+    if (Notification.permission === 'default') {
+      await Notification.requestPermission();
+    }
+    if (Notification.permission !== 'granted') return false;
+    const publicVapidKey = 'BLLKr1SroPRHybfSN2OunQUzy6yd5hggq2fmAmT90LL32Pgyaa_VkoESjUq3DGk0bgD2a5tb17bSZHc2heLJXGo';
+    let subscription = await registration.pushManager.getSubscription();
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicVapidKey)
+      });
+    }
+    const resp = await fetch('/api/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subscription, role: 'customer', bookingId })
+    });
+    return resp.ok;
+  } catch (err) {
+    console.error('Failed to init customer push notifications:', err);
+    return false;
+  }
+}
+
+function renderCustReminderBanner() {
+  const banner = $('custReminderBanner');
+  if (!banner) return;
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+    banner.style.display = 'none';
+    return;
+  }
+  banner.style.display = 'flex';
+  const icon = $('custReminderIcon'), msg = $('custReminderMsg'), btn = $('custReminderBtn');
+  if (Notification.permission === 'denied') {
+    icon.textContent = '⚠️';
+    msg.textContent = 'Notifiche bloccate dal browser — abilitale nelle impostazioni del sito';
+    btn.style.display = 'none';
+  } else {
+    icon.textContent = '🔔';
+    msg.textContent = "Vuoi ricevere un promemoria 24h prima?";
+    btn.style.display = 'inline-block';
+    btn.textContent = 'Attiva';
+    btn.disabled = false;
+  }
+}
+
 function showToastNotification(message) {
   const container = $('toastContainer');
   if (!container) return;
@@ -1362,6 +1416,7 @@ function buildChips(el,salon,onPick){
 let custStep=0;
 const custData={barberId:null,barberName:null,dateISO:null,dateLabel:null,time:null,service:null,price:null,name:null,phone:null};
 let custSalon=null;
+let lastBookingId=null;
 
 function initCustomer(salon){
   custSalon=salon;
@@ -1552,6 +1607,8 @@ async function doSubmit(){
   $('sDone').classList.add('on');
   $('cActions').style.display='none';$('cFooter').style.display='none';
   document.querySelectorAll('#vCustomer .dots .dot').forEach(d=>d.classList.add('on'));
+  lastBookingId=bk.id;
+  renderCustReminderBanner();
 }
 
 function showAltModal(busyName,time,freeB){
@@ -3633,6 +3690,26 @@ async function boot(){
       pushBtn.textContent = '…';
       await initPushNotifications();
       await renderPushNotifBanner();
+    });
+  }
+
+  // Wire customer 24h-reminder opt-in button (booking confirmation screen)
+  const custReminderBtn = $('custReminderBtn');
+  if (custReminderBtn) {
+    custReminderBtn.addEventListener('click', async () => {
+      if (!lastBookingId) return;
+      custReminderBtn.disabled = true;
+      custReminderBtn.textContent = '…';
+      const ok = await initCustomerPushNotifications(lastBookingId);
+      if (ok) {
+        $('custReminderIcon').textContent = '✅';
+        $('custReminderMsg').textContent = 'Promemoria attivato! Ti avviseremo 24h prima.';
+        custReminderBtn.style.display = 'none';
+      } else {
+        custReminderBtn.disabled = false;
+        custReminderBtn.textContent = 'Attiva';
+        $('custReminderMsg').textContent = 'Impossibile attivare il promemoria su questo dispositivo.';
+      }
     });
   }
 
