@@ -129,7 +129,7 @@ new vm.Script(`
     STATE, DEFAULT_SERVICES, DEFAULT_SLOTS,
     normalizeCredentials, bookedTimesFor, bookingsFor, openDays,
     getDistance, deg2rad, dayLabel, initials, isoOf, todayISO, relDay,
-    isOnVacation, freqTag, urlBase64ToUint8Array,
+    isOnVacation, freqTag, urlBase64ToUint8Array, isValidItalianPhone,
     validateCust, custData, doSubmit, custNext,
     doLogin, getSession: function(){ return SESSION; },
     filterByPeriod
@@ -208,6 +208,13 @@ eq(X.freqTag(0).l, 'Da riattivare', 'freqTag(0) => Da riattivare');
 const dist = X.getDistance(45.6983, 9.6773, 45.4642, 9.1900);
 ok(dist > 30 && dist < 60, `getDistance(Bergamo, Milano) plausible (${dist.toFixed(1)} km)`);
 eq(X.getDistance(45, 9, 45, 9), 0, 'getDistance() of identical points is 0');
+
+ok(X.isValidItalianPhone('+39 035 123 4567'), 'isValidItalianPhone() accepts +39 with spaces');
+ok(X.isValidItalianPhone('3331234567'), 'isValidItalianPhone() accepts a bare 10-digit mobile number');
+ok(X.isValidItalianPhone('02-1234567'), 'isValidItalianPhone() accepts dashes as separators');
+ok(!X.isValidItalianPhone(''), 'isValidItalianPhone() rejects an empty string');
+ok(!X.isValidItalianPhone('abc'), 'isValidItalianPhone() rejects non-numeric input');
+ok(!X.isValidItalianPhone('123'), 'isValidItalianPhone() rejects an implausibly short number');
 
 /* ================================================================
    5. BOOKING HELPERS

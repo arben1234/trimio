@@ -28,6 +28,66 @@ function relDay(iso){
 const isOnVacation=(w,iso)=>!!(w.vacFrom&&w.vacTo&&iso>=w.vacFrom&&iso<=w.vacTo);
 const freqTag=m=>m>=2?{l:'Fedele',c:'f-fedele'}:m>=1?{l:'Regolare',c:'f-regolare'}:{l:'Da riattivare',c:'f-occ'};
 
+// Simple Italian phone format check: optional +39/0039 prefix, then 6-12
+// digits (covers mobile 3xx and landline numbers of varying length),
+// ignoring spaces/dashes/dots used as separators.
+function isValidItalianPhone(phone){
+  const cleaned=(phone||'').trim().replace(/[\s\-.]/g,'');
+  return /^(\+39|0039)?\d{6,12}$/.test(cleaned);
+}
+
+// Reads a File via FileReader, uploads it to /api/upload-image (Vercel Blob
+// storage), and returns the resulting public URL. Used by both the salon
+// and worker photo pickers.
+function uploadImageFile(file){
+  return new Promise((resolve,reject)=>{
+    if(!file)return reject(new Error('Nessun file selezionato'));
+    if(!file.type.startsWith('image/'))return reject(new Error('Seleziona un file immagine'));
+    const reader=new FileReader();
+    reader.onerror=()=>reject(new Error('Impossibile leggere il file'));
+    reader.onload=async()=>{
+      try{
+        const dataUrl=reader.result;
+        const dataBase64=dataUrl.split(',')[1];
+        const resp=await fetch('/api/upload-image',{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({filename:file.name,dataBase64,contentType:file.type})
+        });
+        const data=await resp.json().catch(()=>({}));
+        if(!resp.ok)return reject(new Error(data.error||data.message||'Upload fallito'));
+        resolve(data.url);
+      }catch(e){reject(e);}
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+// Wires a file-input + text-input(URL) + preview-img + status-label group so
+// picking a file uploads it and fills the URL field automatically. Shared by
+// the salon "Foto Principale" and worker "Foto del Barbiere" pickers.
+function wireImagePicker(fileInputId,urlInputId,previewId,statusId){
+  const fileInput=$(fileInputId);
+  if(!fileInput)return;
+  fileInput.addEventListener('change',async()=>{
+    const file=fileInput.files&&fileInput.files[0];
+    if(!file)return;
+    const status=$(statusId);
+    if(status)status.textContent='Caricamento in corso...';
+    try{
+      const url=await uploadImageFile(file);
+      $(urlInputId).value=url;
+      const preview=$(previewId);
+      if(preview){preview.src=url;preview.style.display='block';}
+      if(status)status.textContent='✓ Immagine caricata';
+    }catch(e){
+      if(status)status.textContent='Errore: '+e.message;
+    }finally{
+      fileInput.value='';
+    }
+  });
+}
+
 const DEFAULT_SLOTS=['09:00','09:30','10:00','10:30','11:00','11:30','12:00','14:30','15:00','15:30','16:00','16:30','17:00','17:30','18:00','18:30'];
 const DEFAULT_SERVICES=[
   {id:'sv0',name:'Taglio',dur:'30 min',price:15},
@@ -2305,17 +2365,21 @@ let workerEditSalon=null;
 function openWorkerModal(wid,salon){
   workerEditSalon=salon;clearErr('wErr');
   const isOwner = SESSION.role === 'owner';
-  $('wName').disabled = isOwner;
-  $('wUser').disabled = isOwner;
-  $('wPwd').disabled = isOwner;
+  ['wName','wUser','wPwd','wImg','wImgFile','wPhone','wRole','wDesc'].forEach(id=>{ $(id).disabled = isOwner; });
+  $('wImgStatus').textContent='';
   if(wid==='new'){
     $('workerModalH').textContent='Nuovo dipendente';
-    ['wName','wUser','wPwd','wVacFrom','wVacTo'].forEach(id=>$(id).value='');
+    ['wName','wUser','wPwd','wImg','wPhone','wRole','wDesc','wVacFrom','wVacTo'].forEach(id=>$(id).value='');
+    $('wImgPreview').style.display='none';
     $('wDelete').style.display='none';editWorker='new';
   } else {
     const w=salon.workers.find(x=>x.id===wid);if(!w)return;
     $('workerModalH').textContent='Modifica · '+w.name;
     $('wName').value=w.name;$('wUser').value=w.username;$('wPwd').value='';
+    $('wImg').value=w.img||'';$('wPhone').value=w.phone||'';
+    $('wRole').value=w.role||'';$('wDesc').value=w.desc||'';
+    if(w.img){$('wImgPreview').src=w.img;$('wImgPreview').style.display='block';}
+    else{$('wImgPreview').style.display='none';}
     $('wVacFrom').value=w.vacFrom||'';$('wVacTo').value=w.vacTo||'';
     // Hide delete button inside modal for owners
     $('wDelete').style.display=isOwner?'none':'block';
@@ -2336,14 +2400,19 @@ async function saveWorker(){
     }
   } else {
     const name=$('wName').value.trim(),usr=$('wUser').value.trim(),pwd=$('wPwd').value.trim();
+    const img=$('wImg').value.trim(),phone=$('wPhone').value.trim();
+    const role=$('wRole').value.trim(),desc=$('wDesc').value.trim();
     if(name.length<2)return showErr('wErr','Inserisci il nome');
     if(!usr)return showErr('wErr','Inserisci username');
+    if(!phone)return showErr('wErr','Il numero di telefono è obbligatorio');
+    if(!isValidItalianPhone(phone))return showErr('wErr','Inserisci un numero di telefono italiano valido (es. +39 333 123 4567)');
     if(editWorker==='new'){
       if(!pwd)return showErr('wErr','Password obbligatoria per nuovo dipendente');
-      salon.workers.push({id:'w'+Date.now(),name,username:usr,password:pwd,vacFrom,vacTo});
+      salon.workers.push({id:'w'+Date.now(),name,username:usr,password:pwd,img,phone,role,desc,vacFrom,vacTo,reviews:[]});
     } else {
       const w=salon.workers.find(x=>x.id===editWorker);if(!w)return;
-      w.name=name;w.username=usr;if(pwd)w.password=pwd;w.vacFrom=vacFrom;w.vacTo=vacTo;
+      w.name=name;w.username=usr;if(pwd)w.password=pwd;
+      w.img=img;w.phone=phone;w.role=role;w.desc=desc;w.vacFrom=vacFrom;w.vacTo=vacTo;
     }
   }
   
@@ -2618,10 +2687,12 @@ function openSalonModal(sid){
   $('tabSalonInfo').classList.add('active');
   $('panelSalonInfo').style.display = 'block';
 
+  $('smBgImageStatus').textContent='';
   if(sid==='new'){
     $('salonModalH').textContent='Nuovo salone';
     ['smName','smSlug','smCity','smAddress','smPhone','smPromo','smOwnerUser','smOwnerPwd','smBgImage'].forEach(id=>$(id).value='');
-    
+    $('smBgImagePreview').style.display='none';
+
     // Hide staff and services tabs for new unsaved salons
     $('tabSalonStaff').style.display = 'none';
     $('tabSalonServices').style.display = 'none';
@@ -2633,16 +2704,18 @@ function openSalonModal(sid){
     $('smPromo').value=s.promo||'';
     $('smOwnerUser').value=s.ownerUsername||'';$('smOwnerPwd').value=s.ownerPassword||'';
     $('smBgImage').value=s.bgImage||'';
-    
+    if(s.bgImage){$('smBgImagePreview').src=s.bgImage;$('smBgImagePreview').style.display='block';}
+    else{$('smBgImagePreview').style.display='none';}
+
     // Show tabs for existing salons
     $('tabSalonStaff').style.display = '';
     $('tabSalonServices').style.display = '';
-    
+
     // Render sub-lists
     renderSalonModalWorkers(s);
     renderSalonModalServices(s);
   }
-  
+
   $('salonModal').classList.add('show');
   
   // Reset scroll of modal-sheet so it is at the top
@@ -2661,7 +2734,9 @@ async function saveSalon(){
   const bgImg=$('smBgImage').value.trim();
   if(name.length<2)return showErr('smErr','Inserisci il nome del salone');
   if(!slug)return showErr('smErr','Inserisci lo slug');
-  
+  if(!phone)return showErr('smErr','Il numero di telefono è obbligatorio');
+  if(!isValidItalianPhone(phone))return showErr('smErr','Inserisci un numero di telefono italiano valido (es. +39 035 123 4567)');
+
   if(salonEditId==='new'){
     if(!oUser||!oPwd)return showErr('smErr','Username e password proprietario obbligatori');
     STATE.salons.push({
@@ -3337,6 +3412,11 @@ async function boot(){
   $('workerModalOv').addEventListener('click',()=>closeModal('workerModal'));
   $('wCancel').addEventListener('click',()=>closeModal('workerModal'));
   $('wSave').addEventListener('click',saveWorker);
+  wireImagePicker('wImgFile','wImg','wImgPreview','wImgStatus');
+  $('wImg').addEventListener('input',()=>{
+    const preview=$('wImgPreview');const url=$('wImg').value.trim();
+    if(preview){preview.src=url;preview.style.display=url?'block':'none';}
+  });
   $('wDelete').addEventListener('click',async()=>{
     if(!workerEditSalon||editWorker==='new')return;
     if(!confirm('Eliminare questo dipendente?'))return;
@@ -3346,6 +3426,11 @@ async function boot(){
   $('salonModalOv').addEventListener('click',()=>closeModal('salonModal'));
   $('smCancel').addEventListener('click',()=>closeModal('salonModal'));
   $('smSave').addEventListener('click',saveSalon);
+  wireImagePicker('smBgImageFile','smBgImage','smBgImagePreview','smBgImageStatus');
+  $('smBgImage').addEventListener('input',()=>{
+    const preview=$('smBgImagePreview');const url=$('smBgImage').value.trim();
+    if(preview){preview.src=url;preview.style.display=url?'block':'none';}
+  });
   
   initSalonModalTabs();
   $('smAddWorkerBtn').addEventListener('click', (e) => {

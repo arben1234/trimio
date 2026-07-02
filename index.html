@@ -550,12 +550,27 @@
         <div class="modal-sheet">
           <div class="modal-h" id="workerModalH">Dipendente</div>
           <div class="err" id="wErr"></div>
+          <label class="d-lbl">Foto del Barbiere</label>
+          <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px;">
+            <img id="wImgPreview" src="" alt="" style="width:56px; height:56px; border-radius:50%; object-fit:cover; background:#f4f4f5; display:none; flex-shrink:0;">
+            <div style="flex:1;">
+              <input type="file" id="wImgFile" accept="image/*" style="display:block; margin-bottom:6px; font-size:12px;">
+              <input class="minput" id="wImg" placeholder="...oppure incolla un URL immagine" style="margin-bottom:0;">
+              <div id="wImgStatus" style="font-size:11px; color:#71717a; margin-top:4px;"></div>
+            </div>
+          </div>
           <label class="d-lbl">Nome completo</label>
           <input class="minput" id="wName" placeholder="Es. Shqipe Berisha" style="margin-bottom:14px">
           <label class="d-lbl">Username</label>
           <input class="minput" id="wUser" placeholder="es. shqipe" style="margin-bottom:14px">
           <label class="d-lbl">Password</label>
           <input class="minput" id="wPwd" placeholder="lascia vuoto per non cambiare" type="password" style="margin-bottom:14px">
+          <label class="d-lbl">Telefono <span style="color:#e5484d">*</span></label>
+          <input class="minput" id="wPhone" placeholder="Es. +39 333 123 4567" required style="margin-bottom:14px">
+          <label class="d-lbl">Ruolo</label>
+          <input class="minput" id="wRole" placeholder="Es. Barber & Stylist" style="margin-bottom:14px">
+          <label class="d-lbl">Descrizione</label>
+          <textarea class="minput" id="wDesc" placeholder="Es. Specialista in colorazione dei capelli..." rows="3" style="margin-bottom:14px; resize:vertical; font-family:inherit;"></textarea>
           <label class="d-lbl">Ferie dal</label>
           <input class="minput" id="wVacFrom" type="date" style="margin-bottom:14px">
           <label class="d-lbl">Ferie al</label>
@@ -592,16 +607,23 @@
             <input class="minput" id="smCity" placeholder="Es. Milano" style="margin-bottom:14px">
             <label class="d-lbl">Indirizzo</label>
             <input class="minput" id="smAddress" placeholder="Es. Via Sentierone 12" style="margin-bottom:14px">
-            <label class="d-lbl">Telefono</label>
-            <input class="minput" id="smPhone" placeholder="Es. +39 035 123 4567" style="margin-bottom:14px">
+            <label class="d-lbl">Telefono <span style="color:#e5484d">*</span></label>
+            <input class="minput" id="smPhone" placeholder="Es. +39 035 123 4567" required style="margin-bottom:14px">
             <label class="d-lbl">Testo Promozione Salone (ADV)</label>
             <input class="minput" id="smPromo" placeholder="Es. Mostra questo banner per..." style="margin-bottom:14px">
             <label class="d-lbl">Username proprietario</label>
             <input class="minput" id="smOwnerUser" placeholder="es. owner_barberart" style="margin-bottom:14px">
             <label class="d-lbl">Password proprietario</label>
             <input class="minput" id="smOwnerPwd" placeholder="password" type="password" style="margin-bottom:14px">
-            <label class="d-lbl">URL Immagine di Sfondo (Foto Salone)</label>
-            <input class="minput" id="smBgImage" placeholder="Es. https://images.unsplash.com/... (lascia vuoto per default)" style="margin-bottom:14px">
+            <label class="d-lbl">Foto Principale del Salone</label>
+            <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px;">
+              <img id="smBgImagePreview" src="" alt="" style="width:64px; height:64px; border-radius:10px; object-fit:cover; background:#f4f4f5; display:none; flex-shrink:0;">
+              <div style="flex:1;">
+                <input type="file" id="smBgImageFile" accept="image/*" style="display:block; margin-bottom:6px; font-size:12px;">
+                <input class="minput" id="smBgImage" placeholder="...oppure incolla un URL immagine" style="margin-bottom:0;">
+                <div id="smBgImageStatus" style="font-size:11px; color:#71717a; margin-top:4px;"></div>
+              </div>
+            </div>
           </div>
           
           <!-- TAB 2: STAFF & BARBIERI -->
@@ -705,6 +727,6 @@
   </div>
 </div>
 
-<script src="js/app.min.js?v=20260702_0008"></script>
+<script src="js/app.min.js?v=20260702_0009"></script>
 </body>
 </html>

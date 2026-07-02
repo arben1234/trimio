@@ -1,9 +1,8 @@
 /* ================================================================
    TRIMIO — LOCAL DEV SERVER
-   Serves the static app AND wires /api/sync, /api/subscribe,
-   /api/toggle-salon to the real handlers in api/*.js, using the
-   credentials from .env.local (same values `vercel dev` would use).
-   Does not require Vercel CLI login.
+   Serves the static app AND routes any /api/<name> request to the matching
+   api/<name>.js handler, using the credentials from .env.local (same
+   values `vercel dev` would use). Does not require Vercel CLI login.
 
    NOTE: this talks to the SAME live Vercel/Upstash KV database as the
    production deployment (https://trimio-two.vercel.app/) — bookings,
@@ -15,7 +14,7 @@
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -42,11 +41,19 @@ const MIME = {
   '.webmanifest': 'application/manifest+json'
 };
 
-const apiRoutes = {
-  '/api/sync': () => import('./api/sync.js'),
-  '/api/subscribe': () => import('./api/subscribe.js'),
-  '/api/toggle-salon': () => import('./api/toggle-salon.js')
-};
+// Any request to /api/<name> is routed to api/<name>.js if that file exists
+// — mirrors Vercel's own automatic routing convention, so a new file under
+// api/ never needs a matching entry added here by hand (a previous
+// hardcoded-map version of this silently 404'd new endpoints locally while
+// they worked fine on real Vercel, which is exactly the kind of gap that's
+// easy to forget and hard to notice).
+const apiDir = path.join(__dirname, 'api');
+function resolveApiRoute(pathname) {
+  const match = pathname.match(/^\/api\/([\w-]+)$/);
+  if (!match) return null;
+  const file = path.join(apiDir, `${match[1]}.js`);
+  return fs.existsSync(file) ? file : null;
+}
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
@@ -62,12 +69,13 @@ function readBody(req) {
 
 const server = http.createServer(async (req, res) => {
   const { pathname } = new URL(req.url, `http://${req.headers.host}`);
+  const apiFile = resolveApiRoute(pathname);
 
-  if (apiRoutes[pathname]) {
+  if (apiFile) {
     res.status = (code) => { res.statusCode = code; return res; };
     res.json = (body) => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(body)); return res; };
     try {
-      const mod = await apiRoutes[pathname]();
+      const mod = await import(`${pathToFileURL(apiFile)}?t=${Date.now()}`);
       req.body = await readBody(req);
       await mod.default(req, res);
     } catch (e) {
