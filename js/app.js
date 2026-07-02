@@ -1668,12 +1668,11 @@ function updateNavMenu() {
   if (!menu) return;
 
   // Admin: the sidebar (Saloni / Nuovo Salone / Homepage / Statistiche / Esci)
-  // is the single source of navigation while inside the dashboard — this
-  // header dropdown used to duplicate several of those same destinations
-  // (e.g. "Vai alla Dashboard" and "Gestione Saloni" landed on the exact same
-  // screen), which was confusing. Hide it there. But the public Homepage view
-  // has no sidebar/hamburger of its own, so keep a single safety-net option
-  // to get back to the dashboard when admin is anywhere outside it.
+  // is the navigation while inside the dashboard — hide this header dropdown
+  // there to avoid duplicating the same destinations. The public Homepage
+  // view has no sidebar/hamburger of its own though, so show the same set of
+  // destinations here directly (skipping Login, not applicable once logged
+  // in, and Homepage, since admin is already there).
   if (SESSION && SESSION.role === 'admin') {
     const onDash = document.querySelector('.view.on')?.id === 'vDash';
     if (onDash) {
@@ -1681,7 +1680,13 @@ function updateNavMenu() {
       menu.innerHTML = '';
     } else {
       menu.style.display = '';
-      menu.innerHTML = `<option value="dashboard" selected>📊 Vai alla Dashboard</option>`;
+      menu.innerHTML = `
+        <option value="" disabled selected>👤 Admin</option>
+        <option value="nav_saloni">🏪 Gestione Saloni</option>
+        <option value="admin_new_salon">➕ Nuovo Salone</option>
+        <option value="nav_stats">📊 Statistiche</option>
+        <option value="logout">🚪 Esci</option>
+      `;
     }
     return;
   }
@@ -3381,6 +3386,10 @@ async function boot(){
     } else if (val === 'dashboard') {
       showView('vDash');
       initDash();
+    } else if (val === 'admin_new_salon') {
+      showView('vDash');
+      showSec('saloni');
+      openSalonModal('new');
     } else if (val === 'logout') {
       doLogout();
     } else if (val.startsWith('nav_')) {
