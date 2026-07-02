@@ -121,7 +121,19 @@ export default async function handler(req, res) {
 
         if (Array.isArray(newData.salons) && newData.salons.length > 0) {
           if (isValidSalonsArray(newData.salons)) {
-            await setSalonsDb(kvUrl, kvToken, newData.salons);
+            // Merge by id (upsert) instead of overwriting the whole array.
+            // saveState() sends the client's ENTIRE local salons snapshot on
+            // every save, even for unrelated actions (confirming a booking,
+            // etc.) — a client with a stale/partial local copy would
+            // otherwise silently wipe out salons added by someone else in
+            // the meantime. Never remove a salon just because it's absent
+            // from an incoming payload; deletion goes through the dedicated
+            // /api/delete-salon endpoint instead, which acts on the current
+            // server-side list directly.
+            const currentSalons = await getSalonsDb(kvUrl, kvToken);
+            const salonMap = new Map(currentSalons.map(s => [s.id, s]));
+            for (const incoming of newData.salons) salonMap.set(incoming.id, incoming);
+            await setSalonsDb(kvUrl, kvToken, Array.from(salonMap.values()));
           } else {
             console.warn('[SYNC] Ignoring malformed salons payload (not written to salons_db)');
           }

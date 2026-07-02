@@ -2556,9 +2556,28 @@ function renderSaloni(){
       alert('Eliminazione annullata. Password di sicurezza non corretta.');
       return;
     }
+    // Deletion goes through a dedicated endpoint that acts on the current
+    // server-side salon list directly, instead of saveState()'s generic
+    // whole-array sync (which merges by id and never deletes based on a
+    // client's local snapshot missing an entry).
+    try {
+      const resp = await fetch('/api/delete-salon', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ salonId: b.dataset.sdel })
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        alert('Errore durante l\'eliminazione: ' + (err.message || err.error || 'sconosciuto'));
+        return;
+      }
+    } catch (err) {
+      alert('Errore di connessione al server: ' + err.message);
+      return;
+    }
     STATE.salons=STATE.salons.filter(x=>x.id!==b.dataset.sdel);
     STATE.bookings=STATE.bookings.filter(x=>x.salonId!==b.dataset.sdel);
-    await saveState();renderSaloni();
+    renderSaloni();
   }));
 }
 let salonEditId=null;

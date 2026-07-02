@@ -465,6 +465,14 @@ function makeFakeRedis() {
         hashes.get(key).set(field, value);
         return okResult(isNew ? 1 : 0);
       }
+      case 'HDEL': {
+        const [key, ...fields] = rest;
+        const h = hashes.get(key);
+        if (!h) return okResult(0);
+        let count = 0;
+        for (const f of fields) { if (h.delete(f)) count++; }
+        return okResult(count);
+      }
       case 'HSETNX': {
         const [key, field, value] = rest;
         if (!hashes.has(key)) hashes.set(key, new Map());
@@ -665,6 +673,61 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
   const r3 = mkRes();
   await handler({ method: 'GET' }, r3.obj);
   eq(r3.status, 405, 'toggle-salon rejects non-POST methods with 405');
+});
+
+section('api/sync.js — CRITICAL: a stale/partial salons snapshot never deletes other salons');
+await withFakeKv(makeFakeRedis(), async (fake) => {
+  fake.strings.set('salons_db', JSON.stringify([
+    { id: 'salonA', name: 'Salon A' },
+    { id: 'salonB', name: 'Salon B' }
+  ]));
+  const handler = await freshImport('api/sync.js');
+
+  // A client with a stale local copy (only knows about salonA, e.g. it
+  // loaded before salonB was created) saves for an unrelated reason
+  // (confirming a booking) and sends its whole local salons snapshot.
+  const staleClientSalons = [{ id: 'salonA', name: 'Salon A Edited' }];
+  const r1 = mkRes();
+  await handler({ method: 'POST', body: { bookings: [], salons: staleClientSalons } }, r1.obj);
+  ok(r1.status === 200, 'sync accepts a save from a client with a partial salons snapshot');
+
+  const salonsAfter = JSON.parse(fake.strings.get('salons_db'));
+  ok(salonsAfter.some(s => s.id === 'salonB'), 'salonB (absent from the stale payload) is NOT deleted');
+  ok(salonsAfter.find(s => s.id === 'salonA')?.name === 'Salon A Edited', 'salonA is still updated with the fields the client actually sent');
+  eq(salonsAfter.length, 2, 'total salon count is unchanged — nothing silently lost');
+});
+
+section('api/delete-salon.js — explicit, targeted salon deletion (fake KV, no live network)');
+await withFakeKv(makeFakeRedis(), async (fake) => {
+  fake.strings.set('salons_db', JSON.stringify([
+    { id: 'salonA', name: 'Salon A' },
+    { id: 'salonB', name: 'Salon B' }
+  ]));
+  const handler = await freshImport('api/delete-salon.js');
+
+  // Seed a booking + lock belonging to salonA to confirm cleanup.
+  fake.hashes.set('bookings', new Map([
+    ['bkA1', JSON.stringify({ id: 'bkA1', salonId: 'salonA', workerId: 'w1', dateISO: '2030-01-01', time: '10:00', status: 'confirmed' })],
+    ['bkB1', JSON.stringify({ id: 'bkB1', salonId: 'salonB', workerId: 'w2', dateISO: '2030-01-01', time: '11:00', status: 'confirmed' })]
+  ]));
+  fake.strings.set('lock:salonA:w1:2030-01-01:10:00', 'bkA1');
+  fake.strings.set('lock:salonB:w2:2030-01-01:11:00', 'bkB1');
+
+  const r1 = mkRes();
+  await handler({ method: 'POST', body: { salonId: 'salonA' } }, r1.obj);
+  ok(r1.status === 200 && r1.body.success === true, 'delete-salon succeeds for an existing salon');
+  eq(r1.body.removedBookings, 1, 'reports exactly the one booking removed for that salon');
+
+  const salonsAfter = JSON.parse(fake.strings.get('salons_db'));
+  ok(!salonsAfter.some(s => s.id === 'salonA'), 'salonA is removed from salons_db');
+  ok(salonsAfter.some(s => s.id === 'salonB'), 'salonB is untouched');
+  ok(!fake.hashes.get('bookings').has('bkA1'), 'salonA\'s booking is removed from the bookings hash');
+  ok(fake.hashes.get('bookings').has('bkB1'), 'salonB\'s booking is untouched');
+  ok(!fake.strings.has('lock:salonA:w1:2030-01-01:10:00'), 'salonA\'s slot lock is released');
+
+  const r2 = mkRes();
+  await handler({ method: 'POST', body: { salonId: 'does-not-exist' } }, r2.obj);
+  eq(r2.status, 404, 'delete-salon returns 404 for an unknown salonId');
 });
 
 section('api/subscribe.js — push subscription storage (fake KV, no live network)');
