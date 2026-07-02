@@ -1925,6 +1925,7 @@ let calYear=_now.getFullYear(),calMonth=_now.getMonth(),calSelISO=todayISO();
 let cliYear=_now.getFullYear(),cliMonth=_now.getMonth();
 let statsPeriod='oggi',statFrom='',statTo='';
 let editSrv=null,editWorker=null;
+let lastAdminStatsExport=null;
 
 // Admin navigation (Homepage <-> dashboard sections <-> Nuovo Salone) is
 // routed through real URL hashes (#admin/home, #admin/saloni, #admin/stats,
@@ -2625,6 +2626,7 @@ function renderAdminStats(){
   });
   html+=`<div class="chart-wrap">
     <div class="chart-title">Riepilogo per salone</div>
+    <button type="button" class="stats-export-btn" id="statsExportBtn">📄 Esporta PDF / Stampa</button>
     <div style="overflow-x:auto;">
     <table style="width:100%;border-collapse:collapse;font-size:12.5px;">
       <thead><tr style="border-bottom:2px solid #e4e4e7;text-align:left;">
@@ -2652,6 +2654,38 @@ function renderAdminStats(){
   </div>`;
 
   $('statsContent').innerHTML=html;
+
+  // Kept for the export/print button (event-delegated, wired once in boot()).
+  lastAdminStatsExport={rows,servedCount:served.length,servedRev,period:periodLabel()};
+}
+
+function printAdminStats(){
+  const d=lastAdminStatsExport;
+  const target=$('printableStats');
+  if(!d||!target)return;
+  target.innerHTML=`
+    <div class="ps-header">
+      <div class="ps-title">TRIMIO</div>
+      <div class="ps-sub">Riepilogo statistiche · Tutti i saloni · ${d.period}</div>
+    </div>
+    <table>
+      <thead><tr>
+        <th>Periodo</th><th>Salone</th><th style="text-align:right">Clienti serviti</th><th style="text-align:right">Incasso (€)</th>
+      </tr></thead>
+      <tbody>
+        ${d.rows.map(row=>`<tr>
+          <td>${d.period}</td><td>${row.name}</td>
+          <td style="text-align:right">${row.count}</td>
+          <td style="text-align:right">€${row.rev}</td>
+        </tr>`).join('')}
+        <tr style="font-weight:800;">
+          <td></td><td>Totale</td>
+          <td style="text-align:right">${d.servedCount}</td>
+          <td style="text-align:right">€${d.servedRev}</td>
+        </tr>
+      </tbody>
+    </table>`;
+  window.print();
 }
 
 /* ---- SALONI (solo Livello 1 admin) ---- */
@@ -3525,6 +3559,9 @@ async function boot(){
     statFrom=$('statFrom').value;statTo=$('statTo').value;
     if(!statFrom||!statTo){alert('Seleziona data inizio e fine');return;}
     if(curSec==='stats')renderStats();
+  });
+  $('statsContent')?.addEventListener('click',(e)=>{
+    if(e.target.closest('#statsExportBtn'))printAdminStats();
   });
 
   // hash change

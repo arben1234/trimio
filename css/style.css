@@ -1211,3 +1211,29 @@ body{
   border-color:transparent !important;
   box-shadow:0 12px 32px rgba(229,193,88,.4);
 }
+
+/* ---- Stats table export/print button + printable PDF view ---- */
+.stats-export-btn{
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  width:100%;padding:12px;margin-bottom:14px;
+  background:#18181b;color:#fff;border:none;border-radius:12px;
+  font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;
+}
+.stats-export-btn:active{transform:scale(.98);}
+#printableStats{display:none;}
+#printableStats table{width:100%;border-collapse:collapse;font-size:13px;}
+#printableStats th,#printableStats td{padding:8px 6px;text-align:left;border-bottom:1px solid #ddd;}
+#printableStats th{text-align:left;}
+#printableStats .ps-header{margin-bottom:18px;}
+#printableStats .ps-title{font-family:'Cinzel',serif;font-size:22px;font-weight:800;}
+#printableStats .ps-sub{font-size:13px;color:#555;margin-top:4px;}
+@media print{
+  html,body{background:#fff !important;}
+  body *{visibility:hidden;}
+  #printableStats,#printableStats *{visibility:visible;color:#111;}
+  #printableStats{display:block;position:absolute;left:0;top:0;width:100%;padding:24px;background:#fff;}
+  #printableStats .ps-title{color:#111;}
+  #printableStats .ps-sub{color:#555 !important;}
+  #printableStats th{color:#555 !important;}
+  #printableStats th,#printableStats td{border-bottom-color:#ccc !important;}
+}

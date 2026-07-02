@@ -12,7 +12,7 @@
   <meta name="apple-mobile-web-app-title" content="TRIMIO">
   <link rel="apple-touch-icon" href="logo.png">
   <link rel="manifest" href="manifest.json">
-  <link rel="stylesheet" href="css/style.css?v=202607022000">
+  <link rel="stylesheet" href="css/style.css?v=202607022101">
   <!-- Firebase Compatibility SDKs -->
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
@@ -727,6 +727,11 @@
   </div>
 </div>
 
-<script src="js/app.min.js?v=20260702_0016"></script>
+<!-- Printable / PDF-export view for the admin statistics table — hidden on
+     screen, shown only via @media print (see css/style.css), so the browser's
+     own "Save as PDF" print target produces a clean report. -->
+<div id="printableStats"></div>
+
+<script src="js/app.min.js?v=20260702_0017"></script>
 </body>
 </html>
