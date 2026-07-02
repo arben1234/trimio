@@ -1651,7 +1651,9 @@ function renderSalonModalServices(s) {
 
 function doLogout(){
   SESSION={role:null,salonId:null,workerId:null,name:null};
-  adminNavStack = [];
+  if ((location.hash||'').replace('#','').startsWith('admin/')) {
+    try { history.replaceState(null, '', location.pathname + location.search); } catch(e) { location.hash = ''; }
+  }
   if (canStore) {
     try { localStorage.removeItem(SESSION_KEY); } catch(e) {}
   }
@@ -1897,29 +1899,35 @@ let cliYear=_now.getFullYear(),cliMonth=_now.getMonth();
 let statsPeriod='oggi',statFrom='',statTo='';
 let editSrv=null,editWorker=null;
 
-// In-app "back" history for the admin (Homepage <-> dashboard sections <-> Nuovo
-// Salone). Admin navigation never touches the URL hash, so the browser's own
-// back button has nothing meaningful to step through — these two helpers give
-// the on-screen back arrows (hBack/dBack) a real "go to where I was before"
-// action instead of always jumping to a fixed screen.
-let adminNavStack = [];
-function pushAdminNav() {
-  if (!SESSION || SESSION.role !== 'admin') return;
-  const view = document.querySelector('.view.on')?.id;
-  if (!view) return;
-  const entry = view === 'vDash' ? { view, sec: curSec } : { view };
-  adminNavStack.push(entry);
-  if (adminNavStack.length > 25) adminNavStack.shift();
+// Admin navigation (Homepage <-> dashboard sections <-> Nuovo Salone) is
+// routed through real URL hashes (#admin/home, #admin/saloni, #admin/stats,
+// #admin/nuovo-salone) so that both the browser's own back/forward buttons
+// and the in-app back arrows (hBack/dBack) step through the exact path the
+// admin actually took, one real page at a time — see handleAdminHashRoute(),
+// wired from the hashchange listener and checkInitialHash() in boot().
+function adminHashFor(sec) {
+  if (sec === 'home') return 'admin/home';
+  if (sec === 'newSalon') return 'admin/nuovo-salone';
+  return 'admin/' + sec;
 }
-function popAdminNav() {
-  const prev = adminNavStack.pop();
-  if (!prev) { showView('vHome'); return; }
-  if (prev.view === 'vDash') {
+function handleAdminHashRoute(rawHash) {
+  if (!SESSION || SESSION.role !== 'admin') {
+    location.hash = '';
+    showView('vLogin');
+    return;
+  }
+  const part = rawHash.slice('admin/'.length);
+  if (part === 'home') {
+    showView('vHome');
+  } else if (part === 'nuovo-salone') {
     showView('vDash');
     initDash();
-    if (prev.sec) showSec(prev.sec);
+    showSec('saloni');
+    openSalonModal('new');
   } else {
-    showView(prev.view);
+    showView('vDash');
+    initDash();
+    showSec(part);
   }
 }
 
@@ -2020,14 +2028,11 @@ function buildNav(){
     b.addEventListener('click',()=>{
       if(it.sec==='logout') {
         doLogout();
-      } else if(it.sec==='home') {
-        pushAdminNav();
-        showView('vHome');
-      } else if(it.sec==='newSalon') {
-        pushAdminNav();
-        openSalonModal('new');
+      } else if(it.sec==='home' || it.sec==='newSalon') {
+        location.hash = adminHashFor(it.sec);
+      } else if (SESSION && SESSION.role === 'admin') {
+        location.hash = adminHashFor(it.sec);
       } else {
-        pushAdminNav();
         showSec(it.sec);
       }
       closeSide();
@@ -3328,7 +3333,7 @@ async function boot(){
         custBack();
       } else {
         if (SESSION && SESSION.role === 'admin') {
-          popAdminNav();
+          if (history.length > 1) { history.back(); } else { showView('vHome'); }
         } else if (SESSION && SESSION.role) {
           showView('vDash');
           initDash();
@@ -3344,7 +3349,7 @@ async function boot(){
       if (custSalon) {
         showView('vCustomer');
       } else if (SESSION && SESSION.role === 'admin') {
-        popAdminNav();
+        if (history.length > 1) { history.back(); } else { showView('vHome'); }
       } else {
         if (history.length > 1) {
           history.back();
@@ -3357,7 +3362,7 @@ async function boot(){
 
   $('dBack')?.addEventListener('click', () => {
     if (SESSION && SESSION.role === 'admin') {
-      popAdminNav();
+      if (history.length > 1) { history.back(); } else { showView('vHome'); }
     } else if (SESSION && SESSION.role) {
       const salon = STATE.salons.find(x => x.id === SESSION.salonId);
       if (salon) {
@@ -3414,23 +3419,21 @@ async function boot(){
       loginSalonContext = custSalon ? custSalon.id : null;
       showView('vLogin');
     } else if (val === 'dashboard') {
-      pushAdminNav();
       showView('vDash');
       initDash();
     } else if (val === 'admin_new_salon') {
-      pushAdminNav();
-      showView('vDash');
-      initDash();
-      showSec('saloni');
-      openSalonModal('new');
+      location.hash = adminHashFor('newSalon');
     } else if (val === 'logout') {
       doLogout();
     } else if (val.startsWith('nav_')) {
       const sec = val.replace('nav_', '');
-      pushAdminNav();
-      showView('vDash');
-      initDash();
-      showSec(sec);
+      if (SESSION && SESSION.role === 'admin') {
+        location.hash = adminHashFor(sec);
+      } else {
+        showView('vDash');
+        initDash();
+        showSec(sec);
+      }
     }
   });
   $('statusBadge').addEventListener('click',()=>{
@@ -3507,9 +3510,16 @@ async function boot(){
 
   // hash change
   window.addEventListener('hashchange',()=>{
-    const h=(location.hash||'').replace('#','').toUpperCase().trim();
+    const rawHash=(location.hash||'').replace('#','');
+    if(rawHash.startsWith('admin/')){
+      handleAdminHashRoute(rawHash);
+      return;
+    }
+    const h=rawHash.toUpperCase().trim();
     if(!h){
-      if (SESSION && SESSION.role) {
+      if (SESSION && SESSION.role === 'admin') {
+        showView('vHome');
+      } else if (SESSION && SESSION.role) {
         showView('vDash');
         initDash();
       } else {
@@ -3586,8 +3596,22 @@ async function boot(){
   const checkInitialHash = () => {
     loadSession();
 
-    // 1. Prioritize hash check: if there is a hash pointing to a valid salon, show that salon's customer page
-    const h = (location.hash || '').replace('#', '').toUpperCase().trim();
+    // 1a. Admin dashboard deep-link (#admin/saloni, #admin/stats, ...) — only
+    // meaningful with an active admin session (e.g. a page refresh); falls
+    // back to the login screen otherwise.
+    const rawHash = (location.hash || '').replace('#', '');
+    if (rawHash.startsWith('admin/')) {
+      if (SESSION && SESSION.role === 'admin') {
+        handleAdminHashRoute(rawHash);
+      } else {
+        location.hash = '';
+        showView('vLogin');
+      }
+      return;
+    }
+
+    // 1b. Prioritize hash check: if there is a hash pointing to a valid salon, show that salon's customer page
+    const h = rawHash.toUpperCase().trim();
     if (h) {
       const s = STATE.salons.find(x => x.slug === h);
       if (s) {
