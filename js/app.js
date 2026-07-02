@@ -1606,9 +1606,29 @@ function doLogout(){
 function updateNavMenu() {
   const menu = $('navMenu');
   if (!menu) return;
-  
+
+  // Admin: the sidebar (Saloni / Nuovo Salone / Homepage / Statistiche / Esci)
+  // is the single source of navigation while inside the dashboard — this
+  // header dropdown used to duplicate several of those same destinations
+  // (e.g. "Vai alla Dashboard" and "Gestione Saloni" landed on the exact same
+  // screen), which was confusing. Hide it there. But the public Homepage view
+  // has no sidebar/hamburger of its own, so keep a single safety-net option
+  // to get back to the dashboard when admin is anywhere outside it.
+  if (SESSION && SESSION.role === 'admin') {
+    const onDash = document.querySelector('.view.on')?.id === 'vDash';
+    if (onDash) {
+      menu.style.display = 'none';
+      menu.innerHTML = '';
+    } else {
+      menu.style.display = '';
+      menu.innerHTML = `<option value="dashboard" selected>📊 Vai alla Dashboard</option>`;
+    }
+    return;
+  }
+  menu.style.display = '';
+
   let html = '';
-  
+
   if (!SESSION || !SESSION.role) {
     // Guest / Customer level
     if (custSalon && custSalon.name) {
@@ -1620,34 +1640,25 @@ function updateNavMenu() {
         <option value="login_barber">🔑 Login Staf / Barbiere</option>
       `;
     } else {
-      // Main Homepage context
+      // Main Homepage context — simplified to just the admin entry point;
+      // the other options duplicated what's already reachable directly from
+      // the homepage itself.
       html += `
         <option value="" disabled selected>☰ Menu Navigazione</option>
-        <option value="home">🏠 Vai alla Homepage</option>
-        <option value="booking">📅 Prenota Appuntamento</option>
-        <option value="saloni_scroll">🏢 Saloni Disponibili</option>
         <option value="login_admin">🔑 Login Amministratore</option>
       `;
     }
   } else {
-    // Logged in user level
-    const roleLabel = SESSION.role === 'admin' ? 'Admin' : (SESSION.role === 'owner' ? 'Owner' : 'Staf');
+    // Logged in user level (owner / barber — admin already handled above)
+    const roleLabel = SESSION.role === 'owner' ? 'Owner' : 'Staf';
     const nameLabel = SESSION.name ? SESSION.name.split(' ')[0] : '';
     html += `
       <option value="" disabled selected>👤 ${roleLabel}: ${nameLabel}</option>
       <option value="logout">🚪 Esci (Logout)</option>
       <option value="dashboard">📊 Vai alla Dashboard</option>
     `;
-    if (SESSION.role === 'admin') {
-      html += `<option value="home">🏠 Vai alla Homepage</option>`;
-    }
-    
-    if (SESSION.role === 'admin') {
-      html += `
-        <option value="" disabled>--- Sezioni Admin ---</option>
-        <option value="nav_saloni">🏢 Gestione Saloni</option>
-      `;
-    } else if (SESSION.role === 'owner') {
+
+    if (SESSION.role === 'owner') {
       html += `
         <option value="" disabled>--- Sezioni Owner ---</option>
         <option value="nav_oggi">📅 Appuntamenti Oggi</option>
@@ -1718,12 +1729,10 @@ let loginSalonContext = null;
 function onLoginSuccess() {
   clearErr('lErr');
   $('lpw').value = '';
-  if (SESSION && SESSION.role === 'admin') {
-    showView('vHome');
-  } else {
-    showView('vDash');
-    initDash();
-  }
+  // Admin lands on the dashboard too (same as owner/barber) — the sidebar is
+  // the only navigation for admin now, and it isn't reachable from vHome.
+  showView('vDash');
+  initDash();
   if (typeof initPushNotifications === 'function') {
     initPushNotifications();
   }
@@ -3446,8 +3455,9 @@ async function boot(){
           return;
         }
       } else {
-        // Admin session - route to homepage!
-        showView('vHome');
+        // Admin session - route to dashboard (sidebar is the only nav for admin)
+        showView('vDash');
+        initDash();
         if (typeof initPushNotifications === 'function') {
           initPushNotifications();
         }
