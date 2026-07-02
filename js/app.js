@@ -1677,7 +1677,12 @@ function showView(view){
   $(view).classList.add('on');
   const isDash=view==='vDash';
   const isHome=view==='vHome';
-  
+  // Always re-render the homepage with the current STATE.salons before showing
+  // it — otherwise it can show stale content (e.g. a salon added by the admin
+  // moments earlier is missing until a full page reload) since navigating
+  // here doesn't always go through an explicit renderHomepage() call.
+  if(isHome && typeof renderHomepage==='function') renderHomepage();
+
   // Hide top-left logo inside header on homepage to avoid duplicate logos
   const logoWrap = $('hBrandLogoWrapper');
   if (logoWrap) logoWrap.style.display = isHome ? 'none' : 'flex';
@@ -1842,9 +1847,10 @@ function navItems(){
   // LIVELLO 1 — Admin
   if(r==='admin') {
     items = [
-      {sec:'saloni',  ic:'🏪',label:'Saloni'},
-      {sec:'home',    ic:'🏠',label:'Homepage'},
-      {sec:'stats',   ic:'📊',label:'Statistiche'},
+      {sec:'saloni',    ic:'🏪',label:'Saloni'},
+      {sec:'newSalon',  ic:'➕',label:'Nuovo Salone'},
+      {sec:'home',      ic:'🏠',label:'Homepage'},
+      {sec:'stats',     ic:'📊',label:'Statistiche'},
     ];
   }
   // LIVELLO 2 — Proprietario
@@ -1887,6 +1893,8 @@ function buildNav(){
         doLogout();
       } else if(it.sec==='home') {
         showView('vHome');
+      } else if(it.sec==='newSalon') {
+        openSalonModal('new');
       } else {
         showSec(it.sec);
       }
@@ -3279,7 +3287,6 @@ async function boot(){
     workerEditSalon.workers=workerEditSalon.workers.filter(x=>x.id!==editWorker);
     await saveState();closeModal('workerModal');renderDipendenti();
   });
-  $('addSalonBtn').addEventListener('click',()=>openSalonModal('new'));
   $('salonModalOv').addEventListener('click',()=>closeModal('salonModal'));
   $('smCancel').addEventListener('click',()=>closeModal('salonModal'));
   $('smSave').addEventListener('click',saveSalon);
