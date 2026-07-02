@@ -1651,6 +1651,7 @@ function renderSalonModalServices(s) {
 
 function doLogout(){
   SESSION={role:null,salonId:null,workerId:null,name:null};
+  adminNavStack = [];
   if (canStore) {
     try { localStorage.removeItem(SESSION_KEY); } catch(e) {}
   }
@@ -1896,6 +1897,32 @@ let cliYear=_now.getFullYear(),cliMonth=_now.getMonth();
 let statsPeriod='oggi',statFrom='',statTo='';
 let editSrv=null,editWorker=null;
 
+// In-app "back" history for the admin (Homepage <-> dashboard sections <-> Nuovo
+// Salone). Admin navigation never touches the URL hash, so the browser's own
+// back button has nothing meaningful to step through — these two helpers give
+// the on-screen back arrows (hBack/dBack) a real "go to where I was before"
+// action instead of always jumping to a fixed screen.
+let adminNavStack = [];
+function pushAdminNav() {
+  if (!SESSION || SESSION.role !== 'admin') return;
+  const view = document.querySelector('.view.on')?.id;
+  if (!view) return;
+  const entry = view === 'vDash' ? { view, sec: curSec } : { view };
+  adminNavStack.push(entry);
+  if (adminNavStack.length > 25) adminNavStack.shift();
+}
+function popAdminNav() {
+  const prev = adminNavStack.pop();
+  if (!prev) { showView('vHome'); return; }
+  if (prev.view === 'vDash') {
+    showView('vDash');
+    initDash();
+    if (prev.sec) showSec(prev.sec);
+  } else {
+    showView(prev.view);
+  }
+}
+
 function initDash(){
   const r=SESSION.role;
   const salon=getSalon();
@@ -1994,10 +2021,13 @@ function buildNav(){
       if(it.sec==='logout') {
         doLogout();
       } else if(it.sec==='home') {
+        pushAdminNav();
         showView('vHome');
       } else if(it.sec==='newSalon') {
+        pushAdminNav();
         openSalonModal('new');
       } else {
+        pushAdminNav();
         showSec(it.sec);
       }
       closeSide();
@@ -3298,7 +3328,7 @@ async function boot(){
         custBack();
       } else {
         if (SESSION && SESSION.role === 'admin') {
-          showView('vHome');
+          popAdminNav();
         } else if (SESSION && SESSION.role) {
           showView('vDash');
           initDash();
@@ -3314,7 +3344,7 @@ async function boot(){
       if (custSalon) {
         showView('vCustomer');
       } else if (SESSION && SESSION.role === 'admin') {
-        showView('vHome');
+        popAdminNav();
       } else {
         if (history.length > 1) {
           history.back();
@@ -3327,7 +3357,7 @@ async function boot(){
 
   $('dBack')?.addEventListener('click', () => {
     if (SESSION && SESSION.role === 'admin') {
-      showView('vHome');
+      popAdminNav();
     } else if (SESSION && SESSION.role) {
       const salon = STATE.salons.find(x => x.id === SESSION.salonId);
       if (salon) {
@@ -3384,9 +3414,11 @@ async function boot(){
       loginSalonContext = custSalon ? custSalon.id : null;
       showView('vLogin');
     } else if (val === 'dashboard') {
+      pushAdminNav();
       showView('vDash');
       initDash();
     } else if (val === 'admin_new_salon') {
+      pushAdminNav();
       showView('vDash');
       initDash();
       showSec('saloni');
@@ -3395,6 +3427,7 @@ async function boot(){
       doLogout();
     } else if (val.startsWith('nav_')) {
       const sec = val.replace('nav_', '');
+      pushAdminNav();
       showView('vDash');
       initDash();
       showSec(sec);
