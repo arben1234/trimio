@@ -1,5 +1,5 @@
 import webPush from 'web-push';
-import { getAllBookings, hsetBooking } from '../lib/kv.js';
+import { getAllBookings, hsetBooking, getSalonsDb } from '../lib/kv.js';
 
 const VAPID_PUBLIC_KEY = 'BLLKr1SroPRHybfSN2OunQUzy6yd5hggq2fmAmT90LL32Pgyaa_VkoESjUq3DGk0bgD2a5tb17bSZHc2heLJXGo';
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY?.trim();
@@ -47,6 +47,7 @@ export default async function handler(req, res) {
     const dueBookings = Array.from(bookingsMap.values()).filter(
       b => b.status === 'confirmed' && b.dateISO === target && !b.reminderSent
     );
+    const salons = await getSalonsDb(kvUrl, kvToken);
 
     let subscriptions = [];
     const subResp = await fetch(`${kvUrl}/get/push_subscriptions`, { headers: { Authorization: `Bearer ${kvToken}` } });
@@ -63,11 +64,13 @@ export default async function handler(req, res) {
     let subsChanged = false;
     for (const bk of dueBookings) {
       const targets = subscriptions.filter(s => s.role === 'customer' && s.bookingId === bk.id);
+      const salon = salons.find(s => s.id === bk.salonId);
+      const firstName = (bk.name || '').trim().split(' ')[0] || 'cliente';
       for (const target of targets) {
         try {
           const payload = JSON.stringify({
             title: 'Promemoria appuntamento TRIMIO',
-            body: `Domani alle ${bk.time} da ${bk.workerName} — ${bk.service}`,
+            body: `Gentile ${firstName}! Ti ricordiamo che domani alle ore ${bk.time} hai un appuntamento prenotato con ${bk.workerName}, presso il salone ${salon ? salon.name : 'TRIMIO'}. Grazie per la fiducia!`,
             url: '/'
           });
           await webPush.sendNotification(target.subscription, payload);

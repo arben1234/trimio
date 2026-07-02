@@ -116,7 +116,7 @@ let STATE={
     workers:[
       {
         id:'w1',name:'Shqipe',username:'shqipe',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Barber & Stylist',
+        role: 'Barbiere e Parrucchiere',
         desc: 'Specialista in colorazione dei capelli, cura della barba e tagli di capelli per bambini.',
         img: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&h=150&fit=crop&crop=face',
         reviews: [
@@ -126,7 +126,7 @@ let STATE={
       },
       {
         id:'w2',name:'Klajdi',username:'klajdi',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Master Barber',
+        role: 'Maestro Barbiere',
         desc: 'Il re delle linee di precisione, della modellatura della barba e dei servizi combinati.',
         img: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face',
         reviews: [
@@ -136,7 +136,7 @@ let STATE={
       },
       {
         id:'w3',name:'Mario',username:'mario',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Senior Barber',
+        role: 'Barbiere Esperto',
         desc: 'Maestro dei tagli sfumati moderni e rasatura classica a lama libera.',
         img: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&h=150&fit=crop&crop=face',
         reviews: [
@@ -146,7 +146,7 @@ let STATE={
       },
       {
         id:'w4',name:'Francesco',username:'francesco',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Barber & Stylist',
+        role: 'Barbiere e Parrucchiere',
         desc: 'Esperto in modellatura barba scolpita e look classici maschili.',
         img: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=150&h=150&fit=crop&crop=face',
         reviews: [
@@ -156,8 +156,8 @@ let STATE={
       },
       {
         id:'w5',name:'Kristian',username:'kristian',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Senior Barber',
-        desc: 'Specialista in sfumature estreme (skin fade) e hair design artistico.',
+        role: 'Barbiere Esperto',
+        desc: 'Specialista in sfumature estreme e acconciature artistiche.',
         img: 'https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?w=150&h=150&fit=crop&crop=face',
         reviews: [
           {rating: 5, author: 'Pietro S.', comment: 'Ottimo servizio, molto pulito e cordiale.', date: '2026-06-14'}
@@ -176,7 +176,7 @@ let STATE={
     workers:[
       {
         id:'w_mil_1',name:'Luca',username:'luca',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Barber & Stylist',
+        role: 'Barbiere e Parrucchiere',
         desc: 'Specialista in colorazione dei capelli, cura della barba e tagli di capelli per bambini.',
         img: 'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=150&h=150&fit=crop&crop=face',
         reviews: [
@@ -186,7 +186,7 @@ let STATE={
       },
       {
         id:'w_mil_2',name:'Marco',username:'marco',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Master Barber',
+        role: 'Maestro Barbiere',
         desc: 'Il re delle linee di precisione, della modellatura della barba e dei servizi combinati.',
         img: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150&h=150&fit=crop&crop=face',
         reviews: [
@@ -195,8 +195,8 @@ let STATE={
       },
       {
         id:'w_mil_3',name:'Andrea',username:'andrea',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Senior Barber',
-        desc: 'Maestro dei tagli sfumati moderni e del grooming maschile classico.',
+        role: 'Barbiere Esperto',
+        desc: 'Maestro dei tagli sfumati moderni e della cura maschile classica.',
         img: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150&h=150&fit=crop&crop=face',
         reviews: [
           {rating: 5, author: 'Stefano T.', comment: 'Sempre cordiale ed estremamente professionale.', date: '2026-06-19'}
@@ -204,7 +204,7 @@ let STATE={
       },
       {
         id:'w_mil_4',name:'Matteo',username:'matteo',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Barber & Stylist',
+        role: 'Barbiere e Parrucchiere',
         desc: 'Esperto in rasatura tradizionale con panno caldo e modellatura barba.',
         img: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&h=150&fit=crop&crop=face',
         reviews: [
@@ -224,7 +224,7 @@ let STATE={
     workers:[
       {
         id:'w_rom_1',name:'Giuseppe',username:'giuseppe',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Master Barber',
+        role: 'Maestro Barbiere',
         desc: 'Il re delle linee di precisione, della modellatura della barba e dei servizi combinati.',
         img: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=150&h=150&fit=crop&crop=face',
         reviews: [
@@ -233,7 +233,7 @@ let STATE={
       },
       {
         id:'w_rom_2',name:'Francesco',username:'francesco_r',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Barber & Stylist',
+        role: 'Barbiere e Parrucchiere',
         desc: 'Specialista in colorazione dei capelli, cura della barba e tagli di capelli per bambini.',
         img: 'https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?w=150&h=150&fit=crop&crop=face',
         reviews: [
@@ -242,7 +242,7 @@ let STATE={
       },
       {
         id:'w_rom_3',name:'Roberto',username:'roberto',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Senior Barber',
+        role: 'Barbiere Esperto',
         desc: 'Creatore di look contemporanei, specializzato in sfumature ad alta precisione.',
         img: 'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=150&h=150&fit=crop&crop=face',
         reviews: [
@@ -251,7 +251,7 @@ let STATE={
       },
       {
         id:'w_rom_4',name:'Antonio',username:'antonio',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Barber & Stylist',
+        role: 'Barbiere e Parrucchiere',
         desc: 'Esperto di stile classico italiano e trattamenti rivitalizzanti per capelli.',
         img: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150&h=150&fit=crop&crop=face',
         reviews: [
@@ -271,7 +271,7 @@ let STATE={
     workers:[
       {
         id:'w_fir_1',name:'Lorenzo',username:'lorenzo',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Master Barber',
+        role: 'Maestro Barbiere',
         desc: 'Il re delle linee di precisione, della modellatura della barba e dei servizi combinati.',
         img: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150&h=150&fit=crop&crop=face',
         reviews: [
@@ -280,7 +280,7 @@ let STATE={
       },
       {
         id:'w_fir_2',name:'Giovanni',username:'giovanni',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Barber & Stylist',
+        role: 'Barbiere e Parrucchiere',
         desc: 'Specialista in colorazione dei capelli, cura della barba e tagli di capelli per bambini.',
         img: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face',
         reviews: [
@@ -289,7 +289,7 @@ let STATE={
       },
       {
         id:'w_fir_3',name:'Filippo',username:'filippo',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Senior Barber',
+        role: 'Barbiere Esperto',
         desc: 'Esperto di tagli moderni texturizzati e rasature tradizionali.',
         img: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&h=150&fit=crop&crop=face',
         reviews: [
@@ -298,7 +298,7 @@ let STATE={
       },
       {
         id:'w_fir_4',name:'Simone',username:'simone',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Barber & Stylist',
+        role: 'Barbiere e Parrucchiere',
         desc: 'Maestro nella cura della barba e acconciature su misura.',
         img: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=150&h=150&fit=crop&crop=face',
         reviews: [
@@ -318,42 +318,42 @@ let STATE={
     workers:[
       {
         id:'w_nap_1',name:'Vincenzo',username:'vincenzo',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Master Barber',
+        role: 'Maestro Barbiere',
         desc: 'Il re delle linee di precisione, della modellatura della barba e dei servizi combinati.',
         img: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&h=150&fit=crop&crop=face',
         reviews: [{rating: 5, author: 'Luca S.', comment: 'Vincenzo è bravissimo, sfumature perfette.', date: '2026-06-20'}]
       },
       {
         id:'w_nap_2',name:'Gennaro',username:'gennaro',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Senior Barber',
+        role: 'Barbiere Esperto',
         desc: 'Specialista in colorazione dei capelli, cura della barba e tagli di capelli per bambini.',
         img: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face',
         reviews: [{rating: 5, author: 'Marco T.', comment: 'Ottimo servizio, molto attento ai dettagli.', date: '2026-06-21'}]
       },
       {
         id:'w_nap_3',name:'Pasquale',username:'pasquale',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Barber & Stylist',
-        desc: 'Maestro dei tagli sfumati moderni e del grooming maschile classico.',
+        role: 'Barbiere e Parrucchiere',
+        desc: 'Maestro dei tagli sfumati moderni e della cura maschile classica.',
         img: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=150&h=150&fit=crop&crop=face',
         reviews: [{rating: 4, author: 'Ciro A.', comment: 'Taglio pulito, barbiere molto simpatico.', date: '2026-06-22'}]
       },
       {
         id:'w_nap_4',name:'Salvatore',username:'salvatore',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Senior Barber',
+        role: 'Barbiere Esperto',
         desc: 'Esperto in rasatura tradizionale con panno caldo e modellatura barba.',
         img: 'https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?w=150&h=150&fit=crop&crop=face',
         reviews: [{rating: 5, author: 'Peppe F.', comment: 'Servizio barba eccellente, rilassante.', date: '2026-06-24'}]
       },
       {
         id:'w_nap_5',name:'Ciro',username:'ciro',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Barber & Stylist',
+        role: 'Barbiere e Parrucchiere',
         desc: 'Creatore di look contemporanei, specializzato in sfumature ad alta precisione.',
         img: 'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=150&h=150&fit=crop&crop=face',
         reviews: [{rating: 5, author: 'Fabio V.', comment: 'Ciro sa sempre consigliarti lo stile adatto.', date: '2026-06-25'}]
       },
       {
         id:'w_nap_6',name:'Diego',username:'diego',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Senior Barber',
+        role: 'Barbiere Esperto',
         desc: 'Esperto di stile classico italiano e trattamenti rivitalizzanti per capelli.',
         img: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150&h=150&fit=crop&crop=face',
         reviews: [{rating: 5, author: 'Raffaele M.', comment: 'Panno caldo e barba fantastici. Consigliatissimo.', date: '2026-06-26'}]
@@ -371,42 +371,42 @@ let STATE={
     workers:[
       {
         id:'w_tor_1',name:'Alessandro',username:'alessandro',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Master Barber',
+        role: 'Maestro Barbiere',
         desc: 'Il re delle linee di precisione, della modellatura della barba e dei servizi combinati.',
         img: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150&h=150&fit=crop&crop=face',
         reviews: [{rating: 5, author: 'Alberto B.', comment: 'Il top a Torino, linee pulitissime.', date: '2026-06-19'}]
       },
       {
         id:'w_tor_2',name:'Davide',username:'davide',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Senior Barber',
+        role: 'Barbiere Esperto',
         desc: 'Specialista in colorazione dei capelli, cura della barba e tagli di capelli per bambini.',
         img: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face',
         reviews: [{rating: 5, author: 'Claudio Z.', comment: 'Molto bravo con i bambini, paziente e preciso.', date: '2026-06-20'}]
       },
       {
         id:'w_tor_3',name:'Federico',username:'federico',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Barber & Stylist',
-        desc: 'Maestro dei tagli sfumati moderni e del grooming maschile classico.',
+        role: 'Barbiere e Parrucchiere',
+        desc: 'Maestro dei tagli sfumati moderni e della cura maschile classica.',
         img: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&h=150&fit=crop&crop=face',
         reviews: [{rating: 4, author: 'Piero G.', comment: 'Ottima cura del cliente e ambiente rilassante.', date: '2026-06-22'}]
       },
       {
         id:'w_tor_4',name:'Giorgio',username:'giorgio',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Senior Barber',
+        role: 'Barbiere Esperto',
         desc: 'Esperto in rasatura tradizionale con panno caldo e modellatura barba.',
         img: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&h=150&fit=crop&crop=face',
         reviews: [{rating: 5, author: 'Michele R.', comment: 'La rasatura panno caldo è fantastica.', date: '2026-06-23'}]
       },
       {
         id:'w_tor_5',name:'Stefano',username:'stefano',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Barber & Stylist',
+        role: 'Barbiere e Parrucchiere',
         desc: 'Creatore di look contemporanei, specializzato in sfumature ad alta precisione.',
         img: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=150&h=150&fit=crop&crop=face',
         reviews: [{rating: 5, author: 'Giacomo F.', comment: 'Sempre soddisfatto del servizio di Stefano.', date: '2026-06-24'}]
       },
       {
         id:'w_tor_6',name:'Alberto',username:'alberto',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Senior Barber',
+        role: 'Barbiere Esperto',
         desc: 'Esperto di stile classico italiano e trattamenti rivitalizzanti per capelli.',
         img: 'https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?w=150&h=150&fit=crop&crop=face',
         reviews: [{rating: 5, author: 'Lorenzo P.', comment: 'Davvero professionale, ottimi prodotti.', date: '2026-06-25'}]
@@ -424,42 +424,42 @@ let STATE={
     workers:[
       {
         id:'w_ven_1',name:'Marco',username:'marco_v',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Master Barber',
+        role: 'Maestro Barbiere',
         desc: 'Il re delle linee di precisione, della modellatura della barba e dei servizi combinati.',
         img: 'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=150&h=150&fit=crop&crop=face',
         reviews: [{rating: 5, author: 'Daniele K.', comment: 'Puntualità e precisione al massimo livello.', date: '2026-06-18'}]
       },
       {
         id:'w_ven_2',name:'Fabio',username:'fabio',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Senior Barber',
+        role: 'Barbiere Esperto',
         desc: 'Specialista in colorazione dei capelli, cura della barba e tagli di capelli per bambini.',
         img: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150&h=150&fit=crop&crop=face',
         reviews: [{rating: 5, author: 'Filippo O.', comment: 'Ottimo taglio e lozione fantastica.', date: '2026-06-20'}]
       },
       {
         id:'w_ven_3',name:'Paolo',username:'paolo',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Barber & Stylist',
-        desc: 'Maestro dei tagli sfumati moderni e del grooming maschile classico.',
+        role: 'Barbiere e Parrucchiere',
+        desc: 'Maestro dei tagli sfumati moderni e della cura maschile classica.',
         img: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150&h=150&fit=crop&crop=face',
         reviews: [{rating: 4, author: 'Andrea L.', comment: 'Locale stupendo e servizio rapido.', date: '2026-06-22'}]
       },
       {
         id:'w_ven_4',name:'Pietro',username:'pietro_v',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Senior Barber',
+        role: 'Barbiere Esperto',
         desc: 'Esperto in rasatura tradizionale con panno caldo e modellatura barba.',
         img: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face',
         reviews: [{rating: 5, author: 'Max T.', comment: 'Il trattamento barba di Pietro è eccezionale.', date: '2026-06-23'}]
       },
       {
         id:'w_ven_5',name:'Matteo',username:'matteo_v',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Barber & Stylist',
+        role: 'Barbiere e Parrucchiere',
         desc: 'Creatore di look contemporanei, specializzato in sfumature ad alta precisione.',
         img: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&h=150&fit=crop&crop=face',
         reviews: [{rating: 5, author: 'Christian D.', comment: 'Taglio moderno impeccabile, consigliato.', date: '2026-06-25'}]
       },
       {
         id:'w_ven_6',name:'Giovanni',username:'giovanni_v',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Senior Barber',
+        role: 'Barbiere Esperto',
         desc: 'Esperto di stile classico italiano e trattamenti rivitalizzanti per capelli.',
         img: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=150&h=150&fit=crop&crop=face',
         reviews: [{rating: 5, author: 'Stefano M.', comment: 'Molto professionale, consigliatissimo.', date: '2026-06-26'}]
@@ -477,42 +477,42 @@ let STATE={
     workers:[
       {
         id:'w_bol_1',name:'Filippo',username:'filippo_b',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Master Barber',
+        role: 'Maestro Barbiere',
         desc: 'Il re delle linee di precisione, della modellatura della barba e dei servizi combinati.',
         img: 'https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?w=150&h=150&fit=crop&crop=face',
         reviews: [{rating: 5, author: 'Renato F.', comment: 'Grandissima tecnica con le forbici.', date: '2026-06-18'}]
       },
       {
         id:'w_bol_2',name:'Andrea',username:'andrea_b',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Senior Barber',
+        role: 'Barbiere Esperto',
         desc: 'Specialista in colorazione dei capelli, cura della barba e tagli di capelli per bambini.',
         img: 'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=150&h=150&fit=crop&crop=face',
         reviews: [{rating: 5, author: 'Sofia U.', comment: 'Mio figlio adora farsi tagliare i capelli da Andrea.', date: '2026-06-20'}]
       },
       {
         id:'w_bol_3',name:'Nicola',username:'nicola',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Barber & Stylist',
-        desc: 'Maestro dei tagli sfumati moderni e del grooming maschile classico.',
+        role: 'Barbiere e Parrucchiere',
+        desc: 'Maestro dei tagli sfumati moderni e della cura maschile classica.',
         img: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150&h=150&fit=crop&crop=face',
         reviews: [{rating: 4, author: 'Giorgio T.', comment: 'Ottimo taglio e servizio impeccabile.', date: '2026-06-22'}]
       },
       {
         id:'w_bol_4',name:'Riccardo',username:'riccardo',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Senior Barber',
+        role: 'Barbiere Esperto',
         desc: 'Esperto in rasatura tradizionale con panno caldo e modellatura barba.',
         img: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150&h=150&fit=crop&crop=face',
         reviews: [{rating: 5, author: 'Domenico A.', comment: 'Panno caldo eccezionale, un vero relax.', date: '2026-06-24'}]
       },
       {
         id:'w_bol_5',name:'Christian',username:'christian',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Barber & Stylist',
+        role: 'Barbiere e Parrucchiere',
         desc: 'Creatore di look contemporanei, specializzato in sfumature ad alta precisione.',
         img: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face',
         reviews: [{rating: 5, author: 'Federico M.', comment: 'Christian è bravissimo, sfocatura favolosa.', date: '2026-06-25'}]
       },
       {
         id:'w_bol_6',name:'Tommaso',username:'tommaso',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Senior Barber',
+        role: 'Barbiere Esperto',
         desc: 'Esperto di stile classico italiano e trattamenti rivitalizzanti per capelli.',
         img: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&h=150&fit=crop&crop=face',
         reviews: [{rating: 5, author: 'Enzo G.', comment: 'Prodotti di qualità e servizio super.', date: '2026-06-26'}]
@@ -530,42 +530,42 @@ let STATE={
     workers:[
       {
         id:'w_pal_1',name:'Antonio',username:'antonio_p',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Master Barber',
+        role: 'Maestro Barbiere',
         desc: 'Il re delle linee di precisione, della modellatura della barba e dei servizi combinati.',
         img: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=150&h=150&fit=crop&crop=face',
         reviews: [{rating: 5, author: 'Rosario I.', comment: 'Sempre cordiale, taglio perfetto.', date: '2026-06-18'}]
       },
       {
         id:'w_pal_2',name:'Salvatore',username:'salvatore_p',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Senior Barber',
+        role: 'Barbiere Esperto',
         desc: 'Specialista in colorazione dei capelli, cura della barba e tagli di capelli per bambini.',
         img: 'https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?w=150&h=150&fit=crop&crop=face',
         reviews: [{rating: 5, author: 'Carmelo G.', comment: 'Il mio barbiere preferito a Palermo.', date: '2026-06-20'}]
       },
       {
         id:'w_pal_3',name:'Giuseppe',username:'giuseppe_p',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Barber & Stylist',
-        desc: 'Maestro dei tagli sfumati moderni e del grooming maschile classico.',
+        role: 'Barbiere e Parrucchiere',
+        desc: 'Maestro dei tagli sfumati moderni e della cura maschile classica.',
         img: 'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=150&h=150&fit=crop&crop=face',
         reviews: [{rating: 4, author: 'Dario P.', comment: 'Precisione impeccabile con macchinetta.', date: '2026-06-22'}]
       },
       {
         id:'w_pal_4',name:'Francesco',username:'francesco_p',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Senior Barber',
+        role: 'Barbiere Esperto',
         desc: 'Esperto in rasatura tradizionale con panno caldo e modellatura barba.',
         img: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150&h=150&fit=crop&crop=face',
         reviews: [{rating: 5, author: 'Vincenzo B.', comment: 'Panno caldo spettacolare e mani d\'oro.', date: '2026-06-24'}]
       },
       {
         id:'w_pal_5',name:'Roberto',username:'roberto_p',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Barber & Stylist',
+        role: 'Barbiere e Parrucchiere',
         desc: 'Creatore di look contemporanei, specializzato in sfumature ad alta precisione.',
         img: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150&h=150&fit=crop&crop=face',
         reviews: [{rating: 5, author: 'Sergio T.', comment: 'Molto bravo, sfumature curatissime.', date: '2026-06-25'}]
       },
       {
         id:'w_pal_6',name:'Calogero',username:'calogero',password:'barber123',vacFrom:'',vacTo:'',
-        role: 'Senior Barber',
+        role: 'Barbiere Esperto',
         desc: 'Esperto di stile classico italiano e trattamenti rivitalizzanti per capelli.',
         img: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face',
         reviews: [{rating: 5, author: 'Luca E.', comment: 'Ottima esperienza, consigliatissimo.', date: '2026-06-26'}]
@@ -1982,7 +1982,7 @@ let calYear=_now.getFullYear(),calMonth=_now.getMonth(),calSelISO=todayISO();
 let cliYear=_now.getFullYear(),cliMonth=_now.getMonth();
 let statsPeriod='oggi',statFrom='',statTo='';
 let editSrv=null,editWorker=null;
-let lastAdminStatsExport=null;
+let lastStatsExport=null;
 
 // Admin navigation (Homepage <-> dashboard sections <-> Nuovo Salone) is
 // routed through real URL hashes (#admin/home, #admin/saloni, #admin/stats,
@@ -2061,6 +2061,32 @@ function initDash(){
   showSec(firstSec);
 
   renderPushNotifBanner();
+  if(r==='barber') checkNewBookingsOnOpen();
+}
+
+// Shown once per dashboard entry (login / app reopen) for the barber only —
+// summarises whatever bookings were made for them since their last visit,
+// so they see it immediately instead of having to notice it passively.
+function checkNewBookingsOnOpen(){
+  if (!SESSION || SESSION.role !== 'barber' || !SESSION.workerId) return;
+  const key = 'trimio_last_check_' + SESSION.workerId;
+  let lastCheck = 0;
+  try { lastCheck = parseInt(localStorage.getItem(key) || '0', 10) || 0; } catch(e) {}
+  const now = Date.now();
+  const newOnes = STATE.bookings.filter(b =>
+    b.workerId === SESSION.workerId &&
+    b.status !== 'cancelled' &&
+    !b.isDemo &&
+    b.createdAt && new Date(b.createdAt).getTime() > lastCheck
+  );
+  if (newOnes.length > 0) {
+    const label = newOnes.length === 1 ? 'nuova prenotazione' : 'nuove prenotazioni';
+    const list = newOnes.slice(0, 5).map(b => `${b.name} · ${dayLabel(b.dateISO)} ${b.time}`).join('<br>');
+    const extra = newOnes.length > 5 ? `<br>+ altre ${newOnes.length - 5}` : '';
+    showToastNotification(`📋 Hai ${newOnes.length} ${label}:<br>${list}${extra}`);
+    playNotificationSound();
+  }
+  try { localStorage.setItem(key, String(now)); } catch(e) {}
 }
 
 function navItems(){
@@ -2262,12 +2288,16 @@ function apptCard(b,showActs){
   // "Annulla" (cancel): barber + owner. Admin does not cancel bookings.
   const canMarkDone = showActs && SESSION && (SESSION.role === 'admin' || SESSION.role === 'barber');
   const canCancel = showActs && SESSION && (SESSION.role === 'barber' || SESSION.role === 'owner');
-  const acts=(b.status==='confirmed'&&(canMarkDone||canCancel))?`<div class="acard-acts">
+  // Manual "notify client" (barber only) — on top of the automatic 24h-before
+  // reminder, lets the barber ping the client immediately if they opted in.
+  const canNotify = showActs && SESSION && SESSION.role === 'barber';
+  const acts=(b.status==='confirmed'&&(canMarkDone||canCancel||canNotify))?`<div class="acard-acts">
     ${canMarkDone?`<button class="act done" data-act="done" data-id="${b.id}">✓ Fatto</button>`:''}
-    ${canCancel?`<button class="act" data-act="cancel" data-id="${b.id}">Annulla</button>`:''}</div>`:'';
+    ${canCancel?`<button class="act" data-act="cancel" data-id="${b.id}">Annulla</button>`:''}
+    ${canNotify?`<button class="act" data-act="notify" data-id="${b.id}">🔔 Notifica</button>`:''}</div>`:'';
   const src=b.source==='online'?`<span class="tag-src">Online</span>`:'';
   const barberRow=SESSION.role!=='barber'?`<div class="acard-barber">✂️ ${b.workerName||'—'}</div>`:'';
-  const phoneRow = b.phone ? `<div class="acard-phone" style="font-size:11.5px; color:#71717a; margin-top:2px;">📞 ${b.phone}</div>` : '';
+  const phoneRow = b.phone ? `<div class="acard-phone" style="font-size:13px; font-weight:600; color:#18181b; margin-top:2px;">📞 ${b.phone}</div>` : (SESSION && SESSION.role==='barber' ? `<div class="acard-phone" style="font-size:12px; color:#bbb; margin-top:2px;">📞 Nessun numero</div>` : '');
   return`<div class="acard ${b.status==='completed'?'completed':b.status==='cancelled'?'cancelled':''}">
     <div class="acard-main">
       <div class="av">${initials(b.name)}</div>
@@ -2278,11 +2308,42 @@ function apptCard(b,showActs){
       <div class="acard-right"><div class="acard-time">${b.time}</div><div class="acard-price">€${b.price}</div></div>
     </div>${acts}</div>`;
 }
-function wireActs(c){c.querySelectorAll('.act').forEach(b=>b.addEventListener('click',()=>dashAction(b.dataset.act,b.dataset.id)));}
+function wireActs(c){c.querySelectorAll('.act').forEach(b=>b.addEventListener('click',(e)=>{
+  if(b.dataset.act==='notify'){notifyCustomerNow(b.dataset.id,b);return;}
+  dashAction(b.dataset.act,b.dataset.id);
+}));}
 async function dashAction(act,id){
   const b=STATE.bookings.find(x=>x.id===id);if(!b)return;
   b.status=act==='done'?'completed':'cancelled';
   await saveState();renderDash();renderNewBookingsPanel();
+}
+
+// Manual "notify client" button — sends an immediate push reminder for one
+// specific booking, if that client opted in on their confirmation screen.
+async function notifyCustomerNow(bookingId, btn){
+  const original=btn.textContent;
+  btn.textContent='…';btn.disabled=true;
+  try{
+    const resp=await fetch('/api/notify-customer',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({bookingId})
+    });
+    const data=await resp.json().catch(()=>({}));
+    if(data.success){
+      btn.textContent='✓ Inviato';
+      setTimeout(()=>{btn.textContent=original;btn.disabled=false;},2500);
+    }else if(data.reason==='no_subscription'){
+      btn.textContent='Cliente non iscritto';
+      setTimeout(()=>{btn.textContent=original;btn.disabled=false;},2500);
+    }else{
+      btn.textContent='Errore invio';
+      setTimeout(()=>{btn.textContent=original;btn.disabled=false;},2500);
+    }
+  }catch(e){
+    btn.textContent='Errore invio';
+    setTimeout(()=>{btn.textContent=original;btn.disabled=false;},2500);
+  }
 }
 
 /* ---- NEW BOOKINGS INBOX PANEL ---- */
@@ -2641,6 +2702,23 @@ function renderStats(){
     const svcRev={};
     served.forEach(b=>{svcRev[b.service]=(svcRev[b.service]||0)+(b.price||0);});
     html+=`<div class="chart-wrap"><div class="chart-title">Incasso per servizio (€, solo serviti)</div><div class="bar-chart">${barChart(svcRev,'green')}</div></div>`;
+
+    // Tabella riepilogativa per barbiere: periodo | barbiere | clienti serviti | incasso
+    const workerRows=salon.workers.map(w=>{
+      const wServed=served.filter(b=>b.workerId===w.id);
+      const wRevTot=wServed.reduce((sum,b)=>sum+(b.price||0),0);
+      return {name:w.name, count:wServed.length, rev:wRevTot};
+    });
+    html+=`<div class="chart-wrap">
+      <div class="chart-title">Riepilogo per barbiere</div>
+      ${statsTableHtml('Barbiere', workerRows, served.length, servedRev)}
+    </div>`;
+
+    lastStatsExport={
+      title:salon.name,
+      subtitle:`Riepilogo statistiche · ${periodLabel()}`,
+      colLabel:'Barbiere', rows:workerRows, servedCount:served.length, servedRev, period:periodLabel()
+    };
   }
 
   $('statsContent').innerHTML=html;
@@ -2683,12 +2761,29 @@ function renderAdminStats(){
   });
   html+=`<div class="chart-wrap">
     <div class="chart-title">Riepilogo per salone</div>
+    ${statsTableHtml('Salone', rows, served.length, servedRev)}
+  </div>`;
+
+  $('statsContent').innerHTML=html;
+
+  // Kept for the export/print button (event-delegated, wired once in boot()).
+  lastStatsExport={
+    title:'TRIMIO',
+    subtitle:`Riepilogo statistiche · Tutti i saloni · ${periodLabel()}`,
+    colLabel:'Salone', rows, servedCount:served.length, servedRev, period:periodLabel()
+  };
+}
+
+// Shared table markup for the admin (per-salone) and owner (per-barbiere)
+// statistics exports — only the column label and row data differ.
+function statsTableHtml(colLabel, rows, servedCount, servedRev){
+  return `
     <button type="button" class="stats-export-btn" id="statsExportBtn">📄 Esporta PDF / Stampa</button>
     <div style="overflow-x:auto;">
     <table style="width:100%;border-collapse:collapse;font-size:12.5px;">
       <thead><tr style="border-bottom:2px solid #e4e4e7;text-align:left;">
         <th style="padding:8px 6px;font-weight:800;color:#71717a;">Periodo</th>
-        <th style="padding:8px 6px;font-weight:800;color:#71717a;">Salone</th>
+        <th style="padding:8px 6px;font-weight:800;color:#71717a;">${colLabel}</th>
         <th style="padding:8px 6px;font-weight:800;color:#71717a;text-align:right;">Clienti serviti</th>
         <th style="padding:8px 6px;font-weight:800;color:#71717a;text-align:right;">Incasso (€)</th>
       </tr></thead>
@@ -2702,32 +2797,29 @@ function renderAdminStats(){
         <tr style="border-top:2px solid #e4e4e7;font-weight:800;">
           <td style="padding:8px 6px;"></td>
           <td style="padding:8px 6px;">Totale</td>
-          <td style="padding:8px 6px;text-align:right;">${served.length}</td>
+          <td style="padding:8px 6px;text-align:right;">${servedCount}</td>
           <td style="padding:8px 6px;text-align:right;color:#16a34a;">€${servedRev}</td>
         </tr>
       </tbody>
     </table>
-    </div>
-  </div>`;
-
-  $('statsContent').innerHTML=html;
-
-  // Kept for the export/print button (event-delegated, wired once in boot()).
-  lastAdminStatsExport={rows,servedCount:served.length,servedRev,period:periodLabel()};
+    </div>`;
 }
 
-function printAdminStats(){
-  const d=lastAdminStatsExport;
+// Shared PDF/print builder for both the admin (per-salone) and owner
+// (per-barbiere) statistics tables — d.colLabel/d.title differ, everything
+// else about the layout is identical.
+function printStatsExport(){
+  const d=lastStatsExport;
   const target=$('printableStats');
   if(!d||!target)return;
   target.innerHTML=`
     <div class="ps-header">
-      <div class="ps-title">TRIMIO</div>
-      <div class="ps-sub">Riepilogo statistiche · Tutti i saloni · ${d.period}</div>
+      <div class="ps-title">${d.title}</div>
+      <div class="ps-sub">${d.subtitle}</div>
     </div>
     <table>
       <thead><tr>
-        <th>Periodo</th><th>Salone</th><th style="text-align:right">Clienti serviti</th><th style="text-align:right">Incasso (€)</th>
+        <th>Periodo</th><th>${d.colLabel}</th><th style="text-align:right">Clienti serviti</th><th style="text-align:right">Incasso (€)</th>
       </tr></thead>
       <tbody>
         ${d.rows.map(row=>`<tr>
@@ -3618,7 +3710,7 @@ async function boot(){
     if(curSec==='stats')renderStats();
   });
   $('statsContent')?.addEventListener('click',(e)=>{
-    if(e.target.closest('#statsExportBtn'))printAdminStats();
+    if(e.target.closest('#statsExportBtn'))printStatsExport();
   });
 
   // hash change
