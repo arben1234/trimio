@@ -1803,6 +1803,9 @@ function initDash(){
   $('sideAv').textContent=initials(SESSION.name);
   $('sideProfName').textContent=SESSION.name;
 
+  const qrBtn=$('sideQrBtn');
+  if(qrBtn) qrBtn.style.display=(r==='owner'&&salon)?'block':'none';
+
   // build nav per ruolo
   buildNav();
 
@@ -1983,9 +1986,12 @@ function renderOggi(){
   if(SESSION.role==='barber')bks=bks.filter(b=>b.workerId===SESSION.workerId);
   bks.sort((a,b)=>a.time.localeCompare(b.time));
   const wait=bks.filter(b=>b.status!=='completed');
+  const served=bks.filter(b=>b.status==='completed');
   $('kIncasso').textContent='€'+bks.reduce((s,b)=>s+(b.price||0),0);
   $('kAppt').textContent=bks.length;
   $('kWait').textContent=wait.length;
+  if($('kIncassoServito'))$('kIncassoServito').textContent='€'+served.reduce((s,b)=>s+(b.price||0),0);
+  if($('kApptServiti'))$('kApptServiti').textContent=served.length;
 
   // LIVELLO 2: banner con stato real-time
   if(SESSION.role==='owner'){
@@ -2022,11 +2028,13 @@ function renderOggi(){
 
 /* LIVELLO 2: vede il barbiere nella card; LIVELLO 3: non lo vede */
 function apptCard(b,showActs){
-  // Owner and barber roles have no right of confirmation/annullment, only admin can perform actions
-  const showActsAllowed = showActs && SESSION && SESSION.role === 'admin';
-  const acts=(showActsAllowed&&b.status==='confirmed')?`<div class="acard-acts">
-    <button class="act done" data-act="done" data-id="${b.id}">✓ Fatto</button>
-    <button class="act" data-act="cancel" data-id="${b.id}">Annulla</button></div>`:'';
+  // "Fatto" (mark service as completed/arrived): barber + admin.
+  // "Annulla" (cancel): barber + owner. Admin does not cancel bookings.
+  const canMarkDone = showActs && SESSION && (SESSION.role === 'admin' || SESSION.role === 'barber');
+  const canCancel = showActs && SESSION && (SESSION.role === 'barber' || SESSION.role === 'owner');
+  const acts=(b.status==='confirmed'&&(canMarkDone||canCancel))?`<div class="acard-acts">
+    ${canMarkDone?`<button class="act done" data-act="done" data-id="${b.id}">✓ Fatto</button>`:''}
+    ${canCancel?`<button class="act" data-act="cancel" data-id="${b.id}">Annulla</button>`:''}</div>`:'';
   const src=b.source==='online'?`<span class="tag-src">Online</span>`:'';
   const barberRow=SESSION.role!=='barber'?`<div class="acard-barber">✂️ ${b.workerName||'—'}</div>`:'';
   const phoneRow = b.phone ? `<div class="acard-phone" style="font-size:11.5px; color:#71717a; margin-top:2px;">📞 ${b.phone}</div>` : '';
@@ -2361,6 +2369,15 @@ function renderStats(){
   const monthRev=monthBks.reduce((s,b)=>s+(b.price||0),0);
   const yearRev=yearBks.reduce((s,b)=>s+(b.price||0),0);
 
+  // Servizi realmente erogati (solo status "completed" — confermati dal barbiere come "Fatto")
+  const servedAll=allBks.filter(b=>b.status==='completed');
+  const servedFiltered=filterByPeriod(servedAll);
+  const servedMonth=servedAll.filter(b=>b.dateISO>=monthISO);
+  const servedYear=servedAll.filter(b=>b.dateISO>=yearISO);
+  const servedRevPeriod=servedFiltered.reduce((s,b)=>s+(b.price||0),0);
+  const servedRevMonth=servedMonth.reduce((s,b)=>s+(b.price||0),0);
+  const servedRevYear=servedYear.reduce((s,b)=>s+(b.price||0),0);
+
   let html=`<div class="kpi-row">
     ${kpiBox(filtered.length,'Clienti (periodo)')}
     ${kpiBox('€'+totRev,'Incasso (periodo)','green')}
@@ -2372,6 +2389,19 @@ function renderStats(){
   <div class="kpi-row">
     ${kpiBox(yearBks.length,'Clienti anno','amber')}
     ${kpiBox('€'+yearRev,'Incasso anno','amber')}
+  </div>
+  <div class="chart-title" style="margin-top:18px;">Servizi realmente erogati (confermati)</div>
+  <div class="kpi-row">
+    ${kpiBox(servedFiltered.length,'Clienti serviti (periodo)','green')}
+    ${kpiBox('€'+servedRevPeriod,'Incasso reale (periodo)','green')}
+  </div>
+  <div class="kpi-row">
+    ${kpiBox(servedMonth.length,'Serviti mese','green')}
+    ${kpiBox('€'+servedRevMonth,'Incasso reale mese','green')}
+  </div>
+  <div class="kpi-row">
+    ${kpiBox(servedYear.length,'Serviti anno','green')}
+    ${kpiBox('€'+servedRevYear,'Incasso reale anno','green')}
   </div>`;
 
   // Per barbiere (solo owner)
@@ -2418,6 +2448,10 @@ function renderAdminStats(){
   const sMap={};STATE.salons.forEach(s=>{sMap[s.name]=filtered.filter(b=>b.salonId===s.id).length;});
   const wCount=STATE.salons.reduce((s,x)=>s+x.workers.length,0);
 
+  // Servizi realmente erogati (solo status "completed")
+  const servedFiltered=filtered.filter(b=>b.status==='completed');
+  const servedRev=servedFiltered.reduce((s,b)=>s+(b.price||0),0);
+
   let html=`<div class="kpi-row">
     ${kpiBox(STATE.salons.length,'Saloni attivi')}
     ${kpiBox(wCount,'Dipendenti totali','blue')}
@@ -2425,6 +2459,10 @@ function renderAdminStats(){
   <div class="kpi-row">
     ${kpiBox(filtered.length,'Prenotazioni (periodo)','amber')}
     ${kpiBox('€'+totRev,'Incasso (periodo)','green')}
+  </div>
+  <div class="kpi-row">
+    ${kpiBox(servedFiltered.length,'Serviti (periodo)','green')}
+    ${kpiBox('€'+servedRev,'Incasso reale (periodo)','green')}
   </div>
   <div class="chart-wrap"><div class="chart-title">Prenotazioni per salone</div><div class="bar-chart">${barChart(sMap)}</div></div>`;
 
@@ -3337,6 +3375,15 @@ async function boot(){
       pushBtn.textContent = '…';
       await initPushNotifications();
       await renderPushNotifBanner();
+    });
+  }
+
+  // Wire owner sidebar QR code button
+  const qrBtnEl = $('sideQrBtn');
+  if (qrBtnEl) {
+    qrBtnEl.addEventListener('click', () => {
+      const salon = getSalon();
+      if (salon) showSalonQRCode(salon.slug);
     });
   }
 
