@@ -1681,7 +1681,7 @@ function updateNavMenu() {
     } else {
       menu.style.display = '';
       menu.innerHTML = `
-        <option value="" disabled selected>👤 Admin</option>
+        <option value="" disabled selected>☰ Menu</option>
         <option value="nav_saloni">🏪 Gestione Saloni</option>
         <option value="admin_new_salon">➕ Nuovo Salone</option>
         <option value="nav_stats">📊 Statistiche</option>
@@ -3388,6 +3388,7 @@ async function boot(){
       initDash();
     } else if (val === 'admin_new_salon') {
       showView('vDash');
+      initDash();
       showSec('saloni');
       openSalonModal('new');
     } else if (val === 'logout') {
@@ -3395,6 +3396,7 @@ async function boot(){
     } else if (val.startsWith('nav_')) {
       const sec = val.replace('nav_', '');
       showView('vDash');
+      initDash();
       showSec(sec);
     }
   });

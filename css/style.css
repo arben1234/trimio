@@ -898,7 +898,8 @@ body{background:#f1f5f9;min-height:100vh;display:flex;align-items:center;justify
   outline: none;
   font-family: inherit;
   transition: all 0.2s ease;
-  max-width: 155px;
+  max-width: 210px;
+  min-width: 130px;
   -webkit-appearance: none;
   -moz-appearance: none;
   appearance: none;
