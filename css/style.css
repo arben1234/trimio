@@ -72,11 +72,11 @@ body{background:#f1f5f9;min-height:100vh;display:flex;align-items:center;justify
 /* ── Hero ── */
 .hp-hero{
   position:relative;overflow:hidden;
-  min-height:280px;display:flex;flex-direction:column;
+  min-height:400px;display:flex;flex-direction:column;
   align-items:center;justify-content:center;
-  text-align:center;padding:40px 24px 32px;
+  text-align:center;padding:48px 24px 40px;
   background:#09090b;color:#fff;
-  border-radius:0 0 28px 28px;margin-bottom:28px;
+  border-radius:0 0 40px 40px;margin-bottom:28px;
   border-bottom:1px solid #27272a;
 }
 .hp-hero::before{
@@ -125,7 +125,7 @@ body{background:#f1f5f9;min-height:100vh;display:flex;align-items:center;justify
 
 /* card top strip */
 .hsc-strip{
-  height:6px;background:linear-gradient(90deg,#000,#333);
+  height:10px;background:linear-gradient(90deg,#000,#333);
 }
 .hsc-body{padding:18px 18px 6px;}
 
@@ -1108,18 +1108,106 @@ body{
 }
 .alt-title{position:relative;padding-bottom:10px;}
 
-/* ---- Login: a touch of atmosphere behind an otherwise plain form ---- */
-#vLogin{position:relative;padding-top:6px;}
-#vLogin::before{
-  content:'';position:absolute;top:-24px;left:50%;transform:translateX(-50%);
-  width:300px;height:220px;
-  background:radial-gradient(circle, rgba(229,193,88,.16) 0%, transparent 70%);
-  pointer-events:none;z-index:0;
+/* ================================================================
+   TRIMIO — BOLD REDESIGN v3.0 (mobile-first, always-visible impact)
+   v2.0 leaned on :hover and on the <body> background — both are
+   invisible on a real phone (no hover on touch, and .app covers the
+   whole screen). This pass puts every effect into the *resting* and
+   *tap* states inside .app itself, and goes bigger/bolder overall.
+================================================================ */
+
+/* ---- Typography: bigger, bolder headings everywhere ---- */
+.title{font-size:23px;font-weight:800;letter-spacing:-.4px;}
+.sec-h{font-size:20px;}
+.hp-sec-title{font-size:12px;letter-spacing:2px;position:relative;padding-left:16px;}
+.hp-sec-title::before{
+  content:'';position:absolute;left:0;top:50%;transform:translateY(-50%);
+  width:8px;height:8px;border-radius:50%;
+  background:linear-gradient(135deg,var(--gold),var(--gold-dark));
+}
+
+/* ---- Buttons: resting-state gold presence + tap feedback (no hover needed) ---- */
+.btn{padding:17px;border-radius:16px;font-size:15.5px;}
+.btn-main{
+  border:1.5px solid rgba(229,193,88,.45) !important;
+  box-shadow:0 10px 26px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.08);
+}
+.btn-main:active{transform:scale(.96);box-shadow:0 4px 12px rgba(229,193,88,.3);}
+
+/* ---- Homepage hero: animated shimmer + pulsing gold ring around the mark ---- */
+.hp-hero::after{
+  content:'';position:absolute;inset:-40%;z-index:1;pointer-events:none;
+  background:conic-gradient(from 0deg, transparent 0%, rgba(229,193,88,.12) 8%, transparent 16%);
+  animation:heroSpin 9s linear infinite;
+}
+@keyframes heroSpin{to{transform:rotate(360deg);}}
+.hp-hero-content img{border-radius:50%;animation:ringPulse 2.6s ease-in-out infinite;}
+@keyframes ringPulse{
+  0%,100%{box-shadow:0 0 0 0 rgba(229,193,88,.45), 0 8px 32px rgba(0,0,0,.8);}
+  50%{box-shadow:0 0 0 14px rgba(229,193,88,0), 0 8px 32px rgba(0,0,0,.8);}
+}
+.hp-count{
+  background:linear-gradient(135deg,var(--gold),var(--gold-dark)) !important;
+  border-color:transparent !important;color:#0a0a0c !important;font-weight:800;
+  box-shadow:0 8px 20px rgba(229,193,88,.35);
+}
+
+/* ---- Salon cards: bold resting state — no hover needed to notice ---- */
+.hp-salon-card{
+  border:1.5px solid rgba(229,193,88,.22) !important;
+  box-shadow:0 4px 16px rgba(0,0,0,.06), 0 16px 40px rgba(0,0,0,.08);
+}
+.hp-salon-card:active{transform:scale(.98);}
+.hsc-open-btn:active{transform:scale(.97);}
+
+/* ---- Booking-flow selection: bolder resting glow on the chosen option ---- */
+.barber-card.sel,.chip.sel,.slot.sel,.svc-item.sel{
+  border-width:2px;
+  box-shadow:0 10px 26px rgba(229,193,88,.3);
+}
+
+/* ---- Dashboard: bigger headline numbers, punchier accents ---- */
+.d-ttl h2{font-size:21px;}
+.kpi-big{padding:20px 22px;}
+.kpi-big .v{font-size:42px;}
+.acard{border-left-width:5px;}
+.side-item.active{transform:scale(1.02);}
+.act:active,.iconbtn:active,.filter-tab:active{transform:scale(.94);}
+
+/* ---- Login / staff access: full dark branded takeover ----
+   This used to be a plain white form under the black header — now
+   the whole screen continues the same black+gold identity, with a
+   gold headline CTA so "Accedi" is unmistakably the hero action. */
+#vLogin{
+  position:relative;
+  margin:-24px -24px 0;
+  padding:52px 24px 40px;
+  min-height:78vh;
+  background:
+    radial-gradient(circle at 25% 0%, rgba(229,193,88,.28) 0%, transparent 55%),
+    linear-gradient(165deg,#0a0a0c 0%,#1c1c20 60%,#0a0a0c 100%);
+  border-radius:0 0 36px 36px;
+  color:#fff;
 }
 #vLogin .title,#vLogin .login{position:relative;z-index:1;}
-#vLogin .title{padding-bottom:12px;margin-bottom:26px;position:relative;}
+#vLogin .title{color:#fff;font-size:26px;padding-bottom:12px;margin-bottom:26px;position:relative;}
 #vLogin .title::after{
   content:'';position:absolute;left:0;bottom:0;width:38px;height:3px;border-radius:3px;
   background:linear-gradient(90deg,var(--gold),var(--gold-dark));
 }
-#vLogin .field label{color:var(--gold-dark);}
+#vLogin .field label{color:var(--gold);font-weight:700;}
+#vLogin .field input{
+  background:rgba(255,255,255,.07);
+  border:1.5px solid rgba(255,255,255,.16);
+  color:#fff;
+}
+#vLogin .field input::placeholder{color:rgba(255,255,255,.35);}
+#vLogin .field input:focus{background:rgba(255,255,255,.11);}
+#vLogin .link{color:rgba(255,255,255,.55);}
+#vLogin .err{background:rgba(239,68,68,.16);color:#fca5a5;}
+#vLogin .btn-main{
+  background:linear-gradient(135deg,var(--gold-light),var(--gold) 60%,var(--gold-dark)) !important;
+  color:#0a0a0c !important;
+  border-color:transparent !important;
+  box-shadow:0 12px 32px rgba(229,193,88,.4);
+}
