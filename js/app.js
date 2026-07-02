@@ -1721,7 +1721,10 @@ function showView(view){
   $('gear').style.display='none';
   updateNavMenu();
   const hBack = $('hBack');
-  if (hBack) hBack.style.display = isHome ? 'none' : 'flex';
+  // Hidden on Homepage (the admin landing page — nothing to go "back" to)
+  // and on the login screen (its back arrow fell through to browser
+  // history.back(), which could land on an unrelated external page).
+  if (hBack) hBack.style.display = (isHome || isLogin) ? 'none' : 'flex';
   
   // Reset window scroll position to the top of the page on view switch
   window.scrollTo(0, 0);
@@ -1745,10 +1748,15 @@ let loginSalonContext = null;
 function onLoginSuccess() {
   clearErr('lErr');
   $('lpw').value = '';
-  // Admin lands on the dashboard too (same as owner/barber) — the sidebar is
-  // the only navigation for admin now, and it isn't reachable from vHome.
-  showView('vDash');
-  initDash();
+  // Admin lands on the public Homepage by default; the header dropdown's
+  // "Vai alla Dashboard" option (shown whenever admin is outside the
+  // dashboard) is the way in from there, so this is never a dead end.
+  if (SESSION && SESSION.role === 'admin') {
+    showView('vHome');
+  } else {
+    showView('vDash');
+    initDash();
+  }
   if (typeof initPushNotifications === 'function') {
     initPushNotifications();
   }
@@ -3494,9 +3502,8 @@ async function boot(){
           return;
         }
       } else {
-        // Admin session - route to dashboard (sidebar is the only nav for admin)
-        showView('vDash');
-        initDash();
+        // Admin session - route to homepage!
+        showView('vHome');
         if (typeof initPushNotifications === 'function') {
           initPushNotifications();
         }
