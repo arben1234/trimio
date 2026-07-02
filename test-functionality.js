@@ -348,23 +348,45 @@ section('doLogin() across the 4 access levels');
     `document.getElementById('lusr').value = ${JSON.stringify(usr)}; document.getElementById('lpw').value = ${JSON.stringify(pwd)};`,
     { filename: 'set-login.js' }
   ).runInContext(context);
+  const setLoginSalonContext = (id) => new vm.Script(
+    `loginSalonContext = ${id === null ? 'null' : JSON.stringify(id)};`,
+    { filename: 'set-login-salon-context.js' }
+  ).runInContext(context);
 
+  // Generic entry point (no salon context, e.g. the bare root URL) — admin only.
+  setLoginSalonContext(null);
   setLogin('admin', 'admin123');
   X.doLogin();
-  eq(X.getSession().role, 'admin', 'Level 1 — admin/admin123 authenticates as admin');
+  eq(X.getSession().role, 'admin', 'Level 1 — admin/admin123 authenticates as admin from the generic entry point');
 
   const salon0 = X.STATE.salons[0];
+  setLoginSalonContext(null);
   setLogin(salon0.ownerUsername, salon0.ownerPassword);
   X.doLogin();
   let sess = X.getSession();
-  ok(sess.role === 'owner' && sess.salonId === salon0.id, 'Level 2 — owner credentials authenticate as owner of correct salon');
+  ok(sess.role === 'admin', 'owner credentials are REJECTED from the generic entry point (still admin session from before)');
 
   const worker0 = salon0.workers[0];
+  setLoginSalonContext(null);
   setLogin(worker0.username, worker0.password);
   X.doLogin();
   sess = X.getSession();
-  ok(sess.role === 'barber' && sess.workerId === worker0.id, 'Level 3 — barber credentials authenticate as correct worker');
+  ok(sess.role === 'admin', 'barber credentials are REJECTED from the generic entry point (still admin session from before)');
 
+  // Salon-specific entry point (reached via that salon's own page) — owner/barber allowed.
+  setLoginSalonContext(salon0.id);
+  setLogin(salon0.ownerUsername, salon0.ownerPassword);
+  X.doLogin();
+  sess = X.getSession();
+  ok(sess.role === 'owner' && sess.salonId === salon0.id, 'Level 2 — owner credentials authenticate when scoped to their own salon');
+
+  setLoginSalonContext(salon0.id);
+  setLogin(worker0.username, worker0.password);
+  X.doLogin();
+  sess = X.getSession();
+  ok(sess.role === 'barber' && sess.workerId === worker0.id, 'Level 3 — barber credentials authenticate when scoped to their own salon');
+
+  setLoginSalonContext(salon0.id);
   setLogin('nobody', 'wrongpass');
   X.doLogin();
   sess = X.getSession();

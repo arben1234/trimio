@@ -1625,6 +1625,14 @@ function updateNavMenu() {
     }
     return;
   }
+  // The login screen is a dead-end entry point on its own (no salon list or
+  // booking flow to navigate to from there) — the "Menu Navigazione"
+  // dropdown was redundant clutter on it.
+  if (document.querySelector('.view.on')?.id === 'vLogin') {
+    menu.style.display = 'none';
+    menu.innerHTML = '';
+    return;
+  }
   menu.style.display = '';
 
   let html = '';
@@ -1688,6 +1696,14 @@ function showView(view){
   $(view).classList.add('on');
   const isDash=view==='vDash';
   const isHome=view==='vHome';
+  const isLogin=view==='vLogin';
+
+  // Login screen title reflects whether this is the generic admin-only entry
+  // point (no salon context) or a specific salon's staff-access login.
+  if (isLogin) {
+    const loginTitle = $('loginTitle');
+    if (loginTitle) loginTitle.textContent = loginSalonContext ? 'Accesso Staff' : 'Accesso Amministratore';
+  }
   // Always re-render the homepage with the current STATE.salons before showing
   // it — otherwise it can show stale content (e.g. a salon added by the admin
   // moments earlier is missing until a full page reload) since navigating
@@ -1761,11 +1777,15 @@ function doLogin(){
     return;
   }
 
-  // If loginSalonContext is set, restrict authentication to that salon only.
-  // Otherwise, search across all salons.
-  const targetSalons = loginSalonContext 
-    ? STATE.salons.filter(s => s.id === loginSalonContext)
-    : STATE.salons;
+  // The generic entry point (no specific salon context — reached directly
+  // from the root URL) only accepts admin credentials. Owner/barber login is
+  // only available from their own salon's page (the gear/staff-access button
+  // there sets loginSalonContext), never from the bare root login screen.
+  if (!loginSalonContext) {
+    return showErr('lErr', 'Accesso riservato agli amministratori. I proprietari e i barbieri accedono dalla pagina del proprio salone.');
+  }
+
+  const targetSalons = STATE.salons.filter(s => s.id === loginSalonContext);
 
   // LIVELLO 2 — Proprietario salone
   for (const s of targetSalons) {
