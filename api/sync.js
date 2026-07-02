@@ -127,12 +127,20 @@ export default async function handler(req, res) {
           }
         }
 
-        // Send background push notifications asynchronously if there are new bookings
+        // Send push notifications for new bookings — must be awaited, not
+        // fire-and-forget: Vercel's Node.js serverless runtime can freeze/
+        // terminate the function as soon as the HTTP response is sent, which
+        // was silently killing in-flight webPush.sendNotification() calls
+        // before they ever reached the push service (confirmed via prod logs
+        // showing push sends limping along minutes after the response, or
+        // never completing at all).
         if (addedBks.length > 0) {
-          console.log(`[SYNC] Found ${addedBks.length} new bookings. Triggering push notifications...`);
-          sendPushNotifications(addedBks, kvUrl, kvToken).catch(err => {
+          console.log(`[SYNC] Found ${addedBks.length} new bookings. Sending push notifications...`);
+          try {
+            await sendPushNotifications(addedBks, kvUrl, kvToken);
+          } catch (err) {
             console.error('[SYNC] Push notifications job error:', err);
-          });
+          }
         }
 
         return res.status(200).json({ success: true, bookings: Array.from(bookingsMap.values()), conflicts });
