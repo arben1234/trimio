@@ -1770,7 +1770,12 @@ function showView(view){
   // point (no salon context) or a specific salon's staff-access login.
   if (isLogin) {
     const loginTitle = $('loginTitle');
-    if (loginTitle) loginTitle.textContent = loginSalonContext ? 'Accesso Staff' : 'Accesso Amministratore';
+    if (loginTitle) {
+      if (!loginSalonContext) loginTitle.textContent = 'Accesso Amministratore';
+      else if (loginRoleContext === 'owner') loginTitle.textContent = 'Accesso Proprietario';
+      else if (loginRoleContext === 'barber') loginTitle.textContent = 'Accesso Barbiere';
+      else loginTitle.textContent = 'Accesso Staff';
+    }
   }
   // Always re-render the homepage with the current STATE.salons before showing
   // it — otherwise it can show stale content (e.g. a salon added by the admin
@@ -1812,6 +1817,11 @@ function showView(view){
    LOGIN — Livelli 1, 2, 3
 ================================================================ */
 let loginSalonContext = null;
+// Which role the current vLogin visit is scoped to: null (generic staff
+// entry — gear icon / "Sei staff?" — accepts owner OR barber), 'owner'
+// (Login Proprietario) or 'barber' (Login Staf/Barbiere). Admin is never
+// accepted unless loginSalonContext itself is null (root entry point).
+let loginRoleContext = null;
 
 function onLoginSuccess() {
   clearErr('lErr');
@@ -1845,44 +1855,51 @@ function doLogin(){
   const pwd=$('lpw').value;
   if(!usr||!pwd)return showErr('lErr','Inserisci username e password');
 
-  // LIVELLO 1 — Amministratore
-  if(usr===STATE.admin.username&&pwd===STATE.admin.password){
-    SESSION={role:'admin',salonId:null,workerId:null,name:'Amministratore'};
-    saveSession();
-    onLoginSuccess();
-    return;
-  }
-
   // The generic entry point (no specific salon context — reached directly
   // from the root URL) only accepts admin credentials. Owner/barber login is
   // only available from their own salon's page (the gear/staff-access button
-  // there sets loginSalonContext), never from the bare root login screen.
+  // there sets loginSalonContext), never from the bare root login screen —
+  // and, symmetrically, admin credentials are never accepted once a salon
+  // context is set, even if they happen to match what was typed.
   if (!loginSalonContext) {
+    // LIVELLO 1 — Amministratore
+    if(usr===STATE.admin.username&&pwd===STATE.admin.password){
+      SESSION={role:'admin',salonId:null,workerId:null,name:'Amministratore'};
+      saveSession();
+      onLoginSuccess();
+      return;
+    }
     return showErr('lErr', 'Accesso riservato agli amministratori. I proprietari e i barbieri accedono dalla pagina del proprio salone.');
   }
 
   const targetSalons = STATE.salons.filter(s => s.id === loginSalonContext);
 
-  // LIVELLO 2 — Proprietario salone
-  for (const s of targetSalons) {
-    if (usr === s.ownerUsername && pwd === s.ownerPassword) {
-      if (s.inactive) return showErr('lErr', 'Questo salone è inattivo. Accesso negato.');
-      SESSION = {role:'owner', salonId:s.id, workerId:null, name:'Proprietario · '+s.name};
-      saveSession();
-      onLoginSuccess();
-      return;
+  // LIVELLO 2 — Proprietario salone (only when this screen was reached via
+  // "Login Proprietario", or the generic role-agnostic staff entry)
+  if (loginRoleContext === 'owner' || loginRoleContext === null) {
+    for (const s of targetSalons) {
+      if (usr === s.ownerUsername && pwd === s.ownerPassword) {
+        if (s.inactive) return showErr('lErr', 'Questo salone è inattivo. Accesso negato.');
+        SESSION = {role:'owner', salonId:s.id, workerId:null, name:'Proprietario · '+s.name};
+        saveSession();
+        onLoginSuccess();
+        return;
+      }
     }
   }
 
-  // LIVELLO 3 — Barbiere (dipendente)
-  for (const s of targetSalons) {
-    const w = s.workers.find(x => x.username === usr && x.password === pwd);
-    if (w) {
-      if (s.inactive) return showErr('lErr', 'Questo salone è inattivo. Accesso negato.');
-      SESSION = {role:'barber', salonId:s.id, workerId:w.id, name:w.name};
-      saveSession();
-      onLoginSuccess();
-      return;
+  // LIVELLO 3 — Barbiere (dipendente) (only when this screen was reached via
+  // "Login Staf/Barbiere", or the generic role-agnostic staff entry)
+  if (loginRoleContext === 'barber' || loginRoleContext === null) {
+    for (const s of targetSalons) {
+      const w = s.workers.find(x => x.username === usr && x.password === pwd);
+      if (w) {
+        if (s.inactive) return showErr('lErr', 'Questo salone è inattivo. Accesso negato.');
+        SESSION = {role:'barber', salonId:s.id, workerId:w.id, name:w.name};
+        saveSession();
+        onLoginSuccess();
+        return;
+      }
     }
   }
 
@@ -3302,9 +3319,9 @@ async function boot(){
   $('again').addEventListener('click',()=>location.reload());
   $('cname').addEventListener('input',e=>{custData.name=e.target.value;clearErr('cErr');});
   $('cphone').addEventListener('input',e=>{custData.phone=e.target.value;});
-  $('hpAdminBtn')?.addEventListener('click',()=>{ loginSalonContext = null; showView('vLogin'); });
-  $('gear').addEventListener('click',()=>{ loginSalonContext = custSalon ? custSalon.id : null; showView('vLogin'); });
-  $('toStaff').addEventListener('click',()=>{ loginSalonContext = custSalon ? custSalon.id : null; showView('vLogin'); });
+  $('hpAdminBtn')?.addEventListener('click',()=>{ loginSalonContext = null; loginRoleContext = null; showView('vLogin'); });
+  $('gear').addEventListener('click',()=>{ loginSalonContext = custSalon ? custSalon.id : null; loginRoleContext = null; showView('vLogin'); });
+  $('toStaff').addEventListener('click',()=>{ loginSalonContext = custSalon ? custSalon.id : null; loginRoleContext = null; showView('vLogin'); });
   $('toCustomer').addEventListener('click',()=>{
     if(custSalon){showView('vCustomer');}
     else{renderHomepage();showView('vHome');}
@@ -3411,12 +3428,15 @@ async function boot(){
       }
     } else if (val === 'login_admin') {
       loginSalonContext = null;
+      loginRoleContext = null;
       showView('vLogin');
     } else if (val === 'login_owner') {
       loginSalonContext = custSalon ? custSalon.id : null;
+      loginRoleContext = 'owner';
       showView('vLogin');
     } else if (val === 'login_barber') {
       loginSalonContext = custSalon ? custSalon.id : null;
+      loginRoleContext = 'barber';
       showView('vLogin');
     } else if (val === 'dashboard') {
       showView('vDash');

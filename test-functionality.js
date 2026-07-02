@@ -359,6 +359,10 @@ section('doLogin() across the 4 access levels');
     `loginSalonContext = ${id === null ? 'null' : JSON.stringify(id)};`,
     { filename: 'set-login-salon-context.js' }
   ).runInContext(context);
+  const setLoginRoleContext = (role) => new vm.Script(
+    `loginRoleContext = ${role === null ? 'null' : JSON.stringify(role)};`,
+    { filename: 'set-login-role-context.js' }
+  ).runInContext(context);
 
   // Generic entry point (no salon context, e.g. the bare root URL) — admin only.
   setLoginSalonContext(null);
@@ -398,6 +402,47 @@ section('doLogin() across the 4 access levels');
   X.doLogin();
   sess = X.getSession();
   ok(sess.role === 'barber', 'invalid credentials leave SESSION untouched (still previous barber session)');
+
+  // Admin credentials must NEVER work once a salon context is set, even from
+  // the generic role-agnostic staff entry (gear icon / "Sei staff?").
+  setLoginSalonContext(salon0.id);
+  setLoginRoleContext(null);
+  setLogin(X.STATE.admin.username, X.STATE.admin.password);
+  X.doLogin();
+  sess = X.getSession();
+  ok(sess.role === 'barber', 'admin credentials are REJECTED from a salon-scoped login (still previous barber session)');
+
+  // Role-specific entry points ("Login Proprietario" / "Login Staf") must
+  // strictly reject the OTHER role's credentials, not silently log them in.
+  setLoginSalonContext(salon0.id);
+  setLoginRoleContext('owner');
+  setLogin(worker0.username, worker0.password);
+  X.doLogin();
+  sess = X.getSession();
+  ok(sess.role === 'barber', 'barber credentials are REJECTED from the "Login Proprietario" entry (still previous barber session)');
+
+  setLoginSalonContext(salon0.id);
+  setLoginRoleContext('owner');
+  setLogin(salon0.ownerUsername, salon0.ownerPassword);
+  X.doLogin();
+  sess = X.getSession();
+  ok(sess.role === 'owner' && sess.salonId === salon0.id, 'owner credentials still authenticate via the "Login Proprietario" entry');
+
+  setLoginSalonContext(salon0.id);
+  setLoginRoleContext('barber');
+  setLogin(salon0.ownerUsername, salon0.ownerPassword);
+  X.doLogin();
+  sess = X.getSession();
+  ok(sess.role === 'owner', 'owner credentials are REJECTED from the "Login Staf/Barbiere" entry (still previous owner session)');
+
+  setLoginSalonContext(salon0.id);
+  setLoginRoleContext('barber');
+  setLogin(worker0.username, worker0.password);
+  X.doLogin();
+  sess = X.getSession();
+  ok(sess.role === 'barber' && sess.workerId === worker0.id, 'barber credentials still authenticate via the "Login Staf/Barbiere" entry');
+
+  setLoginRoleContext(null); // restore generic context so later suites are unaffected
 
   ok(context.__uiCallCounts.showView >= 3, `successful logins triggered showView() (${context.__uiCallCounts.showView} times)`);
 }
