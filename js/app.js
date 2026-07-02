@@ -1610,11 +1610,21 @@ function renderSalonModalWorkers(s) {
         </div>
       </div>
       <div style="display:flex; gap:6px;">
-        <button class="btn btn-ghost" onclick="event.preventDefault(); event.stopPropagation(); openWorkerModal('${w.id}', STATE.salons.find(x=>x.id==='${s.id}'));" style="padding:4px 8px; font-size:11px; border:1px solid #ccc; border-radius:6px; background:#fff;">Modifica</button>
-        <button class="btn btn-ghost" onclick="event.preventDefault(); event.stopPropagation(); deleteSalonModalWorker('${w.id}', '${s.id}');" style="padding:4px 8px; font-size:11px; color:#ef4444; border:1px solid #fecaca; border-radius:6px; background:#fff;">Elimina</button>
+        <button type="button" class="btn btn-ghost" data-smwedit="${w.id}" style="padding:4px 8px; font-size:11px; border:1px solid #ccc; border-radius:6px; background:#fff;">Modifica</button>
+        <button type="button" class="btn btn-ghost" data-smwdel="${w.id}" style="padding:4px 8px; font-size:11px; color:#ef4444; border:1px solid #fecaca; border-radius:6px; background:#fff;">Elimina</button>
       </div>
     </div>
   `).join('');
+
+  container.querySelectorAll('[data-smwedit]').forEach(btn => btn.addEventListener('click', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    const salon = STATE.salons.find(x => x.id === s.id);
+    if (salon) openWorkerModal(btn.dataset.smwedit, salon);
+  }));
+  container.querySelectorAll('[data-smwdel]').forEach(btn => btn.addEventListener('click', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    deleteSalonModalWorker(btn.dataset.smwdel, s.id);
+  }));
 }
 
 function deleteSalonModalWorker(wid, sid) {
@@ -3699,5 +3709,7 @@ window.closeModal = closeModal;
 window.selectReviewStar = selectReviewStar;
 window.dashAction = dashAction;
 window.showBarberReviews = showBarberReviews;
+window.openWorkerModal = openWorkerModal;
+window.deleteSalonModalWorker = deleteSalonModalWorker;
 
 boot();
