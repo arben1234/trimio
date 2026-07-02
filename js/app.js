@@ -2520,6 +2520,14 @@ function filterByPeriod(bks){
   if(statsPeriod==='custom'&&statFrom&&statTo)return bks.filter(b=>b.dateISO>=statFrom&&b.dateISO<=statTo);
   return bks;
 }
+function periodLabel(){
+  if(statsPeriod==='oggi')return 'Oggi';
+  if(statsPeriod==='settimana')return 'Ultima settimana';
+  if(statsPeriod==='mese')return 'Questo mese';
+  if(statsPeriod==='anno')return "Quest'anno";
+  if(statsPeriod==='custom'&&statFrom&&statTo)return `${statFrom} → ${statTo}`;
+  return 'Periodo';
+}
 function barChart(data,cls=''){
   const max=Math.max(1,...Object.values(data));
   return Object.entries(data).map(([k,v])=>`<div class="bar-row">
@@ -2538,129 +2546,110 @@ function renderStats(){
 
   const salon=getSalon();if(!salon)return;
   let allBks=STATE.bookings.filter(b=>b.salonId===salon.id&&b.status!=='cancelled');
+  // A barber only ever sees their own numbers here, never other barbers'.
   if(r==='barber')allBks=allBks.filter(b=>b.workerId===SESSION.workerId);
 
-  const filtered=filterByPeriod(allBks);
-  const now=new Date();
-  const monthISO=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
-  const yearISO=`${now.getFullYear()}-01-01`;
-  const monthBks=allBks.filter(b=>b.dateISO>=monthISO);
-  const yearBks=allBks.filter(b=>b.dateISO>=yearISO);
-  const totRev=filtered.reduce((s,b)=>s+(b.price||0),0);
-  const monthRev=monthBks.reduce((s,b)=>s+(b.price||0),0);
-  const yearRev=yearBks.reduce((s,b)=>s+(b.price||0),0);
+  const filtered=filterByPeriod(allBks);                    // prenotati nel periodo selezionato
+  const served=filtered.filter(b=>b.status==='completed');  // serviti — solo confermati "Fatto" dal barbiere
+  const servedRev=served.reduce((s,b)=>s+(b.price||0),0);   // incasso reale, solo chi ha ricevuto il servizio
 
-  // Servizi realmente erogati (solo status "completed" — confermati dal barbiere come "Fatto")
-  const servedAll=allBks.filter(b=>b.status==='completed');
-  const servedFiltered=filterByPeriod(servedAll);
-  const servedMonth=servedAll.filter(b=>b.dateISO>=monthISO);
-  const servedYear=servedAll.filter(b=>b.dateISO>=yearISO);
-  const servedRevPeriod=servedFiltered.reduce((s,b)=>s+(b.price||0),0);
-  const servedRevMonth=servedMonth.reduce((s,b)=>s+(b.price||0),0);
-  const servedRevYear=servedYear.reduce((s,b)=>s+(b.price||0),0);
-
-  let html=`<div class="kpi-row">
-    ${kpiBox(filtered.length,'Clienti (periodo)')}
-    ${kpiBox('€'+totRev,'Incasso (periodo)','green')}
+  let html=`
+  <div class="chart-title" style="margin-top:0;">${periodLabel()}</div>
+  <div class="kpi-row">
+    ${kpiBox(filtered.length,'Prenotati','amber')}
+    ${kpiBox(served.length,'Serviti','green')}
   </div>
   <div class="kpi-row">
-    ${kpiBox(monthBks.length,'Clienti mese','blue')}
-    ${kpiBox('€'+monthRev,'Incasso mese','blue')}
-  </div>
-  <div class="kpi-row">
-    ${kpiBox(yearBks.length,'Clienti anno','amber')}
-    ${kpiBox('€'+yearRev,'Incasso anno','amber')}
-  </div>
-  <div class="chart-title" style="margin-top:18px;">Servizi realmente erogati (confermati)</div>
-  <div class="kpi-row">
-    ${kpiBox(servedFiltered.length,'Clienti serviti (periodo)','green')}
-    ${kpiBox('€'+servedRevPeriod,'Incasso reale (periodo)','green')}
-  </div>
-  <div class="kpi-row">
-    ${kpiBox(servedMonth.length,'Serviti mese','green')}
-    ${kpiBox('€'+servedRevMonth,'Incasso reale mese','green')}
-  </div>
-  <div class="kpi-row">
-    ${kpiBox(servedYear.length,'Serviti anno','green')}
-    ${kpiBox('€'+servedRevYear,'Incasso reale anno','green')}
+    ${kpiBox('€'+servedRev,'Incasso reale (solo serviti)','green')}
   </div>`;
 
-  // Per barbiere (solo owner)
-  if(r==='owner'&&filtered.length){
-    const wMap={};
-    filtered.forEach(b=>{wMap[b.workerName]=(wMap[b.workerName]||0)+1;});
-    html+=`<div class="chart-wrap"><div class="chart-title">Clienti per barbiere</div><div class="bar-chart">${barChart(wMap)}</div></div>`;
-    // incasso per barbiere
-    const wRev={};
-    filtered.forEach(b=>{wRev[b.workerName]=(wRev[b.workerName]||0)+(b.price||0);});
-    html+=`<div class="chart-wrap"><div class="chart-title">Incasso per barbiere (€)</div><div class="bar-chart">${barChart(wRev,'green')}</div></div>`;
-  }
-
-  // Per tipo servizio
-  if(filtered.length){
+  // Servizi realizzati per tipo — solo status "completed", mai i soli prenotati
+  if(served.length){
     const sMap={};
-    filtered.forEach(b=>{sMap[b.service]=(sMap[b.service]||0)+1;});
-    html+=`<div class="chart-wrap"><div class="chart-title">Clienti per servizio</div><div class="bar-chart">${barChart(sMap,'blue')}</div></div>`;
+    served.forEach(b=>{sMap[b.service]=(sMap[b.service]||0)+1;});
+    html+=`<div class="chart-wrap"><div class="chart-title">Servizi realizzati per tipo</div><div class="bar-chart">${barChart(sMap,'green')}</div></div>`;
   }
 
-  // Ultimi 7 giorni
-  const dayMap={};
-  for(let i=6;i>=0;i--){
-    const d=new Date();d.setDate(d.getDate()-i);
-    const iso=isoOf(d.getFullYear(),d.getMonth(),d.getDate());
-    const k=`${DOW[d.getDay()]} ${d.getDate()}`;
-    dayMap[k]=allBks.filter(b=>b.dateISO===iso).length;
-  }
-  html+=`<div class="chart-wrap"><div class="chart-title">Ultimi 7 giorni</div><div class="bar-chart">${barChart(dayMap,'amber')}</div></div>`;
+  // Solo owner: ripartizione per barbiere (servizi realizzati + incasso) e per servizio (incasso)
+  if(r==='owner'&&served.length){
+    const wMap={};
+    served.forEach(b=>{wMap[b.workerName]=(wMap[b.workerName]||0)+1;});
+    html+=`<div class="chart-wrap"><div class="chart-title">Servizi realizzati per barbiere</div><div class="bar-chart">${barChart(wMap,'blue')}</div></div>`;
 
-  // Ultimi 6 mesi
-  const mMap={};
-  for(let i=5;i>=0;i--){const d=new Date(now.getFullYear(),now.getMonth()-i,1);const k=MF[d.getMonth()].slice(0,3);const iso=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;mMap[k]=allBks.filter(b=>(b.dateISO || '').startsWith(iso)).length;}
-  html+=`<div class="chart-wrap"><div class="chart-title">Ultimi 6 mesi</div><div class="bar-chart">${barChart(mMap,'green')}</div></div>`;
+    const wRev={};
+    served.forEach(b=>{wRev[b.workerName]=(wRev[b.workerName]||0)+(b.price||0);});
+    html+=`<div class="chart-wrap"><div class="chart-title">Incasso per barbiere (€, solo serviti)</div><div class="bar-chart">${barChart(wRev,'green')}</div></div>`;
+
+    const svcRev={};
+    served.forEach(b=>{svcRev[b.service]=(svcRev[b.service]||0)+(b.price||0);});
+    html+=`<div class="chart-wrap"><div class="chart-title">Incasso per servizio (€, solo serviti)</div><div class="bar-chart">${barChart(svcRev,'green')}</div></div>`;
+  }
 
   $('statsContent').innerHTML=html;
 }
 
 function renderAdminStats(){
-  // Admin: panoramica tutti i saloni (filtrato per periodo)
+  // Admin: panoramica di tutti i saloni, per il periodo selezionato
   const allBks=STATE.bookings.filter(b=>b.status!=='cancelled');
-  const filtered=filterByPeriod(allBks);
-  const totRev=filtered.reduce((s,b)=>s+(b.price||0),0);
-  const sMap={};STATE.salons.forEach(s=>{sMap[s.name]=filtered.filter(b=>b.salonId===s.id).length;});
+  const filtered=filterByPeriod(allBks);                     // prenotati (tutti i saloni)
+  const served=filtered.filter(b=>b.status==='completed');   // serviti — solo confermati "Fatto"
+  const servedRev=served.reduce((s,b)=>s+(b.price||0),0);    // incasso reale, solo chi ha ricevuto il servizio
   const wCount=STATE.salons.reduce((s,x)=>s+x.workers.length,0);
 
-  // Servizi realmente erogati (solo status "completed")
-  const servedFiltered=filtered.filter(b=>b.status==='completed');
-  const servedRev=servedFiltered.reduce((s,b)=>s+(b.price||0),0);
-
-  let html=`<div class="kpi-row">
+  let html=`
+  <div class="chart-title" style="margin-top:0;">${periodLabel()}</div>
+  <div class="kpi-row">
     ${kpiBox(STATE.salons.length,'Saloni attivi')}
     ${kpiBox(wCount,'Dipendenti totali','blue')}
   </div>
   <div class="kpi-row">
-    ${kpiBox(filtered.length,'Prenotazioni (periodo)','amber')}
-    ${kpiBox('€'+totRev,'Incasso (periodo)','green')}
+    ${kpiBox(filtered.length,'Prenotati','amber')}
+    ${kpiBox(served.length,'Serviti','green')}
   </div>
   <div class="kpi-row">
-    ${kpiBox(servedFiltered.length,'Serviti (periodo)','green')}
-    ${kpiBox('€'+servedRev,'Incasso reale (periodo)','green')}
-  </div>
-  <div class="chart-wrap"><div class="chart-title">Prenotazioni per salone</div><div class="bar-chart">${barChart(sMap)}</div></div>`;
+    ${kpiBox('€'+servedRev,'Incasso reale (solo serviti)','green')}
+  </div>`;
 
-  // per nome impiegato su tutti i saloni (filtrato per periodo)
-  const ewMap={};
-  STATE.salons.forEach(s=>s.workers.forEach(w=>{
-    const count = filtered.filter(b=>b.workerId===w.id).length;
-    if (count > 0) {
-      ewMap[w.name]=count;
-    }
-  }));
-  if(Object.keys(ewMap).length)html+=`<div class="chart-wrap"><div class="chart-title">Prenotazioni per barbiere (tutti i saloni)</div><div class="bar-chart">${barChart(ewMap,'blue')}</div></div>`;
+  // Servizi realizzati per tipo, su tutti i saloni — solo status "completed"
+  if(served.length){
+    const sMap={};
+    served.forEach(b=>{sMap[b.service]=(sMap[b.service]||0)+1;});
+    html+=`<div class="chart-wrap"><div class="chart-title">Servizi realizzati per tipo</div><div class="bar-chart">${barChart(sMap,'green')}</div></div>`;
+  }
 
-  // per servizio (filtrato per periodo)
-  const svMap={};
-  filtered.forEach(b=>{svMap[b.service]=(svMap[b.service]||0)+1;});
-  if(Object.keys(svMap).length)html+=`<div class="chart-wrap"><div class="chart-title">Per tipo servizio</div><div class="bar-chart">${barChart(svMap,'amber')}</div></div>`;
+  // Tabella riepilogativa per salone: periodo | salone | clienti serviti | incasso
+  const rows=STATE.salons.map(s=>{
+    const sServed=served.filter(b=>b.salonId===s.id);
+    const sRev=sServed.reduce((sum,b)=>sum+(b.price||0),0);
+    return {name:s.name, count:sServed.length, rev:sRev};
+  });
+  html+=`<div class="chart-wrap">
+    <div class="chart-title">Riepilogo per salone</div>
+    <div style="overflow-x:auto;">
+    <table style="width:100%;border-collapse:collapse;font-size:12.5px;">
+      <thead><tr style="border-bottom:2px solid #e4e4e7;text-align:left;">
+        <th style="padding:8px 6px;font-weight:800;color:#71717a;">Periodo</th>
+        <th style="padding:8px 6px;font-weight:800;color:#71717a;">Salone</th>
+        <th style="padding:8px 6px;font-weight:800;color:#71717a;text-align:right;">Clienti serviti</th>
+        <th style="padding:8px 6px;font-weight:800;color:#71717a;text-align:right;">Incasso (€)</th>
+      </tr></thead>
+      <tbody>
+        ${rows.map(row=>`<tr style="border-bottom:1px solid #f0f0f0;">
+          <td style="padding:8px 6px;color:#71717a;">${periodLabel()}</td>
+          <td style="padding:8px 6px;font-weight:700;">${row.name}</td>
+          <td style="padding:8px 6px;text-align:right;">${row.count}</td>
+          <td style="padding:8px 6px;text-align:right;font-weight:700;color:#16a34a;">€${row.rev}</td>
+        </tr>`).join('')}
+        <tr style="border-top:2px solid #e4e4e7;font-weight:800;">
+          <td style="padding:8px 6px;"></td>
+          <td style="padding:8px 6px;">Totale</td>
+          <td style="padding:8px 6px;text-align:right;">${served.length}</td>
+          <td style="padding:8px 6px;text-align:right;color:#16a34a;">€${servedRev}</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+  </div>`;
 
   $('statsContent').innerHTML=html;
 }
