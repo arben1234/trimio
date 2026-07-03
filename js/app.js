@@ -1001,7 +1001,20 @@ async function renderPushNotifBanner() {
   const status = await getPushNotifStatus();
   const icon = $('pushNotifIcon'), msg = $('pushNotifMsg'), btn = $('pushNotifBtn');
 
-  if (status === 'unsupported') { banner.style.display = 'none'; return; }
+  if (status === 'unsupported') {
+    // Same iOS rule as the customer banner: push exists only for web apps
+    // installed on the Home Screen — guide staff there instead of hiding.
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    if (isIOS && window.navigator.standalone !== true) {
+      banner.style.display = 'flex';
+      icon.textContent = '📲';
+      msg.textContent = 'Per ricevere le notifiche delle prenotazioni: aggiungi TRIMIO alla schermata Home (Condividi → Aggiungi alla schermata Home) e accedi da lì.';
+      btn.style.display = 'none';
+      return;
+    }
+    banner.style.display = 'none';
+    return;
+  }
 
   banner.style.display = 'flex';
   if (status === 'active') {
@@ -1080,8 +1093,20 @@ async function initCustomerPushNotifications(bookingId) {
 function renderCustReminderBanner() {
   const banner = $('custReminderBanner');
   if (!banner) return;
+  const icon0 = $('custReminderIcon'), msg0 = $('custReminderMsg'), btn0 = $('custReminderBtn');
   if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
-    banner.style.display = 'none';
+    // iOS Safari exposes PushManager ONLY inside web apps installed on the
+    // Home Screen (iOS 16.4+). Instead of hiding the reminder option (which
+    // made it look like it didn't exist), tell the customer how to enable it.
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    if (isIOS && window.navigator.standalone !== true) {
+      banner.style.display = 'flex';
+      icon0.textContent = '📲';
+      msg0.textContent = 'Per ricevere il promemoria 24h prima: aggiungi TRIMIO alla schermata Home (Condividi → Aggiungi alla schermata Home) e prenota da lì.';
+      btn0.style.display = 'none';
+    } else {
+      banner.style.display = 'none';
+    }
     return;
   }
   banner.style.display = 'flex';
@@ -1398,6 +1423,10 @@ let lastBookingId=null;
 
 function initCustomer(salon){
   custSalon=salon;
+  // Remember the last salon page visited: a Home-Screen/PWA launch loses the
+  // #SLUG hash (manifest start_url), so boot restores it from here instead of
+  // dumping the customer on the admin login screen.
+  if(canStore){try{localStorage.setItem('trimio_last_salon_slug',salon.slug);}catch(e){}}
   $('hBrand').textContent=salon.name;
   $('hSlug').textContent='#'+salon.slug;$('hSlug').style.display='inline-block';
 
@@ -3815,10 +3844,23 @@ async function boot(){
           showView('vLogin');
           return;
         }
-        // Force logout/clear previous session when scanning a specific salon barcode to ensure no stale login carries over
-        SESSION = {role:null,salonId:null,workerId:null,name:null};
-        if (canStore) {
-          try { localStorage.removeItem(SESSION_KEY); } catch(e){}
+        // An owner/barber of THIS salon re-opening their own salon's QR link
+        // must stay logged in and land on their dashboard — re-scanning the
+        // QR code is how staff get back into the app from the Home Screen,
+        // it must never log them out.
+        if (SESSION && (SESSION.role === 'owner' || SESSION.role === 'barber') && SESSION.salonId === s.id) {
+          showView('vDash');
+          initDash();
+          if (typeof initPushNotifications === 'function') initPushNotifications();
+          return;
+        }
+        // A staff session belonging to a DIFFERENT salon doesn't apply here —
+        // clear it so the visitor gets a clean customer page for the scanned
+        // salon. Admin sessions survive (same rule as the hashchange handler:
+        // an admin may freely browse any salon's public page).
+        if (SESSION && SESSION.role && SESSION.role !== 'admin') {
+          SESSION = {role:null,salonId:null,workerId:null,name:null};
+          if (canStore) { try { localStorage.removeItem(SESSION_KEY); } catch(e){} }
         }
         initCustomer(s);
         showView('vCustomer');
@@ -3856,14 +3898,31 @@ async function boot(){
       }
     }
 
-    // 3. No hash and no session -> show login
+    // 3. No hash, no session — a Home-Screen/PWA launch strips the #SLUG
+    // hash, so restore the last salon page the customer visited instead of
+    // stranding them on the login screen. Only in standalone (installed)
+    // mode: a regular browser tab keeps its hash by itself, and the bare
+    // root URL must stay reachable there as the admin entry point.
+    const isStandalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+    if (canStore && isStandalone) {
+      try {
+        const lastSlug = localStorage.getItem('trimio_last_salon_slug');
+        if (lastSlug) {
+          const s = STATE.salons.find(x => x.slug === lastSlug && !x.inactive);
+          if (s) {
+            location.hash = '#' + s.slug;
+            initCustomer(s);
+            showView('vCustomer');
+            return;
+          }
+        }
+      } catch(e) {}
+    }
+
+    // 4. Nothing to restore -> show login
     showView('vLogin');
   };
   checkInitialHash();
-
-  // Also clear any stale localStorage slug left over from the old approach
-  localStorage.removeItem('trimio_last_salon_slug');
-
 }
 
 // Expose internal functions globally on window to support inline HTML onclick handlers in type="module" mode
