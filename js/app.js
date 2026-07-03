@@ -860,13 +860,6 @@ function initCloudSync() {
 }
 
 /* ======== SINC ALERTS & NOTIFICHE APPLICAZIONE ======== */
-function requestNotificationPermission() {
-  if ('Notification' in window && Notification.permission === 'default') {
-    Notification.requestPermission().then(permission => {
-      console.log("System notification permission status:", permission);
-    });
-  }
-}
 
 function triggerNewBookingNotification(bk) {
   // Only notify if logged in as Owner of this salon, or Barber who is booked
@@ -948,14 +941,15 @@ async function initPushNotifications() {
     const registration = await navigator.serviceWorker.register('/sw.js');
     console.log('Service Worker registered successfully:', registration.scope);
 
-    // 2. Request Notification Permission on demand or restore subscription
-    if (Notification.permission === 'default') {
-      const permission = await Notification.requestPermission();
-      console.log('Notification permission status:', permission);
-    }
-
+    // 2. NEVER request permission here. This runs on page load / session
+    // restore (no user gesture), and Safari/iOS auto-DENIES any permission
+    // request made outside a real click — which then made every banner show
+    // "Notifiche bloccate dal browser" even though the user was never asked.
+    // Permission is requested only from explicit click handlers (login
+    // button, "Attiva" banner buttons); here we just re-sync an existing
+    // grant.
     if (Notification.permission !== 'granted') {
-      console.warn('Notification permission not granted.');
+      console.warn('Notification permission not granted yet — skipping (ask via a button click).');
       return;
     }
 
@@ -1023,7 +1017,7 @@ async function renderPushNotifBanner() {
     btn.style.display = 'none';
   } else if (status === 'blocked') {
     icon.textContent = '⚠️';
-    msg.textContent = 'Notifiche bloccate dal browser — abilitale nelle impostazioni del sito';
+    msg.textContent = 'Notifiche bloccate — su iPhone: Impostazioni → Notifiche → TRIMIO; su altri browser: impostazioni del sito';
     btn.style.display = 'none';
   } else {
     icon.textContent = '🔕';
@@ -1113,7 +1107,7 @@ function renderCustReminderBanner() {
   const icon = $('custReminderIcon'), msg = $('custReminderMsg'), btn = $('custReminderBtn');
   if (Notification.permission === 'denied') {
     icon.textContent = '⚠️';
-    msg.textContent = 'Notifiche bloccate dal browser — abilitale nelle impostazioni del sito';
+    msg.textContent = 'Notifiche bloccate — su iPhone: Impostazioni → Notifiche → TRIMIO; su altri browser: impostazioni del sito';
     btn.style.display = 'none';
   } else {
     icon.textContent = '🔔';
@@ -1909,6 +1903,16 @@ let loginRoleContext = null;
 function onLoginSuccess() {
   clearErr('lErr');
   $('lpw').value = '';
+  // Ask for notification permission HERE — still synchronously inside the
+  // login button's click (user gesture), but only after credentials checked
+  // out, so wrong-password attempts don't trigger a permission prompt.
+  if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission().then(perm => {
+      if (perm === 'granted' && typeof initPushNotifications === 'function') {
+        initPushNotifications();
+      }
+    }).catch(()=>{});
+  }
   // Admin lands on the public Homepage by default; the header dropdown's
   // "Vai alla Dashboard" option (shown whenever admin is outside the
   // dashboard) is the way in from there, so this is never a dead end.
@@ -1924,16 +1928,6 @@ function onLoginSuccess() {
 }
 
 function doLogin(){
-  // Request notification permission inside the click handler to guarantee browser allows it
-  if ('Notification' in window) {
-    Notification.requestPermission().then(perm => {
-      console.log("Login click notification permission status:", perm);
-      if (perm === 'granted' && typeof initPushNotifications === 'function') {
-        initPushNotifications();
-      }
-    }).catch(e=>{});
-  }
-
   const usr=$('lusr').value.trim();
   const pwd=$('lpw').value;
   if(!usr||!pwd)return showErr('lErr','Inserisci username e password');
@@ -3785,11 +3779,17 @@ async function boot(){
     });
   }
 
-  // Wire push-notifications banner button (owner dashboard)
+  // Wire push-notifications banner button (owner dashboard).
+  // The permission request MUST happen right here, inside the click handler:
+  // initPushNotifications() deliberately never asks (Safari/iOS auto-denies
+  // permission requests made outside a user gesture).
   const pushBtn = $('pushNotifBtn');
   if (pushBtn) {
     pushBtn.addEventListener('click', async () => {
       pushBtn.textContent = '…';
+      if ('Notification' in window && Notification.permission === 'default') {
+        try { await Notification.requestPermission(); } catch(e) {}
+      }
       await initPushNotifications();
       await renderPushNotifBanner();
     });
