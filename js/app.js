@@ -1350,10 +1350,17 @@ function renderMapMarkers() {
       .bindPopup(popupContent);
   });
   
-  // Adjust map view to show all markers
-  if (userCoords && STATE.salons.some(s => s.lat && s.lng)) {
-    const points = [ [userCoords.lat, userCoords.lng], ...STATE.salons.filter(s => s.lat && s.lng).map(s => [s.lat, s.lng]) ];
-    map.fitBounds(L.latLngBounds(points), { padding: [30, 30] });
+  // Adjust map view to show all salon markers (zoomed to fit just the areas
+  // where salons actually are, not the whole country) — works whether or not
+  // the user granted geolocation, since salon locations are known either way.
+  const salonPoints = STATE.salons.filter(s => s.lat && s.lng).map(s => [s.lat, s.lng]);
+  if (salonPoints.length) {
+    const points = userCoords ? [[userCoords.lat, userCoords.lng], ...salonPoints] : salonPoints;
+    if (points.length === 1) {
+      map.setView(points[0], 13);
+    } else {
+      map.fitBounds(L.latLngBounds(points), { padding: [30, 30] });
+    }
   }
 }
 
@@ -3026,8 +3033,9 @@ async function saveSalon(){
 }
 
 /* ---- UTENTI (solo Livello 1 admin) ----
-   Admin può: creare/modificare/eliminare/resettare password di proprietari e barbieri */
-let umTarget=null; // {type:'owner'|'barber', salonId, workerId}
+   Admin può SOLO resettare la password di proprietari e barbieri (a un valore
+   di default prevedibile) — tutto il resto si gestisce da "Modifica Salone" */
+let umTarget=null; // {type:'self'} — set by openSelfPasswordModal only
 function renderUtenti(){
   // Admin-only, reset-only: a single cross-salon list to quickly reset an
   // owner's or barber's password if they forget it. Everything else about
@@ -3057,51 +3065,57 @@ function renderUtenti(){
     });
   });
   $('utentiList').innerHTML=html;
-  $('utentiList').querySelectorAll('[data-utype="owner"]').forEach(b=>b.addEventListener('click',()=>{
+  // Reset is immediate and always lands on the same predictable default
+  // (name+123) — no free-typed password from the admin — so there's one
+  // fixed recovery value to communicate to the owner/barber over the phone.
+  $('utentiList').querySelectorAll('[data-utype="owner"]').forEach(b=>b.addEventListener('click',async()=>{
     const s=STATE.salons.find(x=>x.id===b.dataset.usid);if(!s)return;
-    openUserModal({type:'owner',salonId:s.id,label:`Proprietario · ${s.name}`});
+    const newPwd=defaultResetPassword(s.ownerUsername);
+    if(!confirm(`Reimpostare la password di "${s.ownerUsername}" (Proprietario · ${s.name}) a "${newPwd}"?`))return;
+    s.ownerPassword=newPwd;
+    await saveState();
+    alert(`Password reimpostata: ${newPwd}`);
   }));
-  $('utentiList').querySelectorAll('[data-utype="barber"]').forEach(b=>b.addEventListener('click',()=>{
+  $('utentiList').querySelectorAll('[data-utype="barber"]').forEach(b=>b.addEventListener('click',async()=>{
     const s=STATE.salons.find(x=>x.id===b.dataset.usid);const w=s?.workers.find(x=>x.id===b.dataset.uwid);if(!w)return;
-    openUserModal({type:'barber',salonId:s.id,workerId:w.id,label:`${w.name} · ${s.name}`});
+    const newPwd=defaultResetPassword(w.name);
+    if(!confirm(`Reimpostare la password di "${w.name}" (${s.name}) a "${newPwd}"?`))return;
+    w.password=newPwd;
+    await saveState();
+    alert(`Password reimpostata: ${newPwd}`);
   }));
 }
-function openUserModal({type,salonId,workerId,label}){
-  umTarget={type,salonId,workerId};
-  clearErr('umErr');
-  $('userModalH').textContent='Reset password · '+label;
-  $('umFields').innerHTML=`<label class="d-lbl">Nuova password</label><input class="minput" id="umPwd" placeholder="Nuova password" type="password" style="margin-bottom:14px">`;
-  $('userModal').classList.add('show');
+// Predictable recovery password: first name/word, lowercased, accents and
+// punctuation stripped, + "123" — e.g. "Marco Rossi" -> "marco123".
+function defaultResetPassword(name){
+  const noAccents=(name||'').normalize('NFD').split('').filter(ch=>{
+    const code=ch.charCodeAt(0);
+    return code<0x0300||code>0x036f; // strip combining diacritical marks left behind by NFD
+  }).join('');
+  const base=noAccents.trim().split(/\s+/)[0].toLowerCase().replace(/[^a-z0-9]/g,'');
+  return (base||'utente')+'123';
 }
 async function saveUserModal(){
-  const t=umTarget;if(!t)return;
+  // The only remaining caller of this modal is the owner/barber self-service
+  // password change (openSelfPasswordModal) — admin reset now happens
+  // directly from renderUtenti() without a modal at all.
+  const t=umTarget;if(!t||t.type!=='self')return;
+  const curPwd=$('umCurPwd').value;
   const pwd=$('umPwd').value.trim();
-  if(!pwd)return showErr('umErr','Inserisci una nuova password.');
-  if(t.type==='owner'){
-    const s=STATE.salons.find(x=>x.id===t.salonId);if(!s)return;
-    s.ownerPassword=pwd;
-  } else if(t.type==='self'){
-    const curPwd=$('umCurPwd').value;
-    const pwd2=$('umPwd2').value;
-    if(pwd.length<4)return showErr('umErr','La nuova password deve avere almeno 4 caratteri.');
-    if(pwd!==pwd2)return showErr('umErr','Le due password non coincidono.');
-    const salon=getSalon();if(!salon)return;
-    if(SESSION.role==='owner'){
-      if(curPwd!==salon.ownerPassword)return showErr('umErr','Password attuale non corretta.');
-      salon.ownerPassword=pwd;
-    } else if(SESSION.role==='barber'){
-      const w=salon.workers.find(x=>x.id===SESSION.workerId);if(!w)return;
-      if(curPwd!==w.password)return showErr('umErr','Password attuale non corretta.');
-      w.password=pwd;
-    }
-    await saveState();closeModal('userModal');
-    alert('Password aggiornata con successo.');
-    return;
-  } else {
-    const s=STATE.salons.find(x=>x.id===t.salonId);const w=s?.workers.find(x=>x.id===t.workerId);if(!w)return;
+  const pwd2=$('umPwd2').value;
+  if(pwd.length<4)return showErr('umErr','La nuova password deve avere almeno 4 caratteri.');
+  if(pwd!==pwd2)return showErr('umErr','Le due password non coincidono.');
+  const salon=getSalon();if(!salon)return;
+  if(SESSION.role==='owner'){
+    if(curPwd!==salon.ownerPassword)return showErr('umErr','Password attuale non corretta.');
+    salon.ownerPassword=pwd;
+  } else if(SESSION.role==='barber'){
+    const w=salon.workers.find(x=>x.id===SESSION.workerId);if(!w)return;
+    if(curPwd!==w.password)return showErr('umErr','Password attuale non corretta.');
     w.password=pwd;
   }
-  await saveState();closeModal('userModal');renderUtenti();
+  await saveState();closeModal('userModal');
+  alert('Password aggiornata con successo.');
 }
 
 // Owner/barber self-service password change, reachable from the sidebar —
@@ -3210,6 +3224,9 @@ function renderHomepage(){
   const base=getCurrentBaseURL();
   const salons=STATE.salons.filter(s => !s.inactive);
   $('hpCount').textContent=salons.length+' salon'+(salons.length===1?'e':'i')+' attiv'+(salons.length===1?'o':'i');
+  // Hidden while an admin session is already active — clicking it would just
+  // dump the logged-in admin onto a blank login form instead of doing anything useful.
+  if($('hpAdminBtn')) $('hpAdminBtn').style.display=(SESSION&&SESSION.role==='admin')?'none':'block';
   if(!salons.length){
     $('hpSalonList').innerHTML=`<div class="empty"><div class="empty-ic">🏪</div><div class="empty-t">Nessun salone ancora.<br>Accedi come Admin per crearne uno.</div></div>`;
     $('hpAdBannerContainer').innerHTML = '';
