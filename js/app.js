@@ -2046,6 +2046,9 @@ function initDash(){
   const qrBtn=$('sideQrBtn');
   if(qrBtn) qrBtn.style.display=(r==='owner'&&salon)?'block':'none';
 
+  const pwdBtn=$('sidePwdBtn');
+  if(pwdBtn) pwdBtn.style.display=(r==='owner'||r==='barber')?'inline-block':'none';
+
   // build nav per ruolo
   buildNav();
 
@@ -2059,7 +2062,6 @@ function initDash(){
 
   // status badge e pulsante nuovo (livelli 2 e 3)
   $('statusBadge').style.display=r!=='admin'?'inline-block':'none';
-  $('newBtn').style.display='none';
 
   // Load Homepage Ad in Admin form
   if (r === 'admin') {
@@ -2113,6 +2115,7 @@ function navItems(){
       {sec:'newSalon',  ic:'➕',label:'Nuovo Salone'},
       {sec:'home',      ic:'🏠',label:'Homepage'},
       {sec:'stats',     ic:'📊',label:'Statistiche'},
+      {sec:'utenti',    ic:'🔑',label:'Gestione Utenti'},
     ];
   }
   // LIVELLO 2 — Proprietario
@@ -2178,7 +2181,7 @@ function showSec(sec){
   $('sideNav').querySelectorAll('.side-item').forEach(b=>b.classList.toggle('active',b.dataset.sec===sec));
   $('dTitle').textContent=titles[sec]||sec;
   $('statusBadge').style.display=(sec==='oggi'&&SESSION.role!=='admin')?'inline-block':'none';
-  $('newBtn').style.display='none';
+  $('newBtn').style.display=(sec==='oggi'&&SESSION.role!=='admin')?'inline-block':'none';
   renderDash();
 }
 
@@ -3026,13 +3029,18 @@ async function saveSalon(){
    Admin può: creare/modificare/eliminare/resettare password di proprietari e barbieri */
 let umTarget=null; // {type:'owner'|'barber', salonId, workerId}
 function renderUtenti(){
+  // Admin-only, reset-only: a single cross-salon list to quickly reset an
+  // owner's or barber's password if they forget it. Everything else about
+  // a salon/staff member (username, name, add/remove) is managed through
+  // "Modifica Salone" instead, to avoid two different places doing the
+  // same job in different ways.
   let html=`<div class="sub-sec-h">Proprietari saloni</div>`;
   STATE.salons.forEach(s=>{
     html+=`<div class="worker-card">
       <div class="av">${initials(s.ownerUsername)}</div>
       <div class="wc-info"><div class="wc-name">${s.name}</div><div class="wc-meta">@${s.ownerUsername} · Proprietario (Liv. 2)</div></div>
       <div class="wc-btns">
-        <button class="iconbtn" data-utype="owner" data-usid="${s.id}" title="Modifica/reset password">🔑</button>
+        <button class="iconbtn" data-utype="owner" data-usid="${s.id}" title="Reset password">🔑</button>
       </div>
     </div>`;
   });
@@ -3043,69 +3051,76 @@ function renderUtenti(){
         <div class="av">${initials(w.name)}</div>
         <div class="wc-info"><div class="wc-name">${w.name}</div><div class="wc-meta">@${w.username} · ${s.name} · Barbiere (Liv. 3)</div></div>
         <div class="wc-btns">
-          <button class="iconbtn" data-utype="barber" data-usid="${s.id}" data-uwid="${w.id}" title="Modifica">✏️</button>
-          <button class="iconbtn del" data-udel="${w.id}" data-usid="${s.id}" title="Elimina">🗑️</button>
+          <button class="iconbtn" data-utype="barber" data-usid="${s.id}" data-uwid="${w.id}" title="Reset password">🔑</button>
         </div>
       </div>`;
     });
   });
-  html+=`<div style="margin-top:18px"><button class="add-srv" id="addGlobalWorkerBtn">+ Aggiungi barbiere a un salone</button></div>`;
   $('utentiList').innerHTML=html;
-  // owner password reset
   $('utentiList').querySelectorAll('[data-utype="owner"]').forEach(b=>b.addEventListener('click',()=>{
     const s=STATE.salons.find(x=>x.id===b.dataset.usid);if(!s)return;
-    openUserModal({type:'owner',salonId:s.id,label:`Proprietario · ${s.name}`,username:s.ownerUsername});
+    openUserModal({type:'owner',salonId:s.id,label:`Proprietario · ${s.name}`});
   }));
-  // barber edit
   $('utentiList').querySelectorAll('[data-utype="barber"]').forEach(b=>b.addEventListener('click',()=>{
     const s=STATE.salons.find(x=>x.id===b.dataset.usid);const w=s?.workers.find(x=>x.id===b.dataset.uwid);if(!w)return;
-    openUserModal({type:'barber',salonId:s.id,workerId:w.id,label:`${w.name} · ${s.name}`,username:w.username,name:w.name});
+    openUserModal({type:'barber',salonId:s.id,workerId:w.id,label:`${w.name} · ${s.name}`});
   }));
-  // delete barber
-  $('utentiList').querySelectorAll('[data-udel]').forEach(b=>b.addEventListener('click',async()=>{
-    const s=STATE.salons.find(x=>x.id===b.dataset.usid);if(!s)return;
-    if(!confirm('Eliminare questo dipendente?'))return;
-    s.workers=s.workers.filter(x=>x.id!==b.dataset.udel);
-    await saveState();renderUtenti();
-  }));
-  // add barber globally
-  $('utentiList').querySelector('#addGlobalWorkerBtn')?.addEventListener('click',()=>{
-    if(!STATE.salons.length){alert('Crea prima un salone');return;}
-    const opts=STATE.salons.map((s,i)=>`${i+1}. ${s.name}`).join('\n');
-    const choice=prompt('A quale salone aggiungere il dipendente?\n'+opts);
-    if(!choice)return;
-    const idx=parseInt(choice)-1;
-    if(isNaN(idx)||!STATE.salons[idx])return;
-    openWorkerModal('new',STATE.salons[idx]);
-  });
 }
-function openUserModal({type,salonId,workerId,label,username,name}){
+function openUserModal({type,salonId,workerId,label}){
   umTarget={type,salonId,workerId};
   clearErr('umErr');
-  $('userModalH').textContent='Modifica · '+label;
-  let html='';
-  if(type==='barber'){
-    html+=`<label class="d-lbl">Nome</label><input class="minput" id="umName" value="${name||''}" placeholder="Nome" style="margin-bottom:14px">`;
-    html+=`<label class="d-lbl">Username</label><input class="minput" id="umUser" value="${username||''}" placeholder="username" style="margin-bottom:14px">`;
-  } else {
-    html+=`<label class="d-lbl">Username</label><input class="minput" id="umUser" value="${username||''}" placeholder="username" style="margin-bottom:14px">`;
-  }
-  html+=`<label class="d-lbl">Nuova password</label><input class="minput" id="umPwd" placeholder="lascia vuoto per non cambiare" type="password" style="margin-bottom:14px">`;
-  $('umFields').innerHTML=html;
+  $('userModalH').textContent='Reset password · '+label;
+  $('umFields').innerHTML=`<label class="d-lbl">Nuova password</label><input class="minput" id="umPwd" placeholder="Nuova password" type="password" style="margin-bottom:14px">`;
   $('userModal').classList.add('show');
 }
 async function saveUserModal(){
   const t=umTarget;if(!t)return;
   const pwd=$('umPwd').value.trim();
+  if(!pwd)return showErr('umErr','Inserisci una nuova password.');
   if(t.type==='owner'){
     const s=STATE.salons.find(x=>x.id===t.salonId);if(!s)return;
-    const usr=$('umUser').value.trim();if(usr)s.ownerUsername=usr;if(pwd)s.ownerPassword=pwd;
+    s.ownerPassword=pwd;
+  } else if(t.type==='self'){
+    const curPwd=$('umCurPwd').value;
+    const pwd2=$('umPwd2').value;
+    if(pwd.length<4)return showErr('umErr','La nuova password deve avere almeno 4 caratteri.');
+    if(pwd!==pwd2)return showErr('umErr','Le due password non coincidono.');
+    const salon=getSalon();if(!salon)return;
+    if(SESSION.role==='owner'){
+      if(curPwd!==salon.ownerPassword)return showErr('umErr','Password attuale non corretta.');
+      salon.ownerPassword=pwd;
+    } else if(SESSION.role==='barber'){
+      const w=salon.workers.find(x=>x.id===SESSION.workerId);if(!w)return;
+      if(curPwd!==w.password)return showErr('umErr','Password attuale non corretta.');
+      w.password=pwd;
+    }
+    await saveState();closeModal('userModal');
+    alert('Password aggiornata con successo.');
+    return;
   } else {
     const s=STATE.salons.find(x=>x.id===t.salonId);const w=s?.workers.find(x=>x.id===t.workerId);if(!w)return;
-    const nm=$('umName').value.trim();const usr=$('umUser').value.trim();
-    if(nm)w.name=nm;if(usr)w.username=usr;if(pwd)w.password=pwd;
+    w.password=pwd;
   }
   await saveState();closeModal('userModal');renderUtenti();
+}
+
+// Owner/barber self-service password change, reachable from the sidebar —
+// unlike the admin reset above, this requires the CURRENT password first
+// since the user is changing their own credentials, not an admin overriding
+// someone else's.
+function openSelfPasswordModal(){
+  umTarget={type:'self'};
+  clearErr('umErr');
+  $('userModalH').textContent='Cambia la tua password';
+  $('umFields').innerHTML=`
+    <label class="d-lbl">Password attuale</label>
+    <input class="minput" id="umCurPwd" type="password" placeholder="Password attuale" style="margin-bottom:14px">
+    <label class="d-lbl">Nuova password</label>
+    <input class="minput" id="umPwd" type="password" placeholder="Nuova password" style="margin-bottom:14px">
+    <label class="d-lbl">Conferma nuova password</label>
+    <input class="minput" id="umPwd2" type="password" placeholder="Ripeti nuova password" style="margin-bottom:14px">
+  `;
+  $('userModal').classList.add('show');
 }
 
 /* ---- MODAL NUOVO APPUNTAMENTO (Livelli 2 e 3) ----
@@ -3566,6 +3581,7 @@ async function boot(){
   $('hamb').addEventListener('click',openSide);
   $('ov').addEventListener('click',closeSide);
   $('sideOut').addEventListener('click',doLogout);
+  $('sidePwdBtn').addEventListener('click',openSelfPasswordModal);
   
   // Wire navigation dropdown menu
   $('navMenu').addEventListener('change', (e) => {
