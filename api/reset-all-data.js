@@ -1,10 +1,11 @@
-import { setSalonsDb, kvCmd } from '../lib/kv.js';
+import { setSalonsDb, kvCmd, getAdminDb } from '../lib/kv.js';
 
 // Admin-only, destructive, one-shot "start fresh with real salons" action —
 // wipes every salon/worker/booking/push-subscription/slot-lock currently
 // stored, used once when the business switches from test/demo data to real
-// production data. Requires an exact confirmation phrase from the client
-// (checked here too, not just in the UI) so this can't fire by accident.
+// production data. Requires the admin's actual current password (verified
+// here server-side too, not just in the UI) so this can't fire by accident
+// or from someone who only knows a static confirmation phrase.
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -14,8 +15,12 @@ export default async function handler(req, res) {
 
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
-    if (!body || body.confirm !== 'ELIMINA TUTTO') {
-      return res.status(400).json({ error: 'Missing or incorrect confirmation phrase' });
+    if (!body || typeof body.password !== 'string' || !body.password) {
+      return res.status(400).json({ error: 'Missing password' });
+    }
+    const admin = await getAdminDb(kvUrl, kvToken);
+    if (body.password !== admin.password) {
+      return res.status(401).json({ error: 'Incorrect password' });
     }
 
     await setSalonsDb(kvUrl, kvToken, []);

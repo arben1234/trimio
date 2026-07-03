@@ -2,7 +2,7 @@ import webPush from 'web-push';
 import {
   getSalonsDb, setSalonsDb, getAllBookings,
   tryAcquireSlotLock, promoteLock, releaseSlotLock, hsetBooking,
-  ensureMigratedV2
+  ensureMigratedV2, getAdminDb, setAdminDb
 } from '../lib/kv.js';
 
 // VAPID public key is safe to keep in source — it's meant to be shipped to
@@ -60,11 +60,12 @@ export default async function handler(req, res) {
 
       if (req.method === 'GET') {
         console.log('[SYNC] Reading database state from Vercel KV');
-        const [salons, bookingsMap] = await Promise.all([
+        const [salons, bookingsMap, admin] = await Promise.all([
           getSalonsDb(kvUrl, kvToken),
-          getAllBookings(kvUrl, kvToken)
+          getAllBookings(kvUrl, kvToken),
+          getAdminDb(kvUrl, kvToken)
         ]);
-        return res.status(200).json({ bookings: Array.from(bookingsMap.values()), salons });
+        return res.status(200).json({ bookings: Array.from(bookingsMap.values()), salons, admin });
       }
 
       if (req.method === 'POST') {
@@ -137,6 +138,12 @@ export default async function handler(req, res) {
           } else {
             console.warn('[SYNC] Ignoring malformed salons payload (not written to salons_db)');
           }
+        }
+
+        if (newData.admin && typeof newData.admin === 'object'
+            && typeof newData.admin.username === 'string' && newData.admin.username
+            && typeof newData.admin.password === 'string' && newData.admin.password) {
+          await setAdminDb(kvUrl, kvToken, { username: newData.admin.username, password: newData.admin.password });
         }
 
         // Send push notifications for new bookings — must be awaited, not

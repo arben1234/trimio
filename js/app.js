@@ -640,7 +640,8 @@ async function saveState(){
       },
       body: JSON.stringify({
         bookings: cleanBookings,
-        salons: STATE.salons
+        salons: STATE.salons,
+        admin: STATE.admin
       })
     });
     if (syncResp.ok) {
@@ -759,6 +760,14 @@ function initCloudSync() {
           saveState(); // Upload local salons to seed the cloud database
         }
 
+        // Admin credentials: adopt whatever the server has (so a password
+        // change made from any device is picked up everywhere); if the
+        // server has none yet, keep the local default and it'll be pushed
+        // up on the next saveState().
+        if (data.admin && typeof data.admin.username === 'string' && data.admin.username && typeof data.admin.password === 'string' && data.admin.password) {
+          STATE.admin = data.admin;
+        }
+
         if (data.bookings) {
           const fbBookings = Array.isArray(data.bookings) ? data.bookings : Object.values(data.bookings);
           const prevBookings = STATE.bookings || [];
@@ -846,6 +855,10 @@ function initCloudSync() {
             if (wasNormalized) {
               saveState(); // Sync normalized credentials back to Vercel Blob cloud
             }
+          }
+
+          if (data.admin && typeof data.admin.username === 'string' && data.admin.username && typeof data.admin.password === 'string' && data.admin.password) {
+            STATE.admin = data.admin;
           }
 
           localStorage.setItem(SK, JSON.stringify({ ...STATE, bookings: fbBookings }));
@@ -2055,6 +2068,7 @@ function initDash(){
     $('adDescInput').value = ad.description || '';
     $('adBtnInput').value = ad.btnText || '';
     $('adCodeInput').value = ad.code || '';
+    if ($('adminNewUser')) $('adminNewUser').value = STATE.admin.username;
   }
 
   const firstSec=navItems()[0].sec;
@@ -3452,14 +3466,14 @@ async function boot(){
   // di test, per quando si passa a saloni reali. Richiede una frase esatta
   // digitata dall'admin, non solo un confirm(), data la gravità dell'azione.
   $('resetAllDataBtn')?.addEventListener('click', async () => {
-    const typed = prompt('Questa azione ELIMINA PERMANENTEMENTE tutti i saloni e le prenotazioni. Per confermare, scrivi esattamente: ELIMINA TUTTO');
+    const typed = prompt('Questa azione ELIMINA PERMANENTEMENTE tutti i saloni e le prenotazioni. Per confermare, inserisci la tua password di amministratore:');
     if (typed === null) return;
-    if (typed !== 'ELIMINA TUTTO') { alert('Testo non corretto. Operazione annullata.'); return; }
+    if (typed !== STATE.admin.password) { alert('Password errata. Operazione annullata.'); return; }
     try {
       const resp = await fetch('/api/reset-all-data', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ confirm: 'ELIMINA TUTTO' })
+        body: JSON.stringify({ password: typed })
       });
       if (resp.ok) {
         alert('Tutti i dati sono stati eliminati. La pagina verrà ricaricata.');
@@ -3470,6 +3484,28 @@ async function boot(){
       }
     } catch (e) {
       alert('Errore di connessione al server: ' + e.message);
+    }
+  });
+
+  // Cambia Password Amministratore (solo admin)
+  $('saveAdminCredsBtn')?.addEventListener('click', async () => {
+    const curPwd = $('adminCurPwd').value;
+    const newUser = $('adminNewUser').value.trim();
+    const newPwd = $('adminNewPwd').value;
+    const newPwd2 = $('adminNewPwd2').value;
+    clearErr('adminCredsErr');
+    if (curPwd !== STATE.admin.password) return showErr('adminCredsErr', 'Password attuale non corretta.');
+    if (!newUser) return showErr('adminCredsErr', 'Inserisci un username.');
+    if (!newPwd || newPwd.length < 4) return showErr('adminCredsErr', 'La nuova password deve avere almeno 4 caratteri.');
+    if (newPwd !== newPwd2) return showErr('adminCredsErr', 'Le due password non coincidono.');
+    STATE.admin = { username: newUser, password: newPwd };
+    const r = await saveState();
+    if (r.ok) {
+      $('adminCurPwd').value = ''; $('adminNewPwd').value = ''; $('adminNewPwd2').value = '';
+      $('adminNewUser').value = STATE.admin.username;
+      alert('Credenziali amministratore aggiornate con successo.');
+    } else {
+      showErr('adminCredsErr', 'Errore di salvataggio, riprova.');
     }
   });
 

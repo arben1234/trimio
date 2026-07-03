@@ -812,6 +812,7 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
 section('api/reset-all-data.js — wipe all test data before going live (fake KV, no live network)');
 await withFakeKv(makeFakeRedis(), async (fake) => {
   fake.strings.set('salons_db', JSON.stringify([{ id: 'salonA', name: 'Salon A' }]));
+  fake.strings.set('admin_db', JSON.stringify({ username: 'admin', password: 'realSecret1' }));
   fake.hashes.set('bookings', new Map([
     ['bkA1', JSON.stringify({ id: 'bkA1', salonId: 'salonA', status: 'confirmed' })]
   ]));
@@ -819,18 +820,42 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
   fake.strings.set('lock:salonA:w1:2030-01-01:10:00', 'bkA1');
   const handler = await freshImport('api/reset-all-data.js');
 
+  const r0 = mkRes();
+  await handler({ method: 'POST', body: {} }, r0.obj);
+  eq(r0.status, 400, 'rejects a request with no password at all');
+
   const r1 = mkRes();
-  await handler({ method: 'POST', body: { confirm: 'wrong phrase' } }, r1.obj);
-  eq(r1.status, 400, 'rejects a request with an incorrect confirmation phrase');
-  ok(fake.strings.has('salons_db') && JSON.parse(fake.strings.get('salons_db')).length === 1, 'salons_db untouched after a rejected confirmation');
+  await handler({ method: 'POST', body: { password: 'wrongPassword' } }, r1.obj);
+  eq(r1.status, 401, 'rejects a request with an incorrect admin password');
+  ok(fake.strings.has('salons_db') && JSON.parse(fake.strings.get('salons_db')).length === 1, 'salons_db untouched after a rejected password');
 
   const r2 = mkRes();
-  await handler({ method: 'POST', body: { confirm: 'ELIMINA TUTTO' } }, r2.obj);
-  ok(r2.status === 200 && r2.body.success === true, 'wipes everything once the exact confirmation phrase is provided');
+  await handler({ method: 'POST', body: { password: 'realSecret1' } }, r2.obj);
+  ok(r2.status === 200 && r2.body.success === true, 'wipes everything once the correct current admin password is provided');
   eq(JSON.parse(fake.strings.get('salons_db')).length, 0, 'salons_db is now an empty array');
   ok(!fake.hashes.has('bookings') || fake.hashes.get('bookings').size === 0, 'bookings hash is emptied');
   ok(!fake.strings.has('push_subscriptions') || JSON.parse(fake.strings.get('push_subscriptions') || '[]').length === 0, 'push_subscriptions cleared');
   ok(!fake.strings.has('lock:salonA:w1:2030-01-01:10:00'), 'stale slot locks are cleared');
+});
+
+section('api/sync.js — admin credentials sync across devices (fake KV, no live network)');
+await withFakeKv(makeFakeRedis(), async (fake) => {
+  const handler = await freshImport('api/sync.js');
+  fake.strings.set('salons_db', JSON.stringify([{ id: 'salon1', name: 'Salon', workers: [] }]));
+
+  const r1 = mkRes();
+  await handler({ method: 'GET' }, r1.obj);
+  eq(r1.body.admin.username, 'admin', 'GET falls back to the default admin username when none stored yet');
+  eq(r1.body.admin.password, 'admin123', 'GET falls back to the default admin password when none stored yet');
+
+  const r2 = mkRes();
+  await handler({ method: 'POST', body: { admin: { username: 'boss', password: 'newSecret9' } } }, r2.obj);
+  eq(r2.status, 200, 'POST with new admin credentials succeeds');
+
+  const r3 = mkRes();
+  await handler({ method: 'GET' }, r3.obj);
+  eq(r3.body.admin.username, 'boss', 'GET now reflects the updated admin username');
+  eq(r3.body.admin.password, 'newSecret9', 'GET now reflects the updated admin password');
 });
 
 section('api/subscribe.js — push subscription storage (fake KV, no live network)');

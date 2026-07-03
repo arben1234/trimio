@@ -488,6 +488,23 @@
                 </div>
               </div>
 
+              <!-- CAMBIA CREDENZIALI AMMINISTRATORE (SOLO ADMIN) -->
+              <div class="sub-sec-h" style="margin-top:28px;">Credenziali Amministratore</div>
+              <div class="srv" style="margin-top:10px;">
+                <div class="srv-edit" style="display:flex; flex-direction:column; gap:10px;">
+                  <div class="err" id="adminCredsErr"></div>
+                  <label class="d-lbl" style="margin-bottom:2px;">Password attuale (per conferma)</label>
+                  <input class="minput" id="adminCurPwd" type="password" placeholder="Password attuale">
+                  <label class="d-lbl" style="margin-bottom:2px;">Nuovo username</label>
+                  <input class="minput" id="adminNewUser" placeholder="admin">
+                  <label class="d-lbl" style="margin-bottom:2px;">Nuova password</label>
+                  <input class="minput" id="adminNewPwd" type="password" placeholder="Nuova password">
+                  <label class="d-lbl" style="margin-bottom:2px;">Conferma nuova password</label>
+                  <input class="minput" id="adminNewPwd2" type="password" placeholder="Ripeti nuova password">
+                  <button class="b-save" id="saveAdminCredsBtn" style="padding:12px; margin-top:8px; width:100%; border:none; border-radius:10px; cursor:pointer;">Salva Credenziali</button>
+                </div>
+              </div>
+
               <!-- ZONA PERICOLOSA (SOLO ADMIN): elimina tutti i dati di test -->
               <div class="sub-sec-h" style="margin-top:28px; color:#dc2626;">Zona Pericolosa</div>
               <div class="srv" style="margin-top:10px; padding:16px; border:1.5px solid #fecaca; background:#fef2f2;">
@@ -750,6 +767,6 @@
      own "Save as PDF" print target produces a clean report. -->
 <div id="printableStats"></div>
 
-<script src="js/app.min.js?v=20260703_0001"></script>
+<script src="js/app.min.js?v=20260703_0002"></script>
 </body>
 </html>
