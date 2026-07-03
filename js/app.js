@@ -1423,7 +1423,11 @@ let lastBookingId=null;
 function updateManifestLink(){
   const link=document.querySelector('link[rel="manifest"]');
   if(!link) return;
-  const start=location.pathname+location.hash;
+  // The salon goes into a QUERY param (?s=SLUG), not the #hash: WebKit drops
+  // URL fragments from a manifest start_url, which sent every installed app
+  // back to the root admin login. boot() translates ?s= back into the hash.
+  const h=(location.hash||'').replace('#','');
+  const start=(h&&h.indexOf('admin/')!==0)?('/?s='+encodeURIComponent(h)):'/';
   link.href='/api/manifest?start='+encodeURIComponent(start);
 }
 
@@ -3428,6 +3432,16 @@ async function submitBarberReview() {
 
 
 async function boot(){
+  // An installed PWA launches with ?s=SLUG (set by the dynamic manifest's
+  // start_url) — translate it into the normal #SLUG hash before anything
+  // reads location, so the rest of the routing works unchanged.
+  try{
+    const qsSlug=new URLSearchParams(location.search).get('s');
+    if(qsSlug&&!location.hash){
+      history.replaceState(null,'',location.pathname+'#'+qsSlug);
+    }
+  }catch(e){}
+
   await loadState();
 
   initCloudSync();

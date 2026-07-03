@@ -12,6 +12,20 @@
   <meta name="apple-mobile-web-app-title" content="TRIMIO">
   <link rel="apple-touch-icon" href="logo.png">
   <link rel="manifest" href="manifest.json">
+  <script>
+  // Point the manifest at /api/manifest with the current salon captured as a
+  // QUERY param (?s=SLUG) synchronously at parse time — before iOS can fetch
+  // it — so "Aggiungi alla schermata Home" installs an app that reopens this
+  // exact salon page. A query param is used instead of the #hash because
+  // WebKit drops URL fragments from a manifest start_url.
+  (function(){
+    var l=document.querySelector('link[rel="manifest"]');
+    if(!l)return;
+    var h=(location.hash||'').replace('#','');
+    var start=(h&&h.indexOf('admin/')!==0)?('/?s='+encodeURIComponent(h)):'/';
+    l.href='/api/manifest?start='+encodeURIComponent(start);
+  })();
+  </script>
   <link rel="stylesheet" href="css/style.css?v=202607022101">
   <!-- Firebase Compatibility SDKs -->
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
@@ -768,6 +782,6 @@
      own "Save as PDF" print target produces a clean report. -->
 <div id="printableStats"></div>
 
-<script src="js/app.min.js?v=20260703_0009"></script>
+<script src="js/app.min.js?v=20260704_0001"></script>
 </body>
 </html>
