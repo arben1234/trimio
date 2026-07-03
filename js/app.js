@@ -1715,12 +1715,10 @@ function updateNavMenu() {
   const menu = $('navMenu');
   if (!menu) return;
 
-  // Admin: the sidebar (Saloni / Nuovo Salone / Homepage / Statistiche / Esci)
-  // is the navigation while inside the dashboard — hide this header dropdown
-  // there to avoid duplicating the same destinations. The public Homepage
-  // view has no sidebar/hamburger of its own though, so show the same set of
-  // destinations here directly (skipping Login, not applicable once logged
-  // in, and Homepage, since admin is already there).
+  // Admin has exactly ONE navigation: the dashboard sidebar. This header
+  // dropdown must never duplicate its sections — while on the public
+  // Homepage it only offers the single way INTO the dashboard (plus logout),
+  // and inside the dashboard it's hidden entirely.
   if (SESSION && SESSION.role === 'admin') {
     const onDash = document.querySelector('.view.on')?.id === 'vDash';
     if (onDash) {
@@ -1730,9 +1728,7 @@ function updateNavMenu() {
       menu.style.display = '';
       menu.innerHTML = `
         <option value="" disabled selected>☰ Menu</option>
-        <option value="nav_saloni">🏪 Gestione Saloni</option>
-        <option value="admin_new_salon">➕ Nuovo Salone</option>
-        <option value="nav_stats">📊 Statistiche</option>
+        <option value="dashboard">🗂️ Pannello Admin</option>
         <option value="logout">🚪 Esci</option>
       `;
     }
