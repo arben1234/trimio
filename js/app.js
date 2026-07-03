@@ -672,39 +672,6 @@ async function saveState(){
   }
 }
 
-function normalizeCredentials() {
-  let changed = false;
-  if (STATE && STATE.salons) {
-    STATE.salons.forEach(s => {
-      // 1. Owner credentials
-      if (s.ownerPassword === 'owner123' && s.ownerUsername !== 'owner') {
-        s.ownerUsername = 'owner';
-        changed = true;
-      }
-      
-      // 2. Worker credentials
-      if (s.workers) {
-        const nameCounts = {};
-        s.workers.forEach(w => {
-          const firstName = w.name.split(' ')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
-          nameCounts[firstName] = (nameCounts[firstName] || 0) + 1;
-          const suffix = nameCounts[firstName] > 1 ? (nameCounts[firstName] - 1) : '';
-          
-          const expectedUser = firstName + suffix;
-          const expectedPass = firstName + '123';
-          
-          if (w.username !== expectedUser || w.password !== expectedPass) {
-            w.username = expectedUser;
-            w.password = expectedPass;
-            changed = true;
-          }
-        });
-      }
-    });
-  }
-  return changed;
-}
-
 function initCloudSync() {
   const updateUIStatus = (isConnected) => {
     const dot = $('adminSyncStatusDot');
@@ -751,12 +718,7 @@ function initCloudSync() {
         // If the cloud is brand new and empty, upload our local salons to initialize it.
         if (data.salons && data.salons.length > 0) {
           STATE.salons = data.salons;
-          const wasNormalized = normalizeCredentials();
-          if (wasNormalized) {
-            saveState(); // Persist normalized credentials to Vercel Blob cloud
-          }
         } else if (STATE.salons && STATE.salons.length > 0) {
-          normalizeCredentials();
           saveState(); // Upload local salons to seed the cloud database
         }
 
@@ -851,10 +813,6 @@ function initCloudSync() {
           // Safeguard: Only update salons if the response contains a non-empty list
           if (data.salons && data.salons.length > 0) {
             STATE.salons = data.salons;
-            const wasNormalized = normalizeCredentials();
-            if (wasNormalized) {
-              saveState(); // Sync normalized credentials back to Vercel Blob cloud
-            }
           }
 
           if (data.admin && typeof data.admin.username === 'string' && data.admin.username && typeof data.admin.password === 'string' && data.admin.password) {
@@ -3439,11 +3397,6 @@ async function submitBarberReview() {
 
 async function boot(){
   await loadState();
-  
-  const wasNormalized = normalizeCredentials();
-  if (wasNormalized) {
-    saveState();
-  }
 
   initCloudSync();
 

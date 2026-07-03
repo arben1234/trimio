@@ -127,7 +127,7 @@ try {
 new vm.Script(`
   var __EXPORTS__ = {
     STATE, DEFAULT_SERVICES, DEFAULT_SLOTS,
-    normalizeCredentials, bookedTimesFor, bookingsFor, openDays,
+    bookedTimesFor, bookingsFor, openDays,
     getDistance, deg2rad, dayLabel, initials, isoOf, todayISO, relDay,
     isOnVacation, freqTag, urlBase64ToUint8Array, isValidItalianPhone,
     validateCust, custData, doSubmit, custNext,
@@ -163,31 +163,6 @@ ok(X.DEFAULT_SLOTS.length === 16, `DEFAULT_SLOTS has 16 entries (found ${X.DEFAU
 
 const allUsernames = X.STATE.salons.flatMap(s => [s.ownerUsername, ...s.workers.map(w => w.username)]);
 eq(new Set(allUsernames).size, allUsernames.length, 'no duplicate usernames across owners/workers');
-
-/* ================================================================
-   3. normalizeCredentials()
-================================================================ */
-section('normalizeCredentials()');
-{
-  const s = X.STATE.salons[0];
-  const origUser = s.ownerUsername;
-  s.ownerUsername = 'weird_owner_name';
-  s.ownerPassword = 'owner123';
-  const changed = X.normalizeCredentials();
-  ok(changed === true, 'reports changed=true when owner username drifts from convention');
-  ok(s.ownerUsername === 'owner', 'owner username normalized back to "owner"');
-  s.ownerUsername = origUser; // restore
-
-  const w = s.workers[0];
-  const savedU = w.username, savedP = w.password;
-  w.username = 'totally-wrong'; w.password = 'totally-wrong';
-  const changed2 = X.normalizeCredentials();
-  ok(changed2 === true, 'reports changed=true when worker credentials drift');
-  ok(w.username === savedU && w.password === savedP, 'worker credentials normalized back to firstname/firstname123');
-
-  const changed3 = X.normalizeCredentials();
-  ok(changed3 === false, 'idempotent: no changes reported when credentials already normalized');
-}
 
 /* ================================================================
    4. DATE / GEO UTILITIES
