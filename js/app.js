@@ -3390,81 +3390,6 @@ async function submitBarberReview() {
   renderBarberGrid();
 }
 
-function seedDemoBookings() {
-  const start = new Date('2026-01-01T00:00:00');
-  const end = new Date('2026-07-15T00:00:00');
-  
-  if (!STATE.bookings) STATE.bookings = [];
-  const tempBookings = [];
-  const clientNames = ['Alessandro', 'Marco', 'Andrea', 'Matteo', 'Luca', 'Sofia', 'Giuseppe', 'Francesco', 'Roberto', 'Antonio', 'Lorenzo', 'Giovanni', 'Filippo', 'Simone', 'Davide', 'Gabriele', 'Stefano', 'Fabio', 'Pietro', 'Federico', 'Matilde', 'Giacomo', 'Sara', 'Emma', 'Riccardo', 'Tommaso', 'Leonardo', 'Chiara', 'Edoardo', 'Alice'];
-  
-  // Seedable LCG pseudo-random number generator for deterministic seed
-  let seed = 42;
-  function random() {
-    seed = (seed * 9301 + 49297) % 233280;
-    return seed / 233280;
-  }
-  
-  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    const iso = `${year}-${month}-${day}`;
-    const dayOfWeek = d.getDay(); // 0 = Sunday
-    
-    STATE.salons.forEach(s => {
-      // If Sunday, skip
-      if (s.closedDays && s.closedDays.includes(dayOfWeek)) return;
-      
-      const services = s.services || DEFAULT_SERVICES;
-      const slots = s.timeSlots || DEFAULT_SLOTS;
-      
-      s.workers.forEach(w => {
-        // Generate 5-6 bookings per day (either 5 or 6)
-        const numBookings = Math.floor(random() * 2) + 5;
-        
-        // Pick random slots for this day
-        const tempSlots = [...slots];
-        const pickedSlots = [];
-        for (let i = 0; i < numBookings && tempSlots.length > 0; i++) {
-          const idx = Math.floor(random() * tempSlots.length);
-          pickedSlots.push(tempSlots.splice(idx, 1)[0]);
-        }
-        
-        pickedSlots.sort();
-        
-        pickedSlots.forEach(slotTime => {
-          const srvIdx = Math.floor(random() * services.length);
-          const srv = services[srvIdx];
-          
-          const clientName = clientNames[Math.floor(random() * clientNames.length)];
-          const isCompleted = d < new Date(); // past are completed, future are confirmed
-          
-          tempBookings.push({
-            id: 'demo_' + s.id + '_' + w.id + '_' + iso.replace(/-/g, '') + '_' + slotTime.replace(':', ''),
-            salonId: s.id,
-            workerId: w.id,
-            workerName: w.name,
-            name: clientName,
-            dateISO: iso,
-            dateLabel: dayLabel(iso),
-            time: slotTime,
-            service: srv.name,
-            price: srv.price,
-            status: isCompleted ? 'completed' : 'confirmed',
-            source: random() > 0.35 ? 'online' : 'manual',
-            createdAt: `${iso}T${slotTime}:00.000Z`,
-            isDemo: true
-          });
-        });
-      });
-    });
-  }
-  
-  // Merge user bookings with demo bookings (demo bookings first so they show in charts, then user bookings on top)
-  const userBookings = (STATE.bookings || []).filter(b => !b.isDemo);
-  STATE.bookings = [...tempBookings, ...userBookings];
-}
 
 async function boot(){
   await loadState();
@@ -3474,7 +3399,6 @@ async function boot(){
     saveState();
   }
 
-  seedDemoBookings();
   initCloudSync();
 
 
@@ -3522,6 +3446,31 @@ async function boot(){
     await saveState();
     alert('Annuncio salvato con successo!');
     renderHomepage();
+  });
+
+  // Zona Pericolosa (solo admin) — cancella permanentemente saloni/prenotazioni
+  // di test, per quando si passa a saloni reali. Richiede una frase esatta
+  // digitata dall'admin, non solo un confirm(), data la gravità dell'azione.
+  $('resetAllDataBtn')?.addEventListener('click', async () => {
+    const typed = prompt('Questa azione ELIMINA PERMANENTEMENTE tutti i saloni e le prenotazioni. Per confermare, scrivi esattamente: ELIMINA TUTTO');
+    if (typed === null) return;
+    if (typed !== 'ELIMINA TUTTO') { alert('Testo non corretto. Operazione annullata.'); return; }
+    try {
+      const resp = await fetch('/api/reset-all-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: 'ELIMINA TUTTO' })
+      });
+      if (resp.ok) {
+        alert('Tutti i dati sono stati eliminati. La pagina verrà ricaricata.');
+        location.reload();
+      } else {
+        const err = await resp.json().catch(() => ({}));
+        alert('Errore durante l\'eliminazione: ' + (err.error || 'sconosciuto'));
+      }
+    } catch (e) {
+      alert('Errore di connessione al server: ' + e.message);
+    }
   });
 
   // ---- Back Buttons wiring ----

@@ -141,10 +141,9 @@ new vm.Script(`
   // boot() auto-runs at the bottom of app.js (real behaviour). Its
   // continuation (after "await loadState()") fires as a microtask the
   // first time our test script itself awaits something. Neutralise the
-  // side effects we don't want racing our assertions (thousands of demo
-  // bookings, live geolocation, cloud-sync polling) — this only affects
-  // how the test drives app.js, it does not modify app.js itself.
-  seedDemoBookings = function(){};
+  // side effects we don't want racing our assertions (live geolocation,
+  // cloud-sync polling) — this only affects how the test drives app.js,
+  // it does not modify app.js itself.
   initCloudSync = function(){};
   findNearestSalons = function(){};
 `, { filename: 'export-shim.js' }).runInContext(context);
@@ -562,6 +561,12 @@ function makeFakeRedis() {
         if (h) for (const [f, v] of h.entries()) flat.push(f, v);
         return okResult(flat);
       }
+      case 'KEYS': {
+        const [pattern] = rest;
+        const re = new RegExp('^' + String(pattern).split('*').map(s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$');
+        const matched = [...strings.keys()].filter(k => alive(k) && re.test(k));
+        return okResult(matched);
+      }
       default:
         throw new Error('Unsupported fake redis command in test harness: ' + cmd);
     }
@@ -802,6 +807,30 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
   const r2 = mkRes();
   await handler({ method: 'POST', body: { salonId: 'does-not-exist' } }, r2.obj);
   eq(r2.status, 404, 'delete-salon returns 404 for an unknown salonId');
+});
+
+section('api/reset-all-data.js — wipe all test data before going live (fake KV, no live network)');
+await withFakeKv(makeFakeRedis(), async (fake) => {
+  fake.strings.set('salons_db', JSON.stringify([{ id: 'salonA', name: 'Salon A' }]));
+  fake.hashes.set('bookings', new Map([
+    ['bkA1', JSON.stringify({ id: 'bkA1', salonId: 'salonA', status: 'confirmed' })]
+  ]));
+  fake.strings.set('push_subscriptions', JSON.stringify([{ subscription: { endpoint: 'x' }, role: 'customer' }]));
+  fake.strings.set('lock:salonA:w1:2030-01-01:10:00', 'bkA1');
+  const handler = await freshImport('api/reset-all-data.js');
+
+  const r1 = mkRes();
+  await handler({ method: 'POST', body: { confirm: 'wrong phrase' } }, r1.obj);
+  eq(r1.status, 400, 'rejects a request with an incorrect confirmation phrase');
+  ok(fake.strings.has('salons_db') && JSON.parse(fake.strings.get('salons_db')).length === 1, 'salons_db untouched after a rejected confirmation');
+
+  const r2 = mkRes();
+  await handler({ method: 'POST', body: { confirm: 'ELIMINA TUTTO' } }, r2.obj);
+  ok(r2.status === 200 && r2.body.success === true, 'wipes everything once the exact confirmation phrase is provided');
+  eq(JSON.parse(fake.strings.get('salons_db')).length, 0, 'salons_db is now an empty array');
+  ok(!fake.hashes.has('bookings') || fake.hashes.get('bookings').size === 0, 'bookings hash is emptied');
+  ok(!fake.strings.has('push_subscriptions') || JSON.parse(fake.strings.get('push_subscriptions') || '[]').length === 0, 'push_subscriptions cleared');
+  ok(!fake.strings.has('lock:salonA:w1:2030-01-01:10:00'), 'stale slot locks are cleared');
 });
 
 section('api/subscribe.js — push subscription storage (fake KV, no live network)');
