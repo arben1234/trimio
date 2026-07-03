@@ -110,7 +110,7 @@ let STATE={
     address:'Via Sentierone 12',
     phone:'+39 035 123 4567',
     promo: 'Mostra questo banner in salone per ricevere uno shampoo omaggio!',
-    closedDays:[0],bookingDays:30,
+    closedDays:[],bookingDays:30,
     services:DEFAULT_SERVICES.map(s=>({...s})),
     ownerUsername:'owner',ownerPassword:'owner123',
     workers:[
@@ -170,7 +170,7 @@ let STATE={
     address:'Via Monte Napoleone 8',
     phone:'+39 02 987 6543',
     promo: '10% di sconto sul primo taglio prenotato online!',
-    closedDays:[0],bookingDays:30,
+    closedDays:[],bookingDays:30,
     services:DEFAULT_SERVICES.map(s=>({...s})),
     ownerUsername:'owner_milano',ownerPassword:'owner123',
     workers:[
@@ -218,7 +218,7 @@ let STATE={
     address:'Via del Corso 45',
     phone:'+39 06 123 4567',
     promo: 'Prenota oggi e ricevi una lozione dopo-rasatura in omaggio!',
-    closedDays:[0],bookingDays:30,
+    closedDays:[],bookingDays:30,
     services:DEFAULT_SERVICES.map(s=>({...s})),
     ownerUsername:'owner_roma',ownerPassword:'owner123',
     workers:[
@@ -265,7 +265,7 @@ let STATE={
     address:'Piazza della Signoria 5',
     phone:'+39 055 765 4321',
     promo: 'Shampoo purificante gratuito con ogni taglio + barba!',
-    closedDays:[0],bookingDays:30,
+    closedDays:[],bookingDays:30,
     services:DEFAULT_SERVICES.map(s=>({...s})),
     ownerUsername:'owner_firenze',ownerPassword:'owner123',
     workers:[
@@ -312,7 +312,7 @@ let STATE={
     address:'Via Toledo 156',
     phone:'+39 081 234 5678',
     promo: 'Mostra questo banner per una piega stile napoletano gratuita!',
-    closedDays:[0],bookingDays:30,
+    closedDays:[],bookingDays:30,
     services:DEFAULT_SERVICES.map(s=>({...s})),
     ownerUsername:'owner_napoli',ownerPassword:'owner123',
     workers:[
@@ -365,7 +365,7 @@ let STATE={
     address:'Via Roma 88',
     phone:'+39 011 345 6789',
     promo: 'Mostra questo banner per riceve un massaggio cutaneo gratuito!',
-    closedDays:[0],bookingDays:30,
+    closedDays:[],bookingDays:30,
     services:DEFAULT_SERVICES.map(s=>({...s})),
     ownerUsername:'owner_torino',ownerPassword:'owner123',
     workers:[
@@ -418,7 +418,7 @@ let STATE={
     address:'Piazza San Marco 12',
     phone:'+39 041 456 7890',
     promo: '15% di sconto sul primo servizio per residenti!',
-    closedDays:[0],bookingDays:30,
+    closedDays:[],bookingDays:30,
     services:DEFAULT_SERVICES.map(s=>({...s})),
     ownerUsername:'owner_venezia',ownerPassword:'owner123',
     workers:[
@@ -471,7 +471,7 @@ let STATE={
     address:'Via dell\'Indipendenza 22',
     phone:'+39 051 567 8901',
     promo: 'Fai un taglio + barba e ricevi uno spray fissante omaggio!',
-    closedDays:[0],bookingDays:30,
+    closedDays:[],bookingDays:30,
     services:DEFAULT_SERVICES.map(s=>({...s})),
     ownerUsername:'owner_bologna',ownerPassword:'owner123',
     workers:[
@@ -524,7 +524,7 @@ let STATE={
     address:'Via della Libertà 95',
     phone:'+39 091 678 9012',
     promo: 'Usa il codice PALERMO10 sul sito per prenotare a prezzo ridotto!',
-    closedDays:[0],bookingDays:30,
+    closedDays:[],bookingDays:30,
     services:DEFAULT_SERVICES.map(s=>({...s})),
     ownerUsername:'owner_palermo',ownerPassword:'owner123',
     workers:[
@@ -1386,7 +1386,7 @@ function bookingsFor(salonId,workerId=null){
 /* ======== DAYS / CHIPS ======== */
 function openDays(salon){
   const today=new Date();const out=[];let added=0,off=0;
-  const cd=salon.closedDays||[0];const bd=salon.bookingDays||30;
+  const cd=salon.closedDays||[];const bd=salon.bookingDays||30;
   while(added<bd&&off<90){
     const d=new Date(today);d.setDate(today.getDate()+off);off++;
     if(cd.includes(d.getDay()))continue;
@@ -1421,12 +1421,25 @@ const custData={barberId:null,barberName:null,dateISO:null,dateLabel:null,time:n
 let custSalon=null;
 let lastBookingId=null;
 
+// Keep the PWA manifest's start_url pointed at the page currently shown, so
+// "Aggiungi alla schermata Home" installs an app that reopens THIS page
+// (e.g. /#BARBER_ART) instead of the root admin login. This is the fix that
+// actually works on iOS: the installed app has its own separate localStorage,
+// so a stored slug can't cross over from Safari — only the captured URL can.
+function updateManifestLink(){
+  const link=document.querySelector('link[rel="manifest"]');
+  if(!link) return;
+  const start=location.pathname+location.hash;
+  link.href='/api/manifest?start='+encodeURIComponent(start);
+}
+
 function initCustomer(salon){
   custSalon=salon;
   // Remember the last salon page visited: a Home-Screen/PWA launch loses the
   // #SLUG hash (manifest start_url), so boot restores it from here instead of
   // dumping the customer on the admin login screen.
   if(canStore){try{localStorage.setItem('trimio_last_salon_slug',salon.slug);}catch(e){}}
+  updateManifestLink();
   $('hBrand').textContent=salon.name;
   $('hSlug').textContent='#'+salon.slug;$('hSlug').style.display='inline-block';
 
@@ -2393,7 +2406,7 @@ function renderCalendar(){
   for(let i=0;i<off;i++)cells+='<div class="cal-cell empty"></div>';
   for(let d=1;d<=dim;d++){
     const iso=isoOf(calYear,calMonth,d);
-    const closed=(salon.closedDays||[0]).includes(new Date(calYear,calMonth,d).getDay());
+    const closed=(salon.closedDays||[]).includes(new Date(calYear,calMonth,d).getDay());
     const n=counts[iso]||0;
     let cls='cal-cell';if(iso===tiso)cls+=' today';if(iso===calSelISO)cls+=' sel';if(closed)cls+=' closed';
     cells+=`<div class="${cls}" data-iso="${iso}"><span class="cal-n">${d}</span>${n?`<span class="cal-dot">${n}</span>`:''}</div>`;
@@ -2986,7 +2999,7 @@ async function saveSalon(){
   if(salonEditId==='new'){
     if(!oUser||!oPwd)return showErr('smErr','Username e password proprietario obbligatori');
     STATE.salons.push({
-      id:'salon'+Date.now(),name,slug,city,address,phone,promo,bgImage:bgImg,closedDays:[0],bookingDays:30,
+      id:'salon'+Date.now(),name,slug,city,address,phone,promo,bgImage:bgImg,closedDays:[],bookingDays:30,
       services:DEFAULT_SERVICES.map(s=>({...s})),workers:[],ownerUsername:oUser,ownerPassword:oPwd
     });
   } else {
@@ -3711,6 +3724,7 @@ async function boot(){
 
   // hash change
   window.addEventListener('hashchange',()=>{
+    updateManifestLink();
     const rawHash=(location.hash||'').replace('#','');
     if(rawHash.startsWith('admin/')){
       handleAdminHashRoute(rawHash);
@@ -3923,6 +3937,7 @@ async function boot(){
     showView('vLogin');
   };
   checkInitialHash();
+  updateManifestLink();
 }
 
 // Expose internal functions globally on window to support inline HTML onclick handlers in type="module" mode
