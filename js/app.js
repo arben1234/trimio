@@ -1435,11 +1435,16 @@ function updateManifestLink(){
     const start=isSalon?('/?s='+encodeURIComponent(h)):'/';
     link.href='/api/manifest?start='+encodeURIComponent(start);
   }
-  // Mirror ?s=SLUG into the ADDRESS BAR too: with the legacy
-  // apple-mobile-web-app-capable meta present, some iOS versions ignore the
-  // manifest start_url on "Aggiungi alla schermata Home" and save the current
-  // URL with the #fragment stripped — leaving the bare root (admin login).
-  // A query param in the address bar survives that stripping.
+  // iOS "Aggiungi alla schermata Home" captures the DOCUMENT URL as loaded,
+  // strips the #fragment, and ignores history.replaceState changes — so a
+  // salon page whose document was loaded without ?s=SLUG (e.g. the homepage,
+  // then tapping a salon) would install an icon that opens the admin login.
+  // First time a salon is shown in such a document, re-enter it with a REAL
+  // navigation carrying ?s=; afterwards keep the address bar in sync with
+  // replaceState (no further reloads needed within this document).
+  if(isSalon&&!DOC_LOADED_WITH_S){
+    try{location.replace(location.pathname+'?s='+encodeURIComponent(h)+'#'+h);return;}catch(e){}
+  }
   try{
     const target=location.pathname+(isSalon?('?s='+encodeURIComponent(h)):'')+(h?('#'+h):'');
     if(location.pathname+location.search+location.hash!==target){
@@ -1447,6 +1452,9 @@ function updateManifestLink(){
     }
   }catch(e){}
 }
+// Whether THIS document was loaded with ?s= in its real URL (what iOS saves
+// on Add to Home Screen). Evaluated before any history.replaceState runs.
+const DOC_LOADED_WITH_S=/[?&]s=/.test(location.search);
 
 function initCustomer(salon){
   custSalon=salon;

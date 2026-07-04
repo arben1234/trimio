@@ -19,11 +19,21 @@
   // exact salon page. A query param is used instead of the #hash because
   // WebKit drops URL fragments from a manifest start_url.
   (function(){
+    var h=(location.hash||'').replace('#','');
+    var qs='';try{qs=new URLSearchParams(location.search).get('s')||'';}catch(e){}
+    // A salon page reached via #hash only (e.g. an old QR code) is re-opened
+    // with a REAL navigation carrying ?s=SLUG. history.replaceState is not
+    // enough: iOS "Aggiungi alla schermata Home" captures the document URL
+    // as it was loaded (dropping the #fragment), ignoring later history API
+    // changes — which sent installed icons to the root admin login.
+    if(h&&h.indexOf('admin/')!==0&&qs!==h){
+      location.replace(location.pathname+'?s='+encodeURIComponent(h)+'#'+h);
+      return;
+    }
     var l=document.querySelector('link[rel="manifest"]');
     if(!l)return;
-    var h=(location.hash||'').replace('#','');
-    if(!h){try{h=new URLSearchParams(location.search).get('s')||'';}catch(e){}}
-    var start=(h&&h.indexOf('admin/')!==0)?('/?s='+encodeURIComponent(h)):'/';
+    var slug=h||qs;
+    var start=(slug&&slug.indexOf('admin/')!==0)?('/?s='+encodeURIComponent(slug)):'/';
     l.href='/api/manifest?start='+encodeURIComponent(start);
   })();
   </script>
@@ -783,6 +793,6 @@
      own "Save as PDF" print target produces a clean report. -->
 <div id="printableStats"></div>
 
-<script src="js/app.min.js?v=20260704_1215"></script>
+<script src="js/app.min.js?v=20260704_2140"></script>
 </body>
 </html>
