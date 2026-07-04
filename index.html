@@ -10,8 +10,8 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="TRIMIO">
-  <link rel="apple-touch-icon" href="logo.png">
-  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="/logo.png">
+  <link rel="manifest" href="/manifest.json">
   <script>
   // Point the manifest at /api/manifest with the current salon captured as a
   // QUERY param (?s=SLUG) synchronously at parse time — before iOS can fetch
@@ -19,25 +19,29 @@
   // exact salon page. A query param is used instead of the #hash because
   // WebKit drops URL fragments from a manifest start_url.
   (function(){
+    // The salon lives in the URL PATH (/s/SLUG): iOS "Aggiungi alla
+    // schermata Home" saves the loaded document URL stripped of the
+    // #fragment — and on some versions of the query string too — and
+    // ignores history.replaceState, so hash/query-based salon pages
+    // installed icons that opened the root admin login. A path survives
+    // every iOS version. Old links/QRs (#SLUG or ?s=SLUG) get one real
+    // redirect to their /s/SLUG form here, before iOS can capture anything.
+    var m=location.pathname.match(/^\/s\/([^\/]+)\/?$/);
+    var pathSlug=m?decodeURIComponent(m[1]):'';
     var h=(location.hash||'').replace('#','');
-    var qs='';try{qs=new URLSearchParams(location.search).get('s')||'';}catch(e){}
-    // A salon page reached via #hash only (e.g. an old QR code) is re-opened
-    // with a REAL navigation carrying ?s=SLUG. history.replaceState is not
-    // enough: iOS "Aggiungi alla schermata Home" captures the document URL
-    // as it was loaded (dropping the #fragment), ignoring later history API
-    // changes — which sent installed icons to the root admin login.
-    if(h&&h.indexOf('admin/')!==0&&qs!==h){
-      location.replace(location.pathname+'?s='+encodeURIComponent(h)+'#'+h);
+    if(!h||h.indexOf('admin/')===0){try{h=new URLSearchParams(location.search).get('s')||h;}catch(e){}}
+    if(h&&h.indexOf('admin/')!==0&&pathSlug!==h){
+      location.replace('/s/'+encodeURIComponent(h)+'#'+h);
       return;
     }
     var l=document.querySelector('link[rel="manifest"]');
     if(!l)return;
-    var slug=h||qs;
-    var start=(slug&&slug.indexOf('admin/')!==0)?('/?s='+encodeURIComponent(slug)):'/';
+    var slug=pathSlug||((h&&h.indexOf('admin/')!==0)?h:'');
+    var start=slug?('/s/'+encodeURIComponent(slug)):'/';
     l.href='/api/manifest?start='+encodeURIComponent(start);
   })();
   </script>
-  <link rel="stylesheet" href="css/style.css?v=202607022101">
+  <link rel="stylesheet" href="/css/style.css?v=202607022101">
   <!-- Firebase Compatibility SDKs -->
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
@@ -58,7 +62,7 @@
     
     <!-- Left: Logo & Title (with active salon name below) -->
     <div id="hBrandLogoWrapper" style="display:flex; align-items:center; gap:8px; cursor:pointer;" onclick="location.hash='';">
-      <img src="./logo.png" alt="TRIMIO" style="height:28px; width:28px; border-radius:50%; border:none; background:transparent; flex-shrink:0; object-fit: cover;">
+      <img src="/logo.png" alt="TRIMIO" style="height:28px; width:28px; border-radius:50%; border:none; background:transparent; flex-shrink:0; object-fit: cover;">
       <div style="display:flex; flex-direction:column; text-align:left;">
         <span style="font-family:'Cinzel', serif; font-weight:900; font-size:14px; letter-spacing:1.5px; color:#fff; line-height:1.2;">TRIMIO</span>
         <span id="hBrand" style="font-size:11px; font-weight:700; color:#e5c158; line-height:1.2; display:none;">—</span>
@@ -81,7 +85,7 @@
         <div class="hp-hero">
           <div class="hp-hero-bg"></div>
           <div class="hp-hero-content">
-            <img src="./logo.png" alt="TRIMIO Logo" style="width: 220px; height: 220px; margin-bottom: 12px; border-radius: 50%; border: none; box-shadow: 0 8px 32px rgba(0,0,0,0.8); background:transparent; object-fit: cover;">
+            <img src="/logo.png" alt="TRIMIO Logo" style="width: 220px; height: 220px; margin-bottom: 12px; border-radius: 50%; border: none; box-shadow: 0 8px 32px rgba(0,0,0,0.8); background:transparent; object-fit: cover;">
             <div class="hp-count" id="hpCount" style="margin-top: 8px;">— saloni</div>
           </div>
         </div>
@@ -355,6 +359,8 @@
         <button class="btn btn-main" id="loginBtn">Accedi</button>
         <button class="link" id="toCustomer" style="text-align:center">← Torna alla prenotazione</button>
       </div>
+      <!-- Build stamp: lets support confirm which version a device is running -->
+      <div style="text-align:center; font-size:10px; color:#52525b; margin-top:14px;">v. 2026-07-04.3</div>
     </div>
 
     <!-- ===== DASHBOARD (Livelli 1-2-3) ===== -->
@@ -793,6 +799,6 @@
      own "Save as PDF" print target produces a clean report. -->
 <div id="printableStats"></div>
 
-<script src="js/app.min.js?v=20260704_2140"></script>
+<script src="/js/app.min.js?v=20260704_2320"></script>
 </body>
 </html>

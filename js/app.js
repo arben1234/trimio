@@ -1425,36 +1425,27 @@ let lastBookingId=null;
 // actually works on iOS: the installed app has its own separate localStorage,
 // so a stored slug can't cross over from Safari — only the captured URL can.
 function updateManifestLink(){
-  // The salon goes into a QUERY param (?s=SLUG), not the #hash: WebKit drops
-  // URL fragments from a manifest start_url, which sent every installed app
-  // back to the root admin login. boot() translates ?s= back into the hash.
+  // The salon lives in the URL PATH (/s/SLUG). iOS "Aggiungi alla schermata
+  // Home" saves the loaded document URL stripped of the #fragment (and on
+  // some versions of the ?query too) and ignores history.replaceState — a
+  // path is the only part that survives every iOS version.
   const h=(location.hash||'').replace('#','');
   const isSalon=!!h&&h.indexOf('admin/')!==0;
   const link=document.querySelector('link[rel="manifest"]');
   if(link){
-    const start=isSalon?('/?s='+encodeURIComponent(h)):'/';
+    const start=isSalon?('/s/'+encodeURIComponent(h)):'/';
     link.href='/api/manifest?start='+encodeURIComponent(start);
   }
-  // iOS "Aggiungi alla schermata Home" captures the DOCUMENT URL as loaded,
-  // strips the #fragment, and ignores history.replaceState changes — so a
-  // salon page whose document was loaded without ?s=SLUG (e.g. the homepage,
-  // then tapping a salon) would install an icon that opens the admin login.
-  // First time a salon is shown in such a document, re-enter it with a REAL
-  // navigation carrying ?s=; afterwards keep the address bar in sync with
-  // replaceState (no further reloads needed within this document).
-  if(isSalon&&!DOC_LOADED_WITH_S){
-    try{location.replace(location.pathname+'?s='+encodeURIComponent(h)+'#'+h);return;}catch(e){}
+  // If this document's real URL doesn't already carry the shown salon in its
+  // path (e.g. homepage -> tapped a salon, or an old ?s=/#hash link), re-enter
+  // it once with a REAL navigation so Add to Home Screen captures /s/SLUG.
+  if(isSalon&&DOC_PATH_SLUG!==h){
+    try{location.replace('/s/'+encodeURIComponent(h)+'#'+h);return;}catch(e){}
   }
-  try{
-    const target=location.pathname+(isSalon?('?s='+encodeURIComponent(h)):'')+(h?('#'+h):'');
-    if(location.pathname+location.search+location.hash!==target){
-      history.replaceState(null,'',target);
-    }
-  }catch(e){}
 }
-// Whether THIS document was loaded with ?s= in its real URL (what iOS saves
-// on Add to Home Screen). Evaluated before any history.replaceState runs.
-const DOC_LOADED_WITH_S=/[?&]s=/.test(location.search);
+// The salon slug embedded in THIS document's real URL path (what iOS saves
+// on Add to Home Screen). Evaluated before any history API call runs.
+const DOC_PATH_SLUG=(()=>{try{const m=location.pathname.match(/^\/s\/([^\/]+)\/?$/);return m?decodeURIComponent(m[1]):'';}catch(e){return '';}})();
 
 function initCustomer(salon){
   custSalon=salon;
@@ -3266,9 +3257,10 @@ function clearInfo(el){$(el).classList.remove('show');}
    HOMEPAGE — lista saloni con link
 ================================================================ */
 function getCurrentBaseURL(){
-  // Strip both #hash and ?s= (the address bar carries ?s=SLUG on salon pages)
-  const loc=window.location.href.split('#')[0].split('?')[0];
-  if(loc.startsWith('file://') || loc.includes('localhost') || loc.includes('127.0.0.1')){
+  // Origin only: the page may live on a /s/SLUG path, which must never leak
+  // into links built for OTHER salons.
+  const loc=(window.location.origin||'')+'/';
+  if(!loc.startsWith('http') || loc.includes('localhost') || loc.includes('127.0.0.1')){
     // Dynamic fallback to the live Vercel URL so the QR code can be scanned on mobile from localhost/local file
     return 'https://trimio-two.vercel.app/';
   }
@@ -3393,9 +3385,10 @@ function showSalonQRCode(slug) {
   if (!s) return;
   
   const base = getCurrentBaseURL();
-  // ?s= in the QR link (in addition to the #hash) so that "Aggiungi alla
-  // schermata Home" on iOS keeps the salon even when it strips the fragment.
-  const link = base + '?s=' + encodeURIComponent(s.slug) + '#' + s.slug;
+  // Path-based link (/s/SLUG): the only URL form iOS keeps intact when the
+  // page is added to the Home Screen (it strips #fragments and sometimes
+  // query strings).
+  const link = base + 's/' + encodeURIComponent(s.slug);
   
   $('qrModalH').textContent = `QR Code - ${s.name}`;
   $('qrLinkInput').value = link;
@@ -3494,16 +3487,14 @@ async function submitBarberReview() {
 
 
 async function boot(){
-  // An installed PWA launches with ?s=SLUG (set by the dynamic manifest's
-  // start_url) — translate it into the normal #SLUG hash before anything
-  // reads location, so the rest of the routing works unchanged.
+  // An installed PWA/Home-Screen icon launches on /s/SLUG (or a legacy
+  // /?s=SLUG icon) — translate the document URL into the normal #SLUG hash
+  // before anything reads location, so the rest of the routing works
+  // unchanged. The /s/ path itself is preserved (it's what iOS saved).
   try{
-    const qsSlug=new URLSearchParams(location.search).get('s');
-    if(qsSlug&&!location.hash){
-      // Keep ?s= in the address bar alongside the hash: if the user re-adds
-      // the page to the Home Screen from inside the app, iOS may save the
-      // current URL minus the #fragment, and ?s= is what still routes here.
-      history.replaceState(null,'',location.pathname+'?s='+encodeURIComponent(qsSlug)+'#'+qsSlug);
+    const slug=DOC_PATH_SLUG||new URLSearchParams(location.search).get('s');
+    if(slug&&!location.hash){
+      history.replaceState(null,'',location.pathname+'#'+slug);
     }
   }catch(e){}
 

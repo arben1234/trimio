@@ -90,7 +90,10 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  const filePath = path.join(__dirname, pathname === '/' ? 'index.html' : pathname);
+  // /s/SLUG salon pages are served by index.html (mirrors the vercel.json
+  // rewrite) — the client-side router reads the slug from the path.
+  const isSalonPath = /^\/s\/[^/]+\/?$/.test(pathname);
+  const filePath = path.join(__dirname, (pathname === '/' || isSalonPath) ? 'index.html' : pathname);
   if (!filePath.startsWith(__dirname)) { res.statusCode = 403; res.end('Forbidden'); return; }
   fs.readFile(filePath, (err, content) => {
     if (err) { res.statusCode = 404; res.end('Not found'); return; }
