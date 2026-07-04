@@ -7,16 +7,40 @@ if (VAPID_PRIVATE_KEY) {
   webPush.setVapidDetails('mailto:trimio@example.com', VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
 }
 
-// Runs once a day (see vercel.json crons) — finds every confirmed booking
-// scheduled for "tomorrow" (relative to whenever the cron fires) that hasn't
-// been reminded yet, and sends a push notification to the customer if they
-// opted in on the confirmation screen (see initCustomerPushNotifications in
-// js/app.js). Marks booking.reminderSent so a booking is only ever reminded
-// once, even if the cron runs more than once in a day.
-function tomorrowISO() {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+// Runs every hour (see vercel.json crons) and sends two kinds of customer
+// reminders, but never before 8:00 Italian time:
+//  - 24h before: every confirmed booking for "tomorrow" not yet reminded
+//    (booking.reminderSent) — goes out at the first run at/after 8:00.
+//  - 3-4h before: every confirmed booking for "today" whose start time is at
+//    most 4 hours away (booking.sameDayReminderSent). With hourly runs this
+//    lands 3-4h before the appointment; for early-morning appointments it
+//    lands at the 8:00 run instead, however close that is.
+// The customer receives them only if they opted in on the confirmation screen
+// (see initCustomerPushNotifications in js/app.js) — the subscription is tied
+// to the bookingId. The *Sent flags make each reminder fire at most once even
+// if the cron runs again.
+
+// All date math is done in Italian wall-clock time, because the server runs
+// in UTC while booking dateISO/time are what the customer saw on screen.
+function romeNow() {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/Rome', hourCycle: 'h23',
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
+  }).formatToParts(new Date());
+  const get = t => parts.find(p => p.type === t).value;
+  const year = Number(get('year')), month = Number(get('month')), day = Number(get('day'));
+  const pad = n => String(n).padStart(2, '0');
+  const next = new Date(Date.UTC(year, month - 1, day) + 86400000);
+  return {
+    todayISO: `${year}-${pad(month)}-${pad(day)}`,
+    tomorrowISO: `${next.getUTCFullYear()}-${pad(next.getUTCMonth() + 1)}-${pad(next.getUTCDate())}`,
+    minutes: Number(get('hour')) * 60 + Number(get('minute'))
+  };
+}
+
+function bookingMinutes(time) {
+  const m = /^(\d{1,2}):(\d{2})/.exec(time || '');
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
 }
 
 export default async function handler(req, res) {
@@ -42,11 +66,23 @@ export default async function handler(req, res) {
   }
 
   try {
-    const target = tomorrowISO();
+    const now = romeNow();
+    if (now.minutes < 8 * 60) {
+      return res.status(200).json({ checked: 0, sent: 0, note: 'Before 8:00 Europe/Rome — reminders postponed.' });
+    }
+
     const bookingsMap = await getAllBookings(kvUrl, kvToken);
-    const dueBookings = Array.from(bookingsMap.values()).filter(
-      b => b.status === 'confirmed' && b.dateISO === target && !b.reminderSent
+    const all = Array.from(bookingsMap.values());
+    const dueTomorrow = all.filter(
+      b => b.status === 'confirmed' && b.dateISO === now.tomorrowISO && !b.reminderSent
     );
+    const dueToday = all.filter(b => {
+      if (b.status !== 'confirmed' || b.dateISO !== now.todayISO || b.sameDayReminderSent) return false;
+      const start = bookingMinutes(b.time);
+      if (start === null) return false;
+      const left = start - now.minutes;
+      return left > 0 && left <= 4 * 60;
+    });
     const salons = await getSalonsDb(kvUrl, kvToken);
 
     let subscriptions = [];
@@ -62,17 +98,12 @@ export default async function handler(req, res) {
 
     let sent = 0;
     let subsChanged = false;
-    for (const bk of dueBookings) {
+
+    const notifyBooking = async (bk, body) => {
       const targets = subscriptions.filter(s => s.role === 'customer' && s.bookingId === bk.id);
-      const salon = salons.find(s => s.id === bk.salonId);
-      const firstName = (bk.name || '').trim().split(' ')[0] || 'cliente';
       for (const target of targets) {
         try {
-          const payload = JSON.stringify({
-            title: 'Promemoria appuntamento TRIMIO',
-            body: `Gentile ${firstName}! Ti ricordiamo che domani alle ore ${bk.time} hai un appuntamento prenotato con ${bk.workerName}, presso il salone ${salon ? salon.name : 'TRIMIO'}. Grazie per la fiducia!`,
-            url: '/'
-          });
+          const payload = JSON.stringify({ title: 'Promemoria appuntamento TRIMIO', body, url: '/' });
           await webPush.sendNotification(target.subscription, payload);
           sent++;
         } catch (err) {
@@ -84,7 +115,21 @@ export default async function handler(req, res) {
           }
         }
       }
+    };
+
+    for (const bk of dueTomorrow) {
+      const salon = salons.find(s => s.id === bk.salonId);
+      const firstName = (bk.name || '').trim().split(' ')[0] || 'cliente';
+      await notifyBooking(bk, `Gentile ${firstName}! Ti ricordiamo che domani alle ore ${bk.time} hai un appuntamento prenotato con ${bk.workerName}, presso il salone ${salon ? salon.name : 'TRIMIO'}. Grazie per la fiducia!`);
       bk.reminderSent = true;
+      await hsetBooking(kvUrl, kvToken, bk);
+    }
+
+    for (const bk of dueToday) {
+      const salon = salons.find(s => s.id === bk.salonId);
+      const firstName = (bk.name || '').trim().split(' ')[0] || 'cliente';
+      await notifyBooking(bk, `Gentile ${firstName}! Ti ricordiamo il tuo appuntamento di oggi alle ore ${bk.time} con ${bk.workerName}, presso il salone ${salon ? salon.name : 'TRIMIO'}. A presto!`);
+      bk.sameDayReminderSent = true;
       await hsetBooking(kvUrl, kvToken, bk);
     }
 
@@ -96,7 +141,7 @@ export default async function handler(req, res) {
       });
     }
 
-    return res.status(200).json({ checked: dueBookings.length, sent });
+    return res.status(200).json({ checked: dueTomorrow.length + dueToday.length, sent });
   } catch (err) {
     console.error('[REMINDER] Error:', err);
     return res.status(500).json({ error: err.message });
