@@ -1540,8 +1540,13 @@ function renderCustStep(){
   if(custStep===0)$('s0').classList.add('on');
   else $('s'+Math.min(custStep,3)).classList.add('on');
   document.querySelectorAll('#vCustomer .dots .dot').forEach((d,i)=>d.classList.toggle('on',i<=custStep));
+  // Restore the action bar hidden by the confirmation screen — without this,
+  // starting a new booking after a completed one left the page with no
+  // Avanti/Conferma buttons at all.
+  $('cActions').style.display='';
   $('cBack').style.display=custStep>0?'block':'none';
   $('cNext').style.display='block';
+  $('cNext').disabled=false;
   $('cNext').textContent=custStep===3?'✓ Conferma':'Avanti →';
   $('cFooter').style.display=custStep===0?'block':'none';
   if(custStep===1){
@@ -1577,56 +1582,73 @@ function validateCust(){
   return true;
 }
 
+// Re-entry guard: doSubmit awaits a network save that can take seconds. A
+// second tap on "✓ Conferma" in that window used to re-run the whole flow,
+// see the customer's OWN just-pushed booking in the local slot check, and pop
+// the "choose another time" modal on top of a booking that had actually
+// succeeded. One submission at a time, with the button disabled meanwhile.
+let custSubmitting=false;
 async function doSubmit(){
-  $('cNext').textContent='…';
-  if(bookedTimesFor(custSalon.id,custData.dateISO,custData.barberId).includes(custData.time)){
-    // cerca barbieri alternativi liberi
-    const free=custSalon.workers.filter(w=>{
-      if(w.id===custData.barberId)return false;
-      if(isOnVacation(w,custData.dateISO))return false;
-      return!bookedTimesFor(custSalon.id,custData.dateISO,w.id).includes(custData.time);
-    });
-    $('cNext').textContent='✓ Conferma';
-    showAltModal(custData.barberName,custData.time,free);
-    return;
-  }
-  const bk={
-    id:'bk'+Date.now()+Math.random().toString(36).slice(2,6),
-    salonId:custSalon.id,workerId:custData.barberId,workerName:custData.barberName,
-    name:custData.name.trim(),phone:(custData.phone||'').trim(),dateISO:custData.dateISO,dateLabel:custData.dateLabel,
-    time:custData.time,service:custData.service,price:custData.price,
-    status:'confirmed',source:'online',createdAt:new Date().toISOString()
-  };
-  STATE.bookings.push(bk);
-  const r=await saveState();
+  if(custSubmitting)return;
+  custSubmitting=true;
+  const nextBtn=$('cNext');
+  nextBtn.disabled=true;
+  nextBtn.textContent='…';
+  try{
+    if(bookedTimesFor(custSalon.id,custData.dateISO,custData.barberId).includes(custData.time)){
+      // cerca barbieri alternativi liberi
+      const free=custSalon.workers.filter(w=>{
+        if(w.id===custData.barberId)return false;
+        if(isOnVacation(w,custData.dateISO))return false;
+        return!bookedTimesFor(custSalon.id,custData.dateISO,w.id).includes(custData.time);
+      });
+      nextBtn.disabled=false;
+      nextBtn.textContent='✓ Conferma';
+      showAltModal(custData.barberName,custData.time,free);
+      return;
+    }
+    const bk={
+      id:'bk'+Date.now()+Math.random().toString(36).slice(2,6),
+      salonId:custSalon.id,workerId:custData.barberId,workerName:custData.barberName,
+      name:custData.name.trim(),phone:(custData.phone||'').trim(),dateISO:custData.dateISO,dateLabel:custData.dateLabel,
+      time:custData.time,service:custData.service,price:custData.price,
+      status:'confirmed',source:'online',createdAt:new Date().toISOString()
+    };
+    STATE.bookings.push(bk);
+    const r=await saveState();
 
-  if(r.conflicts.some(c=>c.id===bk.id)){
-    // Un altro cliente ha preso questo slot nel frattempo (rilevato dal server)
-    STATE.bookings=STATE.bookings.filter(x=>x.id!==bk.id);
-    const free=custSalon.workers.filter(w=>{
-      if(w.id===custData.barberId)return false;
-      if(isOnVacation(w,custData.dateISO))return false;
-      return!bookedTimesFor(custSalon.id,custData.dateISO,w.id).includes(custData.time);
-    });
-    $('cNext').textContent='✓ Conferma';
-    showAltModal(custData.barberName,custData.time,free);
-    return;
-  }
-  if(!r.ok){
-    STATE.bookings=STATE.bookings.filter(x=>x.id!==bk.id);
-    $('cNext').textContent='✓ Conferma';
-    showErr('cErr','Impossibile completare la prenotazione, riprova.');
-    return;
-  }
+    if(r.conflicts.some(c=>c.id===bk.id)){
+      // Un altro cliente ha preso questo slot nel frattempo (rilevato dal server)
+      STATE.bookings=STATE.bookings.filter(x=>x.id!==bk.id);
+      const free=custSalon.workers.filter(w=>{
+        if(w.id===custData.barberId)return false;
+        if(isOnVacation(w,custData.dateISO))return false;
+        return!bookedTimesFor(custSalon.id,custData.dateISO,w.id).includes(custData.time);
+      });
+      nextBtn.disabled=false;
+      nextBtn.textContent='✓ Conferma';
+      showAltModal(custData.barberName,custData.time,free);
+      return;
+    }
+    if(!r.ok){
+      STATE.bookings=STATE.bookings.filter(x=>x.id!==bk.id);
+      nextBtn.disabled=false;
+      nextBtn.textContent='✓ Conferma';
+      showErr('cErr','Impossibile completare la prenotazione, riprova.');
+      return;
+    }
 
-  $('dB').textContent=custData.barberName;$('dD').textContent=custData.dateLabel;
-  $('dT').textContent=custData.time;$('dS').textContent=custData.service;
-  ['s0','s1','s2','s3'].forEach(id=>$(id).classList.remove('on'));
-  $('sDone').classList.add('on');
-  $('cActions').style.display='none';$('cFooter').style.display='none';
-  document.querySelectorAll('#vCustomer .dots .dot').forEach(d=>d.classList.add('on'));
-  lastBookingId=bk.id;
-  renderCustReminderBanner();
+    $('dB').textContent=custData.barberName;$('dD').textContent=custData.dateLabel;
+    $('dT').textContent=custData.time;$('dS').textContent=custData.service;
+    ['s0','s1','s2','s3'].forEach(id=>$(id).classList.remove('on'));
+    $('sDone').classList.add('on');
+    $('cActions').style.display='none';$('cFooter').style.display='none';
+    document.querySelectorAll('#vCustomer .dots .dot').forEach(d=>d.classList.add('on'));
+    lastBookingId=bk.id;
+    renderCustReminderBanner();
+  } finally {
+    custSubmitting=false;
+  }
 }
 
 function showAltModal(busyName,time,freeB){
@@ -3157,36 +3179,47 @@ function fillModalTimes(){
   const slots=salon.timeSlots||DEFAULT_SLOTS;
   $('mTime').innerHTML=slots.map(t=>`<option value="${t}" ${booked.includes(t)?'disabled':''}>${t}${booked.includes(t)?' (occupato)':''}</option>`).join('');
 }
+// Same double-tap protection as doSubmit: one in-flight save at a time.
+let manualApptSaving=false;
 async function saveManualAppt(){
+  if(manualApptSaving)return;
   const salon=getSalon();if(!salon)return;
   const name=$('mName').value.trim();const iso=$('mDate').value;const time=$('mTime').value;
   const wid=$('mBarber').value;const worker=salon.workers.find(w=>w.id===wid);
   const srv=(salon.services||DEFAULT_SERVICES).find(s=>s.id===$('mSrv').value);
   if(name.length<2)return showErr('mErr','Inserisci il nome del cliente');
   if(!time||$('mTime').options[$('mTime').selectedIndex]?.disabled)return showErr('mErr','Seleziona un orario disponibile');
-  const bk={
-    id:'bk'+Date.now()+Math.random().toString(36).slice(2,6),
-    salonId:salon.id,workerId:wid,workerName:worker?.name||'',
-    name,dateISO:iso,dateLabel:dayLabel(iso),time,
-    service:srv?.name||'—',price:srv?.price||0,
-    status:'confirmed',source:'manual',createdAt:new Date().toISOString()
-  };
-  STATE.bookings.push(bk);
-  const r=await saveState();
+  manualApptSaving=true;
+  const saveBtn=$('mSave');
+  if(saveBtn){saveBtn.disabled=true;saveBtn.textContent='…';}
+  try{
+    const bk={
+      id:'bk'+Date.now()+Math.random().toString(36).slice(2,6),
+      salonId:salon.id,workerId:wid,workerName:worker?.name||'',
+      name,dateISO:iso,dateLabel:dayLabel(iso),time,
+      service:srv?.name||'—',price:srv?.price||0,
+      status:'confirmed',source:'manual',createdAt:new Date().toISOString()
+    };
+    STATE.bookings.push(bk);
+    const r=await saveState();
 
-  if(r.conflicts.some(c=>c.id===bk.id)||!r.ok){
-    STATE.bookings=STATE.bookings.filter(x=>x.id!==bk.id);
-    fillModalTimes();
-    return showErr('mErr', r.conflicts.length ? 'Questo orario è appena stato occupato, scegli un altro orario.' : 'Impossibile salvare la prenotazione, riprova.');
-  }
+    if(r.conflicts.some(c=>c.id===bk.id)||!r.ok){
+      STATE.bookings=STATE.bookings.filter(x=>x.id!==bk.id);
+      fillModalTimes();
+      return showErr('mErr', r.conflicts.length ? 'Questo orario è appena stato occupato, scegli un altro orario.' : 'Impossibile salvare la prenotazione, riprova.');
+    }
 
-  closeModal('modal');
-  if(curSec==='oggi'){
-    dashDateISO=iso;
-    const chip=[...$('oggiDates').querySelectorAll('.chip')].find(c=>c.dataset.iso===iso);
-    if(chip){$('oggiDates').querySelectorAll('.chip').forEach(x=>x.classList.remove('sel'));chip.classList.add('sel');}
+    closeModal('modal');
+    if(curSec==='oggi'){
+      dashDateISO=iso;
+      const chip=[...$('oggiDates').querySelectorAll('.chip')].find(c=>c.dataset.iso===iso);
+      if(chip){$('oggiDates').querySelectorAll('.chip').forEach(x=>x.classList.remove('sel'));chip.classList.add('sel');}
+    }
+    renderDash();
+  } finally {
+    manualApptSaving=false;
+    if(saveBtn){saveBtn.disabled=false;saveBtn.textContent='Salva appuntamento';}
   }
-  renderDash();
 }
 
 /* ---- SIDEBAR & MODALS ---- */
