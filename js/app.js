@@ -1096,7 +1096,7 @@ function renderCustReminderBanner() {
     if (isIOS && window.navigator.standalone !== true) {
       banner.style.display = 'flex';
       icon0.textContent = '📲';
-      msg0.textContent = 'Per ricevere il promemoria 24h prima: aggiungi TRIMIO alla schermata Home (Condividi → Aggiungi alla schermata Home) e prenota da lì.';
+      msg0.textContent = 'Per ricevere il promemoria 24h prima sulle prossime prenotazioni: aggiungi TRIMIO alla schermata Home (Condividi → Aggiungi alla schermata Home) e prenota da lì la prossima volta.';
       btn0.style.display = 'none';
     } else {
       banner.style.display = 'none';
