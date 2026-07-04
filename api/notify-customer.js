@@ -1,5 +1,6 @@
 import webPush from 'web-push';
 import { getAllBookings, getSalonsDb } from '../lib/kv.js';
+import { sendCustomerText, twilioConfigured } from '../lib/sms.js';
 
 const VAPID_PUBLIC_KEY = 'BLLKr1SroPRHybfSN2OunQUzy6yd5hggq2fmAmT90LL32Pgyaa_VkoESjUq3DGk0bgD2a5tb17bSZHc2heLJXGo';
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY?.trim();
@@ -18,7 +19,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  if (!VAPID_PRIVATE_KEY) {
+  if (!VAPID_PRIVATE_KEY && !twilioConfigured()) {
     return res.status(200).json({ success: false, reason: 'not_configured' });
   }
 
@@ -48,19 +49,23 @@ export default async function handler(req, res) {
       }
     }
 
-    const targets = subscriptions.filter(s => s.role === 'customer' && s.bookingId === bookingId);
-    if (targets.length === 0) {
-      return res.status(200).json({ success: false, reason: 'no_subscription' });
-    }
-
     const salons = await getSalonsDb(kvUrl, kvToken);
     const salon = salons.find(s => s.id === bk.salonId);
     const firstName = (bk.name || '').trim().split(' ')[0] || 'cliente';
-    const payload = JSON.stringify({
-      title: 'Promemoria appuntamento TRIMIO',
-      body: `Gentile ${firstName}! Ti ricordiamo il tuo appuntamento il ${bk.dateLabel || bk.dateISO} alle ore ${bk.time} con ${bk.workerName}, presso il salone ${salon ? salon.name : 'TRIMIO'}. Grazie per la fiducia!`,
-      url: '/'
-    });
+    const msgBody = `Gentile ${firstName}! Ti ricordiamo il tuo appuntamento il ${bk.dateLabel || bk.dateISO} alle ore ${bk.time} con ${bk.workerName}, presso il salone ${salon ? salon.name : 'TRIMIO'}. Grazie per la fiducia!`;
+
+    const targets = VAPID_PRIVATE_KEY ? subscriptions.filter(s => s.role === 'customer' && s.bookingId === bookingId) : [];
+
+    // No push opt-in but a phone number on the booking: reach the customer
+    // via SMS/WhatsApp instead of giving up with "Cliente non iscritto".
+    if (targets.length === 0) {
+      if (bk.phone && await sendCustomerText(bk.phone, msgBody)) {
+        return res.status(200).json({ success: true, sent: 1, via: 'sms' });
+      }
+      return res.status(200).json({ success: false, reason: 'no_subscription' });
+    }
+
+    const payload = JSON.stringify({ title: 'Promemoria appuntamento TRIMIO', body: msgBody, url: '/' });
 
     let sent = 0;
     for (const target of targets) {
@@ -70,6 +75,11 @@ export default async function handler(req, res) {
       } catch (err) {
         console.error('[NOTIFY-CUSTOMER] Failed to send:', err.message);
       }
+    }
+
+    // Every push attempt failed (dead subscriptions) — SMS as last resort.
+    if (sent === 0 && bk.phone && await sendCustomerText(bk.phone, msgBody)) {
+      return res.status(200).json({ success: true, sent: 1, via: 'sms' });
     }
 
     return res.status(200).json({ success: sent > 0, sent });

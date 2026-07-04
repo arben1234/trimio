@@ -1,5 +1,6 @@
 import webPush from 'web-push';
 import { getAllBookings, hsetBooking, getSalonsDb } from '../lib/kv.js';
+import { sendCustomerText, twilioConfigured } from '../lib/sms.js';
 
 const VAPID_PUBLIC_KEY = 'BLLKr1SroPRHybfSN2OunQUzy6yd5hggq2fmAmT90LL32Pgyaa_VkoESjUq3DGk0bgD2a5tb17bSZHc2heLJXGo';
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY?.trim();
@@ -57,8 +58,8 @@ export default async function handler(req, res) {
     }
   }
 
-  if (!VAPID_PRIVATE_KEY) {
-    return res.status(200).json({ sent: 0, checked: 0, note: 'VAPID_PRIVATE_KEY not configured — reminders skipped.' });
+  if (!VAPID_PRIVATE_KEY && !twilioConfigured()) {
+    return res.status(200).json({ sent: 0, checked: 0, note: 'Neither VAPID_PRIVATE_KEY nor Twilio configured — reminders skipped.' });
   }
 
   const kvUrl = process.env.KV_REST_API_URL;
@@ -99,15 +100,21 @@ export default async function handler(req, res) {
     }
 
     let sent = 0;
+    let smsSent = 0;
     let subsChanged = false;
 
+    // Push to every opted-in device; when none succeeds (customer never
+    // tapped "Attiva", or the subscription died) fall back to SMS/WhatsApp on
+    // the phone number left at booking time — the customer then gets the
+    // reminder without ever having confirmed anything.
     const notifyBooking = async (bk, body) => {
-      const targets = subscriptions.filter(s => s.role === 'customer' && s.bookingId === bk.id);
+      let delivered = 0;
+      const targets = VAPID_PRIVATE_KEY ? subscriptions.filter(s => s.role === 'customer' && s.bookingId === bk.id) : [];
       for (const target of targets) {
         try {
           const payload = JSON.stringify({ title: 'Promemoria appuntamento TRIMIO', body, url: '/' });
           await webPush.sendNotification(target.subscription, payload);
-          sent++;
+          sent++; delivered++;
         } catch (err) {
           if (err.statusCode === 410 || err.statusCode === 404) {
             const idx = subscriptions.findIndex(s => s.subscription.endpoint === target.subscription.endpoint);
@@ -115,6 +122,13 @@ export default async function handler(req, res) {
           } else {
             console.error('[REMINDER] Failed to send to customer:', err.message);
           }
+        }
+      }
+      if (delivered === 0 && bk.phone) {
+        try {
+          if (await sendCustomerText(bk.phone, body)) { sent++; smsSent++; }
+        } catch (err) {
+          console.error('[REMINDER] SMS fallback failed:', err.message);
         }
       }
     };
@@ -143,7 +157,7 @@ export default async function handler(req, res) {
       });
     }
 
-    return res.status(200).json({ checked: dueTomorrow.length + dueToday.length, sent });
+    return res.status(200).json({ checked: dueTomorrow.length + dueToday.length, sent, smsSent, smsConfigured: twilioConfigured() });
   } catch (err) {
     console.error('[REMINDER] Error:', err);
     return res.status(500).json({ error: err.message });

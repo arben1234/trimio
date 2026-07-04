@@ -1,5 +1,6 @@
 import webPush from 'web-push';
 import { getAllBookings, getSalonsDb } from '../lib/kv.js';
+import { twilioConfigured } from '../lib/sms.js';
 
 const VAPID_PUBLIC_KEY = 'BLLKr1SroPRHybfSN2OunQUzy6yd5hggq2fmAmT90LL32Pgyaa_VkoESjUq3DGk0bgD2a5tb17bSZHc2heLJXGo';
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY?.trim();
@@ -40,6 +41,7 @@ export default async function handler(req, res) {
   const base = `${/^(localhost|127\.)/.test(host) ? 'http' : 'https'}://${host}`;
 
   if (!VAPID_PRIVATE_KEY) problems.push('VAPID_PRIVATE_KEY mancante: nessuna notifica push può partire');
+  report.smsConfigured = twilioConfigured();
   if (!kvUrl || !kvToken) {
     problems.push('Database KV non configurato');
     return res.status(200).json({ problems, report, notified: 0 });
