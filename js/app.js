@@ -613,6 +613,10 @@ async function loadState(){
 }
 
 let isSaving = false;
+// Settles when the first /api/sync fetch completes (ok or not) — boot's
+// routing awaits it before deciding a salon slug is unknown, because a
+// fresh install has no local copy of the cloud salons yet.
+let initialCloudSync = null;
 
 async function saveState(){
   isSaving = true;
@@ -703,7 +707,7 @@ function initCloudSync() {
   updateUIStatus(true);
 
   // Initial load from Vercel Cloud Blob with cache-busting to bypass browser cache
-  fetch('/api/sync?t=' + Date.now(), { cache: 'no-store' })
+  initialCloudSync = fetch('/api/sync?t=' + Date.now(), { cache: 'no-store' })
     .then(r => {
       if (!r.ok) {
         updateUIStatus(false);
@@ -1421,14 +1425,27 @@ let lastBookingId=null;
 // actually works on iOS: the installed app has its own separate localStorage,
 // so a stored slug can't cross over from Safari — only the captured URL can.
 function updateManifestLink(){
-  const link=document.querySelector('link[rel="manifest"]');
-  if(!link) return;
   // The salon goes into a QUERY param (?s=SLUG), not the #hash: WebKit drops
   // URL fragments from a manifest start_url, which sent every installed app
   // back to the root admin login. boot() translates ?s= back into the hash.
   const h=(location.hash||'').replace('#','');
-  const start=(h&&h.indexOf('admin/')!==0)?('/?s='+encodeURIComponent(h)):'/';
-  link.href='/api/manifest?start='+encodeURIComponent(start);
+  const isSalon=!!h&&h.indexOf('admin/')!==0;
+  const link=document.querySelector('link[rel="manifest"]');
+  if(link){
+    const start=isSalon?('/?s='+encodeURIComponent(h)):'/';
+    link.href='/api/manifest?start='+encodeURIComponent(start);
+  }
+  // Mirror ?s=SLUG into the ADDRESS BAR too: with the legacy
+  // apple-mobile-web-app-capable meta present, some iOS versions ignore the
+  // manifest start_url on "Aggiungi alla schermata Home" and save the current
+  // URL with the #fragment stripped — leaving the bare root (admin login).
+  // A query param in the address bar survives that stripping.
+  try{
+    const target=location.pathname+(isSalon?('?s='+encodeURIComponent(h)):'')+(h?('#'+h):'');
+    if(location.pathname+location.search+location.hash!==target){
+      history.replaceState(null,'',target);
+    }
+  }catch(e){}
 }
 
 function initCustomer(salon){
@@ -3241,7 +3258,8 @@ function clearInfo(el){$(el).classList.remove('show');}
    HOMEPAGE — lista saloni con link
 ================================================================ */
 function getCurrentBaseURL(){
-  const loc=window.location.href.split('#')[0];
+  // Strip both #hash and ?s= (the address bar carries ?s=SLUG on salon pages)
+  const loc=window.location.href.split('#')[0].split('?')[0];
   if(loc.startsWith('file://') || loc.includes('localhost') || loc.includes('127.0.0.1')){
     // Dynamic fallback to the live Vercel URL so the QR code can be scanned on mobile from localhost/local file
     return 'https://trimio-two.vercel.app/';
@@ -3367,7 +3385,9 @@ function showSalonQRCode(slug) {
   if (!s) return;
   
   const base = getCurrentBaseURL();
-  const link = base + '#' + s.slug;
+  // ?s= in the QR link (in addition to the #hash) so that "Aggiungi alla
+  // schermata Home" on iOS keeps the salon even when it strips the fragment.
+  const link = base + '?s=' + encodeURIComponent(s.slug) + '#' + s.slug;
   
   $('qrModalH').textContent = `QR Code - ${s.name}`;
   $('qrLinkInput').value = link;
@@ -3472,7 +3492,10 @@ async function boot(){
   try{
     const qsSlug=new URLSearchParams(location.search).get('s');
     if(qsSlug&&!location.hash){
-      history.replaceState(null,'',location.pathname+'#'+qsSlug);
+      // Keep ?s= in the address bar alongside the hash: if the user re-adds
+      // the page to the Home Screen from inside the app, iOS may save the
+      // current URL minus the #fragment, and ?s= is what still routes here.
+      history.replaceState(null,'',location.pathname+'?s='+encodeURIComponent(qsSlug)+'#'+qsSlug);
     }
   }catch(e){}
 
@@ -3876,7 +3899,7 @@ async function boot(){
   findNearestSalons();
 
   // Check initial hash or restore active session on startup!
-  const checkInitialHash = () => {
+  const checkInitialHash = async () => {
     loadSession();
 
     // 1a. Admin dashboard deep-link (#admin/saloni, #admin/stats, ...) — only
@@ -3896,7 +3919,15 @@ async function boot(){
     // 1b. Prioritize hash check: if there is a hash pointing to a valid salon, show that salon's customer page
     const h = rawHash.toUpperCase().trim();
     if (h) {
-      const s = STATE.salons.find(x => x.slug === h);
+      let s = STATE.salons.find(x => x.slug === h);
+      if (!s && initialCloudSync) {
+        // A freshly installed PWA has empty localStorage: salons created only
+        // in the cloud aren't known yet. Wait for the first sync (max 8s)
+        // before concluding the slug is invalid, or the customer would be
+        // dumped on the login screen.
+        await Promise.race([initialCloudSync, new Promise(r => setTimeout(r, 8000))]);
+        s = STATE.salons.find(x => x.slug === h);
+      }
       if (s) {
         if (s.inactive) {
           alert(`Spiacenti, il salone "${s.name}" è temporaneamente inattivo. Contatta l'amministratore.`);
@@ -3970,7 +4001,11 @@ async function boot(){
       try {
         const lastSlug = localStorage.getItem('trimio_last_salon_slug');
         if (lastSlug) {
-          const s = STATE.salons.find(x => x.slug === lastSlug && !x.inactive);
+          let s = STATE.salons.find(x => x.slug === lastSlug && !x.inactive);
+          if (!s && initialCloudSync) {
+            await Promise.race([initialCloudSync, new Promise(r => setTimeout(r, 8000))]);
+            s = STATE.salons.find(x => x.slug === lastSlug && !x.inactive);
+          }
           if (s) {
             location.hash = '#' + s.slug;
             initCustomer(s);
@@ -3984,7 +4019,7 @@ async function boot(){
     // 4. Nothing to restore -> show login
     showView('vLogin');
   };
-  checkInitialHash();
+  await checkInitialHash();
   updateManifestLink();
 }
 

@@ -22,6 +22,7 @@
     var l=document.querySelector('link[rel="manifest"]');
     if(!l)return;
     var h=(location.hash||'').replace('#','');
+    if(!h){try{h=new URLSearchParams(location.search).get('s')||'';}catch(e){}}
     var start=(h&&h.indexOf('admin/')!==0)?('/?s='+encodeURIComponent(h)):'/';
     l.href='/api/manifest?start='+encodeURIComponent(start);
   })();
@@ -782,6 +783,6 @@
      own "Save as PDF" print target produces a clean report. -->
 <div id="printableStats"></div>
 
-<script src="js/app.min.js?v=20260704_0004"></script>
+<script src="js/app.min.js?v=20260704_1215"></script>
 </body>
 </html>
