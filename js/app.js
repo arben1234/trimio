@@ -767,8 +767,8 @@ function initCloudSync() {
             } else {
               custSalon = refreshed;
               if (custStep === 0 && typeof renderBarberGrid === 'function') renderBarberGrid();
-              if (custStep === 1 && typeof renderCustTimes === 'function') renderCustTimes();
-              if (custStep === 2 && typeof renderCustServices === 'function') renderCustServices();
+              if (custStep === 1 && typeof renderCustServices === 'function') renderCustServices();
+              if (custStep === 2 && typeof renderCustTimes === 'function') renderCustTimes();
             }
           }
         }
@@ -1375,6 +1375,60 @@ function getSalonById(id){return STATE.salons.find(s=>s.id===id)||null;}
 function bookedTimesFor(salonId,iso,workerId){
   return STATE.bookings.filter(b=>b.salonId===salonId&&b.dateISO===iso&&b.workerId===workerId&&b.status!=='cancelled').map(b=>b.time);
 }
+
+/* ======== DURATION-AWARE SCHEDULING ========
+   Ogni prenotazione occupa [inizio, inizio+durata servizio): un servizio da
+   40 min alle 10:00 libera il barbiere alle 10:40, uno da 20 min alle 10:20.
+   Gli orari proposti sono "impacchettati" per ogni barbiere in modo
+   indipendente: si parte dall'apertura e ci si sposta di una durata alla
+   volta, saltando alla fine di ogni prenotazione già presa. */
+function timeToMin(t){const m=/^(\d{1,2}):(\d{2})/.exec(t||'');return m?(+m[1])*60+(+m[2]):null;}
+function minToTime(m){return String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');}
+function serviceDurMin(salon,serviceName){
+  const svcs=(salon&&salon.services)||DEFAULT_SERVICES;
+  const s=svcs.find(x=>x.name===serviceName);
+  const n=s?parseInt(s.dur,10):NaN;
+  return Number.isFinite(n)&&n>0?n:30;
+}
+function busyIntervalsFor(salonId,iso,workerId){
+  const salon=getSalonById(salonId);
+  return STATE.bookings
+    .filter(b=>b.salonId===salonId&&b.dateISO===iso&&b.workerId===workerId&&b.status!=='cancelled')
+    .map(b=>{const s=timeToMin(b.time);return s===null?null:{start:s,end:s+serviceDurMin(salon,b.service)};})
+    .filter(Boolean)
+    .sort((a,b)=>a.start-b.start);
+}
+// Finestre di lavoro derivate dalla griglia timeSlots del salone (slot da 30
+// min consecutivi = una finestra; il buco pranzo le separa). L'ultimo slot
+// rappresenta ancora 30 minuti di lavoro, quindi la finestra chiude a +30.
+function workWindows(salon){
+  const mins=((salon&&salon.timeSlots)||DEFAULT_SLOTS).map(timeToMin).filter(v=>v!==null).sort((a,b)=>a-b);
+  const wins=[];
+  for(const t of mins){
+    const last=wins[wins.length-1];
+    if(last&&t<=last.end)last.end=Math.max(last.end,t+30);
+    else wins.push({start:t,end:t+30});
+  }
+  return wins;
+}
+function freeTimesFor(salon,workerId,iso,durMin){
+  const busy=busyIntervalsFor(salon.id,iso,workerId);
+  const out=[];
+  for(const w of workWindows(salon)){
+    let t=w.start;
+    while(t+durMin<=w.end){
+      const hit=busy.find(b=>t<b.end&&t+durMin>b.start);
+      if(hit){t=hit.end;continue;}
+      out.push(minToTime(t));t+=durMin;
+    }
+  }
+  return out;
+}
+function slotConflicts(salonId,workerId,iso,time,durMin){
+  const s=timeToMin(time);
+  if(s===null)return true;
+  return busyIntervalsFor(salonId,iso,workerId).some(b=>s<b.end&&s+durMin>b.start);
+}
 function bookingsFor(salonId,workerId=null){
   let bks=STATE.bookings.filter(b=>b.salonId===salonId);
   if(workerId)bks=bks.filter(b=>b.workerId===workerId);
@@ -1505,29 +1559,31 @@ function renderBarberGrid(){
 }
 
 function renderCustTimes(){
-  const booked=bookedTimesFor(custSalon.id,custData.dateISO,custData.barberId);
-  const slots=custSalon.timeSlots||DEFAULT_SLOTS;
-  
-  const isToday = custData.dateISO === todayISO();
-  let currentTimeStr = '';
-  if (isToday) {
-    const now = new Date();
-    currentTimeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+  // Orari calcolati sulla durata del servizio scelto (per questo il servizio
+  // viene ora scelto PRIMA dell'orario), indipendenti per ogni barbiere.
+  const dur=serviceDurMin(custSalon,custData.service);
+  let times=freeTimesFor(custSalon,custData.barberId,custData.dateISO,dur);
+
+  if(custData.dateISO===todayISO()){
+    const now=new Date();
+    const nowStr=`${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+    times=times.filter(t=>t>=nowStr);
   }
 
-  $('times').innerHTML=slots.map(t=>{
-    const isPast = isToday && (t < currentTimeStr);
-    const isBusy = booked.includes(t) || isPast;
-    return `<div class="slot${isBusy?' busy':''}" data-t="${t}">${t}</div>`;
-  }).join('');
+  if(!times.length){
+    $('times').innerHTML=`<div class="empty" style="grid-column:1/-1"><div class="empty-t">Nessun orario disponibile per questo giorno.<br>Prova un altro giorno o un altro barbiere.</div></div>`;
+    return;
+  }
 
-  $('times').querySelectorAll('.slot:not(.busy)').forEach(el=>el.addEventListener('click',()=>{
+  $('times').innerHTML=times.map(t=>`<div class="slot${custData.time===t?' sel':''}" data-t="${t}">${t}</div>`).join('');
+
+  $('times').querySelectorAll('.slot').forEach(el=>el.addEventListener('click',()=>{
     $('times').querySelectorAll('.slot').forEach(x=>x.classList.remove('sel'));
     el.classList.add('sel');custData.time=el.dataset.t;clearErr('cErr');
-    
-    // Auto-advance to Step 2 (Services) after a slight delay
+
+    // Auto-advance to confirmation after a slight delay
     setTimeout(() => {
-      custStep = 2;
+      custStep = 3;
       renderCustStep();
     }, 180);
   }));
@@ -1540,11 +1596,15 @@ function renderCustServices(){
     <div class="svc-price">€${s.price}</div></div>`).join('');
   $('svc').querySelectorAll('.svc-item').forEach(el=>el.addEventListener('click',()=>{
     $('svc').querySelectorAll('.svc-item').forEach(x=>x.classList.remove('sel'));
-    el.classList.add('sel');custData.service=el.dataset.name;custData.price=parseInt(el.dataset.price);clearErr('cErr');
-    
-    // Auto-advance to Step 3 (Confirmation) after a slight delay
+    el.classList.add('sel');custData.service=el.dataset.name;custData.price=parseInt(el.dataset.price);
+    // La durata del servizio determina gli orari proposti: un orario scelto
+    // in precedenza per un altro servizio potrebbe non essere più valido.
+    custData.time=null;
+    clearErr('cErr');
+
+    // Auto-advance to date & time after a slight delay
     setTimeout(() => {
-      custStep = 3;
+      custStep = 2;
       renderCustStep();
     }, 180);
   }));
@@ -1553,8 +1613,11 @@ function renderCustServices(){
 function renderCustStep(){
   clearErr('cErr');clearInfo('cInfo');
   ['s0','s1','s2','s3','sDone'].forEach(id=>$(id).classList.remove('on'));
-  if(custStep===0)$('s0').classList.add('on');
-  else $('s'+Math.min(custStep,3)).classList.add('on');
+  // Ordine dei passi: barbiere (s0) → servizio (s2) → data e orario (s1) →
+  // conferma (s3). Il servizio viene PRIMA dell'orario perché la sua durata
+  // determina quali orari sono proponibili.
+  const STEP_EL=['s0','s2','s1','s3'];
+  $(STEP_EL[Math.min(custStep,3)]).classList.add('on');
   document.querySelectorAll('#vCustomer .dots .dot').forEach((d,i)=>d.classList.toggle('on',i<=custStep));
   // Restore the action bar hidden by the confirmation screen — without this,
   // starting a new booking after a completed one left the page with no
@@ -1565,14 +1628,15 @@ function renderCustStep(){
   $('cNext').disabled=false;
   $('cNext').textContent=custStep===3?'✓ Conferma':'Avanti →';
   $('cFooter').style.display=custStep===0?'block':'none';
-  if(custStep===1){
+  if(custStep===1)renderCustServices();
+  if(custStep===2){
     buildChips($('dates'),custSalon,(iso,label)=>{custData.dateISO=iso;custData.dateLabel=label;custData.time=null;renderCustTimes();clearErr('cErr');});
     const first=$('dates').querySelector('.chip');if(first)first.click();
   }
-  if(custStep===2)renderCustServices();
   if(custStep===3){
     $('rB').textContent=custData.barberName;$('rD').textContent=custData.dateLabel;
-    $('rT').textContent=custData.time;$('rS').textContent=custData.service;$('rP').textContent='€'+custData.price;
+    $('rT').textContent=custData.time+' · '+serviceDurMin(custSalon,custData.service)+' min';
+    $('rS').textContent=custData.service;$('rP').textContent='€'+custData.price;
   }
 }
 
@@ -1582,7 +1646,8 @@ function custBack(){if(custStep>0){custStep--;renderCustStep();}}
 function validateCust(){
   const s=custStep;
   if(s===0&&!custData.barberId)return showErr('cErr','Seleziona un barbiere');
-  if(s===1){
+  if(s===1&&!custData.service)return showErr('cErr','Seleziona un servizio');
+  if(s===2){
     if(!custData.dateISO)return showErr('cErr','Seleziona un giorno');
     if(!custData.time)return showErr('cErr','Seleziona un orario');
     if(custData.dateISO === todayISO()){
@@ -1593,7 +1658,6 @@ function validateCust(){
       }
     }
   }
-  if(s===2&&!custData.service)return showErr('cErr','Seleziona un servizio');
   if(s===3&&(!custData.name||custData.name.trim().length<2))return showErr('cErr','Inserisci il tuo nome');
   return true;
 }
@@ -1611,12 +1675,13 @@ async function doSubmit(){
   nextBtn.disabled=true;
   nextBtn.textContent='…';
   try{
-    if(bookedTimesFor(custSalon.id,custData.dateISO,custData.barberId).includes(custData.time)){
+    const durMin=serviceDurMin(custSalon,custData.service);
+    if(slotConflicts(custSalon.id,custData.barberId,custData.dateISO,custData.time,durMin)){
       // cerca barbieri alternativi liberi
       const free=custSalon.workers.filter(w=>{
         if(w.id===custData.barberId)return false;
         if(isOnVacation(w,custData.dateISO))return false;
-        return!bookedTimesFor(custSalon.id,custData.dateISO,w.id).includes(custData.time);
+        return!slotConflicts(custSalon.id,w.id,custData.dateISO,custData.time,durMin);
       });
       nextBtn.disabled=false;
       nextBtn.textContent='✓ Conferma';
@@ -1639,7 +1704,7 @@ async function doSubmit(){
       const free=custSalon.workers.filter(w=>{
         if(w.id===custData.barberId)return false;
         if(isOnVacation(w,custData.dateISO))return false;
-        return!bookedTimesFor(custSalon.id,custData.dateISO,w.id).includes(custData.time);
+        return!slotConflicts(custSalon.id,w.id,custData.dateISO,custData.time,durMin);
       });
       nextBtn.disabled=false;
       nextBtn.textContent='✓ Conferma';
@@ -3192,9 +3257,17 @@ function openNewApptModal(){
 function fillModalTimes(){
   const salon=getSalon();if(!salon)return;
   const iso=$('mDate').value;const wid=$('mBarber').value;
-  const booked=bookedTimesFor(salon.id,iso,wid);
-  const slots=salon.timeSlots||DEFAULT_SLOTS;
-  $('mTime').innerHTML=slots.map(t=>`<option value="${t}" ${booked.includes(t)?'disabled':''}>${t}${booked.includes(t)?' (occupato)':''}</option>`).join('');
+  // Orari dipendenti dalla durata del servizio selezionato, come nel flusso
+  // cliente: ogni prenotazione libera il barbiere alla fine effettiva del
+  // servizio, non alla mezz'ora successiva.
+  const srv=(salon.services||DEFAULT_SERVICES).find(s=>s.id===$('mSrv').value);
+  const dur=serviceDurMin(salon,srv?srv.name:null);
+  const prev=$('mTime').value;
+  const times=freeTimesFor(salon,wid,iso,dur);
+  $('mTime').innerHTML=times.length
+    ? times.map(t=>`<option value="${t}">${t}</option>`).join('')
+    : `<option value="" disabled selected>Nessun orario disponibile</option>`;
+  if(prev&&times.includes(prev))$('mTime').value=prev;
 }
 // Same double-tap protection as doSubmit: one in-flight save at a time.
 let manualApptSaving=false;
@@ -3726,6 +3799,7 @@ async function boot(){
   $('mSave').addEventListener('click',saveManualAppt);
   $('mDate').addEventListener('change',fillModalTimes);
   $('mBarber').addEventListener('change',fillModalTimes);
+  $('mSrv').addEventListener('change',fillModalTimes);
   $('addSrvBtn').addEventListener('click',()=>{editSrv='new';renderServizi();});
   $('addWorkerBtn').addEventListener('click',()=>{
     const salon=SESSION.role==='admin'?getSalonById(dipSalonId):getSalon();

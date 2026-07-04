@@ -33,6 +33,34 @@ function isValidSalonsArray(salons) {
     && salons.every(s => s && typeof s === 'object' && typeof s.id === 'string' && s.id);
 }
 
+// ---- Duration-aware overlap detection (mirrors js/app.js) ----
+// A booking occupies [start, start+service duration): a 40-min service at
+// 10:00 blocks the barber until 10:40, a 20-min one until 10:20. The exact
+// per-time slot lock below can't see two DIFFERENT start times overlapping
+// (10:00/40min vs 10:20), so new bookings are also checked against every
+// existing booking of the same barber+day.
+function timeToMin(t) { const m = /^(\d{1,2}):(\d{2})/.exec(t || ''); return m ? (+m[1]) * 60 + (+m[2]) : null; }
+function svcDurMin(salon, serviceName) {
+  const svcs = salon && Array.isArray(salon.services) && salon.services.length ? salon.services : null;
+  const s = svcs ? svcs.find(x => x && x.name === serviceName) : null;
+  const n = s ? parseInt(s.dur, 10) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : 30;
+}
+function overlapsExisting(nb, bookingsMap, salon) {
+  const start = timeToMin(nb.time);
+  if (start === null) return false;
+  const end = start + svcDurMin(salon, nb.service);
+  for (const b of bookingsMap.values()) {
+    if (b.id === nb.id || b.salonId !== nb.salonId || b.workerId !== nb.workerId
+        || b.dateISO !== nb.dateISO || b.status === 'cancelled') continue;
+    const bs = timeToMin(b.time);
+    if (bs === null) continue;
+    const be = bs + svcDurMin(salon, b.service);
+    if (start < be && end > bs) return true;
+  }
+  return false;
+}
+
 export default async function handler(req, res) {
   // CORS configuration
   res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -77,6 +105,9 @@ export default async function handler(req, res) {
         const newBks = Array.isArray(newData.bookings) ? newData.bookings : [];
         const addedBks = [];
         const conflicts = [];
+        // Salons are needed to translate each booking's service into a
+        // duration for the overlap check below.
+        const salonsForDur = newBks.length ? await getSalonsDb(kvUrl, kvToken) : [];
 
         for (const nb of newBks) {
           try {
@@ -92,6 +123,13 @@ export default async function handler(req, res) {
             }
 
             if (!existing) {
+              // Duration-aware overlap with any existing booking of the same
+              // barber+day (different start times can still collide).
+              if (nb.status !== 'cancelled'
+                  && overlapsExisting(nb, bookingsMap, salonsForDur.find(s => s.id === nb.salonId))) {
+                conflicts.push({ id: nb.id, salonId: nb.salonId, workerId: nb.workerId, dateISO: nb.dateISO, time: nb.time });
+                continue;
+              }
               // Brand-new booking claiming a slot — must go through the atomic lock.
               const acquired = await tryAcquireSlotLock(kvUrl, kvToken, nb);
               if (!acquired) {
