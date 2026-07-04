@@ -2376,6 +2376,7 @@ async function notifyCustomerNow(bookingId, btn){
     }else if(data.reason==='no_subscription'){
       btn.textContent='Cliente non iscritto';
       setTimeout(()=>{btn.textContent=original;btn.disabled=false;},2500);
+      alert('Questo cliente non ha attivato le notifiche sul suo dispositivo.\n\nLe notifiche possono essere attivate SOLO dal cliente stesso: dopo aver completato la prenotazione, deve toccare "Attiva" nel banner "Vuoi ricevere un promemoria 24h prima?" e accettare il permesso di notifica (su iPhone serve prima aggiungere TRIMIO alla schermata Home).\n\nSenza questa attivazione non è possibile inviargli notifiche — né manuali né il promemoria automatico 24h prima.');
     }else{
       btn.textContent='Errore invio';
       setTimeout(()=>{btn.textContent=original;btn.disabled=false;},2500);
