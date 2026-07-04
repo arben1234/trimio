@@ -1,0 +1,19 @@
+# Hourly trigger for customer reminders. Vercel's Hobby plan only allows
+# daily crons, so the vercel.json cron (07:00 UTC) alone can never deliver
+# the "~3h before the appointment" same-day reminders — this workflow calls
+# the endpoint every hour instead. The endpoint itself enforces the
+# 8:00-20:00 Italy quiet hours and the sent-once flags, so extra calls are
+# harmless no-ops.
+name: Hourly reminders
+on:
+  schedule:
+    - cron: '5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  send-reminders:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger reminder check
+        run: |
+          curl -fsS --max-time 60 "https://trimio-two.vercel.app/api/send-reminders"
