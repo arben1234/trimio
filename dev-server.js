@@ -68,7 +68,8 @@ function readBody(req) {
 }
 
 const server = http.createServer(async (req, res) => {
-  const { pathname } = new URL(req.url, `http://${req.headers.host}`);
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const { pathname } = url;
   const apiFile = resolveApiRoute(pathname);
 
   if (apiFile) {
@@ -77,6 +78,9 @@ const server = http.createServer(async (req, res) => {
     try {
       const mod = await import(`${pathToFileURL(apiFile)}?t=${Date.now()}`);
       req.body = await readBody(req);
+      // Vercel populates req.query from the URL's search params — handlers
+      // like api/manifest.js rely on it, so mirror that here too.
+      req.query = Object.fromEntries(url.searchParams);
       await mod.default(req, res);
     } catch (e) {
       console.error(`[dev-server] ${pathname} error:`, e);
