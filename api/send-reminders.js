@@ -7,18 +7,20 @@ if (VAPID_PRIVATE_KEY) {
   webPush.setVapidDetails('mailto:trimio@example.com', VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
 }
 
-// Runs every hour (see vercel.json crons) and sends two kinds of customer
-// reminders, but never before 8:00 Italian time:
-//  - 24h before: every confirmed booking for "tomorrow" not yet reminded
+// Runs every hour (external cron + vercel.json fallback) and sends two kinds
+// of customer reminders, never before 8:00 or after 20:00 Italian time:
+//  - the day before: every confirmed booking for "tomorrow" not yet reminded
 //    (booking.reminderSent) — goes out at the first run at/after 8:00.
-//  - 3-4h before: every confirmed booking for "today" whose start time is at
-//    most 4 hours away (booking.sameDayReminderSent). With hourly runs this
-//    lands 3-4h before the appointment; for early-morning appointments it
-//    lands at the 8:00 run instead, however close that is.
-// The customer receives them only if they opted in on the confirmation screen
-// (see initCustomerPushNotifications in js/app.js) — the subscription is tied
-// to the bookingId. The *Sent flags make each reminder fire at most once even
-// if the cron runs again.
+//  - ~3h before: every confirmed booking for "today" whose start time is at
+//    most 3 hours away (booking.sameDayReminderSent). For early-morning
+//    appointments (e.g. 9:00) it lands at the 8:00 run instead — only 1h
+//    before, because of the 8:00 floor.
+// A booking never gets more than one reminder per day: the two kinds fire on
+// different days, so a customer who booked days ahead gets 2 in total, and a
+// same-day booking gets only the ~3h one. The customer receives them only if
+// they opted in on the confirmation screen (see initCustomerPushNotifications
+// in js/app.js) — the subscription is tied to the bookingId. The *Sent flags
+// make each reminder fire at most once even if the cron runs again.
 
 // All date math is done in Italian wall-clock time, because the server runs
 // in UTC while booking dateISO/time are what the customer saw on screen.
@@ -67,8 +69,8 @@ export default async function handler(req, res) {
 
   try {
     const now = romeNow();
-    if (now.minutes < 8 * 60) {
-      return res.status(200).json({ checked: 0, sent: 0, note: 'Before 8:00 Europe/Rome — reminders postponed.' });
+    if (now.minutes < 8 * 60 || now.minutes >= 20 * 60) {
+      return res.status(200).json({ checked: 0, sent: 0, note: 'Outside 8:00-20:00 Europe/Rome — reminders postponed.' });
     }
 
     const bookingsMap = await getAllBookings(kvUrl, kvToken);
@@ -81,7 +83,7 @@ export default async function handler(req, res) {
       const start = bookingMinutes(b.time);
       if (start === null) return false;
       const left = start - now.minutes;
-      return left > 0 && left <= 4 * 60;
+      return left > 0 && left <= 3 * 60;
     });
     const salons = await getSalonsDb(kvUrl, kvToken);
 
