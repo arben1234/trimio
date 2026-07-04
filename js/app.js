@@ -1088,10 +1088,19 @@ async function initCustomerPushNotifications(bookingId) {
   }
 }
 
-function renderCustReminderBanner() {
+function renderCustReminderBanner(alreadyActive) {
   const banner = $('custReminderBanner');
   if (!banner) return;
   const icon0 = $('custReminderIcon'), msg0 = $('custReminderMsg'), btn0 = $('custReminderBtn');
+  // Reminder already re-armed silently for this booking (permission was
+  // granted on a previous booking) — confirm instead of asking again.
+  if (alreadyActive) {
+    banner.style.display = 'flex';
+    icon0.textContent = '✅';
+    msg0.textContent = 'Promemoria attivo: riceverai una notifica prima di questo appuntamento.';
+    btn0.style.display = 'none';
+    return;
+  }
   if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
     // iOS Safari exposes PushManager ONLY inside web apps installed on the
     // Home Screen (iOS 16.4+). Instead of hiding the reminder option (which
@@ -1115,7 +1124,7 @@ function renderCustReminderBanner() {
     btn.style.display = 'none';
   } else {
     icon.textContent = '🔔';
-    msg.textContent = "Vuoi ricevere un promemoria 24h prima?";
+    msg.textContent = "Vuoi ricevere un promemoria prima dell'appuntamento?";
     btn.style.display = 'inline-block';
     btn.textContent = 'Attiva';
     btn.disabled = false;
@@ -1429,6 +1438,35 @@ function slotConflicts(salonId,workerId,iso,time,durMin){
   if(s===null)return true;
   return busyIntervalsFor(salonId,iso,workerId).some(b=>s<b.end&&s+durMin>b.start);
 }
+
+/* ======== TELEFONO (formato italiano) ========
+   Normalizza in "+39 3XX XXX XXXX": accetta numeri nudi (345..., 06...),
+   il prefisso internazionale scritto come 0039 o +39, e lascia intatti i
+   numeri esteri (+355, +41, ...) limitandosi a raggrupparli. */
+function formatItalianPhone(raw){
+  let v=(raw||'').replace(/[^\d+]/g,'');
+  if(!v)return '';
+  if(v.startsWith('00'))v='+'+v.slice(2);
+  if(!v.startsWith('+'))v='+39'+v;
+  const cc=v.startsWith('+39')?'+39':(v.match(/^\+\d{1,3}/)||['+39'])[0];
+  const d=v.slice(cc.length);
+  let out=cc;
+  if(d)out+=' '+d.slice(0,3);
+  if(d.length>3)out+=' '+d.slice(3,6);
+  if(d.length>6)out+=' '+d.slice(6,11);
+  return out;
+}
+function isValidItalianPhone(formatted){
+  const v=(formatted||'').trim();
+  if(!v)return true; // facoltativo
+  const digits=v.replace(/\D/g,'');
+  if(v.startsWith('+39')){
+    const n=digits.slice(2);
+    // cellulare 3xx (9-10 cifre) o fisso 0xx (8-11 cifre)
+    return /^3\d{8,9}$/.test(n)||/^0\d{7,10}$/.test(n);
+  }
+  return /^\d{8,15}$/.test(digits); // numero estero: solo lunghezza sensata
+}
 function bookingsFor(salonId,workerId=null){
   let bks=STATE.bookings.filter(b=>b.salonId===salonId);
   if(workerId)bks=bks.filter(b=>b.workerId===workerId);
@@ -1658,7 +1696,15 @@ function validateCust(){
       }
     }
   }
-  if(s===3&&(!custData.name||custData.name.trim().length<2))return showErr('cErr','Inserisci il tuo nome');
+  if(s===3){
+    if(!custData.name||custData.name.trim().length<2)return showErr('cErr','Inserisci il tuo nome');
+    if((custData.phone||'').trim()){
+      const formatted=formatItalianPhone(custData.phone);
+      if(!isValidItalianPhone(formatted))return showErr('cErr','Numero di telefono non valido. Es. +39 345 678 9012');
+      custData.phone=formatted;
+      $('cphone').value=formatted;
+    }
+  }
   return true;
 }
 
@@ -1720,13 +1766,20 @@ async function doSubmit(){
     }
 
     $('dB').textContent=custData.barberName;$('dD').textContent=custData.dateLabel;
-    $('dT').textContent=custData.time;$('dS').textContent=custData.service;
+    $('dT').textContent=custData.time+' · '+durMin+' min';$('dS').textContent=custData.service;
     ['s0','s1','s2','s3'].forEach(id=>$(id).classList.remove('on'));
     $('sDone').classList.add('on');
     $('cActions').style.display='none';$('cFooter').style.display='none';
     document.querySelectorAll('#vCustomer .dots .dot').forEach(d=>d.classList.add('on'));
     lastBookingId=bk.id;
-    renderCustReminderBanner();
+    // Il permesso notifiche è già stato concesso in una prenotazione
+    // precedente → riattiva il promemoria per QUESTA prenotazione in
+    // silenzio, senza chiedere di nuovo "Attiva".
+    let reminderAuto=false;
+    if(typeof Notification!=='undefined'&&Notification.permission==='granted'){
+      try{reminderAuto=await initCustomerPushNotifications(bk.id);}catch(e){}
+    }
+    renderCustReminderBanner(reminderAuto);
   } finally {
     custSubmitting=false;
   }
@@ -3599,6 +3652,13 @@ async function boot(){
   $('again').addEventListener('click',()=>location.reload());
   $('cname').addEventListener('input',e=>{custData.name=e.target.value;clearErr('cErr');});
   $('cphone').addEventListener('input',e=>{custData.phone=e.target.value;});
+  // Formato italiano applicato quando il campo perde il focus (formattare a
+  // ogni tasto sposterebbe il cursore mentre si digita).
+  $('cphone').addEventListener('blur',e=>{
+    if(!e.target.value.trim())return;
+    const f=formatItalianPhone(e.target.value);
+    e.target.value=f;custData.phone=f;
+  });
   $('hpAdminBtn')?.addEventListener('click',()=>{ loginSalonContext = null; loginRoleContext = null; showView('vLogin'); });
   $('gear').addEventListener('click',()=>{ loginSalonContext = custSalon ? custSalon.id : null; loginRoleContext = null; showView('vLogin'); });
   $('toStaff').addEventListener('click',()=>{ loginSalonContext = custSalon ? custSalon.id : null; loginRoleContext = null; showView('vLogin'); });
