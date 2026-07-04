@@ -272,6 +272,7 @@
           <h2 id="custHeroTitle" style="font-family: 'Cinzel', serif; font-size: 28px; font-weight: 800; color: #ffffff; margin-bottom: 4px; text-shadow: 0 2px 14px rgba(0,0,0,0.7); text-transform:uppercase;">—</h2>
           <p id="custHeroAddress" style="font-size: 13px; color: #e5c158; text-shadow: 0 1px 4px rgba(0,0,0,0.6); font-weight: 700;">📍 —</p>
         </div>
+        <div id="custHeroDots" style="position:absolute; bottom:8px; left:0; right:0; display:none; justify-content:center; gap:6px; z-index:2;"></div>
       </div>
       <div class="dots" style="margin-top: 10px;"><div class="dot on"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
       <div class="err" id="cErr"></div>
@@ -360,7 +361,7 @@
         <button class="link" id="toCustomer" style="text-align:center">← Torna alla prenotazione</button>
       </div>
       <!-- Build stamp: lets support confirm which version a device is running -->
-      <div style="text-align:center; font-size:10px; color:#52525b; margin-top:14px;">v. 2026-07-04.6</div>
+      <div style="text-align:center; font-size:10px; color:#52525b; margin-top:14px;">v. 2026-07-05.1</div>
     </div>
 
     <!-- ===== DASHBOARD (Livelli 1-2-3) ===== -->
@@ -691,6 +692,10 @@
                 <div id="smBgImageStatus" style="font-size:11px; color:#71717a; margin-top:4px;"></div>
               </div>
             </div>
+            <label class="d-lbl">Galleria foto del salone (facoltativa, più foto)</label>
+            <div id="smGalleryList" style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:8px;"></div>
+            <input type="file" id="smGalleryFile" accept="image/*" multiple style="display:block; margin-bottom:4px; font-size:12px;">
+            <div id="smGalleryStatus" style="font-size:11px; color:#71717a; margin-bottom:14px;"></div>
           </div>
           
           <!-- TAB 2: STAFF & BARBIERI -->
@@ -799,6 +804,6 @@
      own "Save as PDF" print target produces a clean report. -->
 <div id="printableStats"></div>
 
-<script src="/js/app.min.js?v=20260704_2300"></script>
+<script src="/js/app.min.js?v=20260705_0040"></script>
 </body>
 </html>

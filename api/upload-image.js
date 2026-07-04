@@ -35,19 +35,45 @@ export default async function handler(req, res) {
       return res.status(413).json({ error: `Image too large — max ${Math.round(MAX_BYTES / 1024 / 1024)}MB` });
     }
 
+    // Preferred backend: Vercel Blob (when the store works).
     const token = process.env.BLOB_READ_WRITE_TOKEN;
-    if (!token) {
-      return res.status(403).json({ error: 'blob_not_configured', message: 'BLOB_READ_WRITE_TOKEN non configurato.' });
+    if (token) {
+      try {
+        const safeName = filename.replace(/[^a-zA-Z0-9_.-]/g, '_');
+        const blob = await put(`uploads/${Date.now()}-${safeName}`, buffer, {
+          access: 'public',
+          contentType,
+          token
+        });
+        return res.status(200).json({ success: true, url: blob.url });
+      } catch (blobErr) {
+        // e.g. "This store has been suspended" — fall through to KV storage.
+        console.warn('[UPLOAD-IMAGE] Blob failed, falling back to KV:', blobErr.message);
+      }
     }
 
-    const safeName = filename.replace(/[^a-zA-Z0-9_.-]/g, '_');
-    const blob = await put(`uploads/${Date.now()}-${safeName}`, buffer, {
-      access: 'public',
-      contentType,
-      token
+    // Fallback backend: Upstash KV ("img:<id>" = "contentType|base64"),
+    // served back by /api/image?id=<id>. The client compresses images before
+    // uploading, so they fit comfortably under Upstash's ~1MB request cap.
+    const kvUrl = process.env.KV_REST_API_URL;
+    const kvToken = process.env.KV_REST_API_TOKEN;
+    if (!kvUrl || !kvToken) {
+      return res.status(403).json({ error: 'storage_not_configured', message: 'Nessuno storage immagini configurato.' });
+    }
+    if (dataBase64.length > 900000) {
+      return res.status(413).json({ error: 'Immagine troppo grande — riprova con una foto più piccola.' });
+    }
+    const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    const setResp = await fetch(`${kvUrl}/set/img:${id}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${kvToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(contentType + '|' + dataBase64)
     });
-
-    return res.status(200).json({ success: true, url: blob.url });
+    if (!setResp.ok) {
+      const t = await setResp.text().catch(() => '');
+      throw new Error('KV write failed: ' + t.slice(0, 200));
+    }
+    return res.status(200).json({ success: true, url: `/api/image?id=${id}` });
   } catch (error) {
     console.error('[UPLOAD-IMAGE] Error:', error);
     return res.status(500).json({ error: error.message });

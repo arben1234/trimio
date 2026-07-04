@@ -36,31 +36,57 @@ function isValidItalianPhone(phone){
   return /^(\+39|0039)?\d{6,12}$/.test(cleaned);
 }
 
-// Reads a File via FileReader, uploads it to /api/upload-image (Vercel Blob
-// storage), and returns the resulting public URL. Used by both the salon
-// and worker photo pickers.
-function uploadImageFile(file){
+// Downscales an image client-side (max 1200px, JPEG) before uploading —
+// phone photos are 3-10MB, far beyond what the KV image storage accepts,
+// and a hero/avatar never needs more than ~1200px anyway.
+function readFileAsDataURL(file){
   return new Promise((resolve,reject)=>{
-    if(!file)return reject(new Error('Nessun file selezionato'));
-    if(!file.type.startsWith('image/'))return reject(new Error('Seleziona un file immagine'));
-    const reader=new FileReader();
-    reader.onerror=()=>reject(new Error('Impossibile leggere il file'));
-    reader.onload=async()=>{
-      try{
-        const dataUrl=reader.result;
-        const dataBase64=dataUrl.split(',')[1];
-        const resp=await fetch('/api/upload-image',{
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({filename:file.name,dataBase64,contentType:file.type})
-        });
-        const data=await resp.json().catch(()=>({}));
-        if(!resp.ok)return reject(new Error(data.error||data.message||'Upload fallito'));
-        resolve(data.url);
-      }catch(e){reject(e);}
-    };
-    reader.readAsDataURL(file);
+    const r=new FileReader();
+    r.onerror=()=>reject(new Error('Impossibile leggere il file'));
+    r.onload=()=>resolve(r.result);
+    r.readAsDataURL(file);
   });
+}
+async function compressImage(file){
+  const dataUrl=await readFileAsDataURL(file);
+  try{
+    const img=await new Promise((resolve,reject)=>{
+      const i=new Image();
+      i.onload=()=>resolve(i);
+      i.onerror=()=>reject(new Error('decode'));
+      i.src=dataUrl;
+    });
+    const MAX=1200;
+    let w=img.naturalWidth,h=img.naturalHeight;
+    if(!w||!h)throw new Error('decode');
+    if(w>MAX||h>MAX){const k=Math.min(MAX/w,MAX/h);w=Math.round(w*k);h=Math.round(h*k);}
+    const canvas=document.createElement('canvas');
+    canvas.width=w;canvas.height=h;
+    canvas.getContext('2d').drawImage(img,0,0,w,h);
+    const out=canvas.toDataURL('image/jpeg',0.82);
+    if(out.length<dataUrl.length){
+      return{dataUrl:out,contentType:'image/jpeg',filename:(file.name||'foto').replace(/\.\w+$/,'')+'.jpg'};
+    }
+  }catch(e){/* formato non decodificabile — carica l'originale */}
+  return{dataUrl,contentType:file.type,filename:file.name||'foto'};
+}
+
+// Reads a File, compresses it and uploads it to /api/upload-image (Vercel
+// Blob or KV fallback), returning the public URL. Used by the salon photo
+// pickers (principale + galleria) and the worker photo picker.
+async function uploadImageFile(file){
+  if(!file)throw new Error('Nessun file selezionato');
+  if(!file.type.startsWith('image/'))throw new Error('Seleziona un file immagine');
+  const{dataUrl,contentType,filename}=await compressImage(file);
+  const dataBase64=dataUrl.split(',')[1];
+  const resp=await fetch('/api/upload-image',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({filename,dataBase64,contentType})
+  });
+  const data=await resp.json().catch(()=>({}));
+  if(!resp.ok)throw new Error(data.error||data.message||'Upload fallito');
+  return data.url;
 }
 
 // Wires a file-input + text-input(URL) + preview-img + status-label group so
@@ -1539,6 +1565,29 @@ function updateManifestLink(){
 // on Add to Home Screen). Evaluated before any history API call runs.
 const DOC_PATH_SLUG=(()=>{try{const m=location.pathname.match(/^\/s\/([^\/]+)\/?$/);return m?decodeURIComponent(m[1]):'';}catch(e){return '';}})();
 
+// Hero del salone: con una sola foto è statico, con più foto (bgImage +
+// gallery) diventa un carosello automatico con puntini cliccabili.
+let custHeroTimer=null;
+function initCustHero(salon){
+  const photos=[salon.bgImage,...(salon.gallery||[])].filter(Boolean);
+  if(!photos.length)photos.push('https://images.unsplash.com/photo-1503951914875-452162b0f3f1?w=800&q=70&fit=crop');
+  const bg=$('custHeroBg'),dots=$('custHeroDots');
+  if(custHeroTimer){clearInterval(custHeroTimer);custHeroTimer=null;}
+  let idx=0;
+  const show=i=>{
+    idx=i;
+    bg.style.backgroundImage=`url('${photos[i]}')`;
+    if(dots)dots.querySelectorAll('span').forEach((d,k)=>{d.style.background=k===i?'#e5c158':'rgba(255,255,255,0.45)';});
+  };
+  if(dots){
+    dots.style.display=photos.length>1?'flex':'none';
+    dots.innerHTML=photos.length>1?photos.map((_,i)=>`<span data-i="${i}" style="width:7px;height:7px;border-radius:50%;cursor:pointer;"></span>`).join(''):'';
+    dots.querySelectorAll('span').forEach(d=>d.addEventListener('click',()=>show(+d.dataset.i)));
+  }
+  show(0);
+  if(photos.length>1)custHeroTimer=setInterval(()=>show((idx+1)%photos.length),4000);
+}
+
 function initCustomer(salon){
   custSalon=salon;
   // Remember the last salon page visited: a Home-Screen/PWA launch loses the
@@ -1552,7 +1601,7 @@ function initCustomer(salon){
   // Set Salon booking page hero elements
   $('custHeroTitle').textContent = salon.name;
   $('custHeroAddress').textContent = salon.address ? `📍 ${salon.address}, ${salon.city || '—'}` : `📍 ${salon.city || '—'}`;
-  $('custHeroBg').style.backgroundImage = `url('${salon.bgImage || 'https://images.unsplash.com/photo-1503951914875-452162b0f3f1?w=800&q=70&fit=crop'}')`;
+  initCustHero(salon);
 
   custStep=0;Object.keys(custData).forEach(k=>custData[k]=null);
   renderCustStep();renderBarberGrid();
@@ -3092,6 +3141,21 @@ function renderSaloni(){
   }));
 }
 let salonEditId=null;
+// Galleria del salone in modifica: copia di lavoro finché non si salva.
+let smGalleryTemp=[];
+function renderSmGallery(){
+  const wrap=$('smGalleryList');
+  if(!wrap)return;
+  wrap.innerHTML=smGalleryTemp.map((u,i)=>`
+    <div style="position:relative; width:64px; height:64px;">
+      <img src="${u}" alt="" style="width:64px; height:64px; border-radius:10px; object-fit:cover; background:#f4f4f5;">
+      <button type="button" class="sm-gal-del" data-i="${i}" title="Rimuovi" style="position:absolute; top:-7px; right:-7px; width:20px; height:20px; border-radius:50%; border:none; background:#dc2626; color:#fff; font-size:12px; line-height:1; cursor:pointer;">✕</button>
+    </div>`).join('')||'<div style="font-size:11px; color:#a1a1aa;">Nessuna foto nella galleria.</div>';
+  wrap.querySelectorAll('.sm-gal-del').forEach(b=>b.addEventListener('click',()=>{
+    smGalleryTemp.splice(+b.dataset.i,1);renderSmGallery();
+  }));
+}
+
 function openSalonModal(sid){
   clearErr('smErr');salonEditId=sid;
   
@@ -3102,10 +3166,12 @@ function openSalonModal(sid){
   $('panelSalonInfo').style.display = 'block';
 
   $('smBgImageStatus').textContent='';
+  if($('smGalleryStatus'))$('smGalleryStatus').textContent='';
   if(sid==='new'){
     $('salonModalH').textContent='Nuovo salone';
     ['smName','smSlug','smCity','smAddress','smPhone','smPromo','smOwnerUser','smOwnerPwd','smBgImage'].forEach(id=>$(id).value='');
     $('smBgImagePreview').style.display='none';
+    smGalleryTemp=[];renderSmGallery();
 
     // Hide staff and services tabs for new unsaved salons
     $('tabSalonStaff').style.display = 'none';
@@ -3120,6 +3186,7 @@ function openSalonModal(sid){
     $('smBgImage').value=s.bgImage||'';
     if(s.bgImage){$('smBgImagePreview').src=s.bgImage;$('smBgImagePreview').style.display='block';}
     else{$('smBgImagePreview').style.display='none';}
+    smGalleryTemp=(s.gallery||[]).slice();renderSmGallery();
 
     // Show tabs for existing salons
     $('tabSalonStaff').style.display = '';
@@ -3154,12 +3221,13 @@ async function saveSalon(){
   if(salonEditId==='new'){
     if(!oUser||!oPwd)return showErr('smErr','Username e password proprietario obbligatori');
     STATE.salons.push({
-      id:'salon'+Date.now(),name,slug,city,address,phone,promo,bgImage:bgImg,closedDays:[],bookingDays:30,
+      id:'salon'+Date.now(),name,slug,city,address,phone,promo,bgImage:bgImg,gallery:smGalleryTemp.slice(),closedDays:[],bookingDays:30,
       services:DEFAULT_SERVICES.map(s=>({...s})),workers:[],ownerUsername:oUser,ownerPassword:oPwd
     });
   } else {
     const s=STATE.salons.find(x=>x.id===salonEditId);if(!s)return;
     s.name=name;s.slug=slug;s.city=city;s.address=address;s.phone=phone;s.promo=promo;s.bgImage=bgImg;
+    s.gallery=smGalleryTemp.slice();
     if(oUser)s.ownerUsername=oUser;if(oPwd)s.ownerPassword=oPwd;
     
     // Save Services list prices and durations
@@ -3883,6 +3951,25 @@ async function boot(){
   $('smCancel').addEventListener('click',()=>closeModal('salonModal'));
   $('smSave').addEventListener('click',saveSalon);
   wireImagePicker('smBgImageFile','smBgImage','smBgImagePreview','smBgImageStatus');
+  // Galleria del salone: più file in una volta, ognuno compresso e caricato.
+  $('smGalleryFile')?.addEventListener('change',async e=>{
+    const files=Array.from(e.target.files||[]);
+    if(!files.length)return;
+    const st=$('smGalleryStatus');
+    try{
+      for(let i=0;i<files.length;i++){
+        if(st)st.textContent=`Caricamento ${i+1}/${files.length}...`;
+        const url=await uploadImageFile(files[i]);
+        smGalleryTemp.push(url);
+        renderSmGallery();
+      }
+      if(st)st.textContent='✓ Foto caricate — ricordati di salvare';
+    }catch(err){
+      if(st)st.textContent='Errore: '+err.message;
+    }finally{
+      e.target.value='';
+    }
+  });
   $('smBgImage').addEventListener('input',()=>{
     const preview=$('smBgImagePreview');const url=$('smBgImage').value.trim();
     if(preview){preview.src=url;preview.style.display=url?'block':'none';}
