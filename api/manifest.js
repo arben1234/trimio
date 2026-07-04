@@ -17,6 +17,7 @@ export default function handler(req, res) {
     short_name: 'TRIMIO',
     description: 'Sistema di prenotazione per barbieri',
     start_url: start,
+    scope: '/',
     display: 'standalone',
     background_color: '#000000',
     theme_color: '#000000',

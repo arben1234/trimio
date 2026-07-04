@@ -12,9 +12,14 @@
   "rewrites": [
     {
       "source": "/s/:slug",
-      "destination": "/index.html"
+      "destination": "/api/salon-page?slug=:slug"
     }
   ],
+  "functions": {
+    "api/salon-page.js": {
+      "includeFiles": "index.html"
+    }
+  },
   "headers": [
     {
       "source": "/(.*)",

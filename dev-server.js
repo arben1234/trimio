@@ -70,7 +70,11 @@ function readBody(req) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const { pathname } = url;
-  const apiFile = resolveApiRoute(pathname);
+  // /s/SLUG salon pages go through api/salon-page.js (mirrors the
+  // vercel.json rewrite) so the manifest link is baked server-side.
+  const salonMatch = pathname.match(/^\/s\/([^/]+)\/?$/);
+  if (salonMatch) url.searchParams.set('slug', decodeURIComponent(salonMatch[1]));
+  const apiFile = salonMatch ? path.join(apiDir, 'salon-page.js') : resolveApiRoute(pathname);
 
   if (apiFile) {
     res.status = (code) => { res.statusCode = code; return res; };
@@ -90,10 +94,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // /s/SLUG salon pages are served by index.html (mirrors the vercel.json
-  // rewrite) — the client-side router reads the slug from the path.
-  const isSalonPath = /^\/s\/[^/]+\/?$/.test(pathname);
-  const filePath = path.join(__dirname, (pathname === '/' || isSalonPath) ? 'index.html' : pathname);
+  const filePath = path.join(__dirname, pathname === '/' ? 'index.html' : pathname);
   if (!filePath.startsWith(__dirname)) { res.statusCode = 403; res.end('Forbidden'); return; }
   fs.readFile(filePath, (err, content) => {
     if (err) { res.statusCode = 404; res.end('Not found'); return; }
