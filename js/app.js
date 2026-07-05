@@ -89,6 +89,27 @@ async function uploadImageFile(file){
   return data.url;
 }
 
+// Reads a video File and uploads it to /api/upload-image as-is (no client
+// compression — re-encoding video in the browser isn't practical). The
+// backend caps the request body at 4MB, so only short/small clips fit; we
+// check that up front for a fast, friendly error instead of a 413 round-trip.
+const MAX_VIDEO_BYTES = 4 * 1024 * 1024;
+async function uploadVideoFile(file){
+  if(!file)throw new Error('Nessun file selezionato');
+  if(!file.type.startsWith('video/'))throw new Error('Seleziona un file video');
+  if(file.size>MAX_VIDEO_BYTES)throw new Error('Video troppo grande — max 4MB, usa un video breve');
+  const dataUrl=await readFileAsDataURL(file);
+  const dataBase64=dataUrl.split(',')[1];
+  const resp=await fetch('/api/upload-image',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({filename:file.name||'video',dataBase64,contentType:file.type})
+  });
+  const data=await resp.json().catch(()=>({}));
+  if(!resp.ok)throw new Error(data.error||data.message||'Upload fallito');
+  return data.url;
+}
+
 // Wires a file-input + text-input(URL) + preview-img + status-label group so
 // picking a file uploads it and fills the URL field automatically. Shared by
 // the salon "Foto Principale" and worker "Foto del Barbiere" pickers.
@@ -1598,8 +1619,11 @@ const DOC_PATH_SLUG=(()=>{try{const m=location.pathname.match(/^\/s\/([^\/]+)\/?
 // gallery) diventa un carosello automatico con puntini cliccabili.
 let custHeroTimer=null;
 function initCustHero(salon){
-  const realPhotos=[salon.bgImage,...(salon.gallery||[])].filter(Boolean);
-  const photos=realPhotos.length?realPhotos.slice():['https://images.unsplash.com/photo-1503951914875-452162b0f3f1?w=800&q=70&fit=crop'];
+  const galleryItems=(salon.gallery||[]).map(item=>typeof item==='string'?{url:item,type:'photo'}:item);
+  // The hero background carousel can only show photos (a CSS background can't
+  // play video), so it filters videos out; the strip below shows everything.
+  const heroPhotos=[salon.bgImage,...galleryItems.filter(it=>it.type!=='video').map(it=>it.url)].filter(Boolean);
+  const photos=heroPhotos.length?heroPhotos.slice():['https://images.unsplash.com/photo-1503951914875-452162b0f3f1?w=800&q=70&fit=crop'];
   const bg=$('custHeroBg'),dots=$('custHeroDots');
   if(custHeroTimer){clearInterval(custHeroTimer);custHeroTimer=null;}
   let idx=0;
@@ -1615,21 +1639,40 @@ function initCustHero(salon){
   }
   show(0);
   if(photos.length>1)custHeroTimer=setInterval(()=>show((idx+1)%photos.length),4000);
-  renderCustGalleryStrip(realPhotos);
+  const stripItems=[salon.bgImage?{url:salon.bgImage,type:'photo'}:null,...galleryItems].filter(Boolean);
+  renderCustGalleryStrip(stripItems);
 }
 
-// Miniature chiare delle foto del salone, sotto l'hero — la versione nell'hero
-// è a opacità 20% (sfondo del titolo), quasi invisibile: qui il cliente vede
-// le foto per davvero. Nascosta quando il salone non ha foto proprie.
-function renderCustGalleryStrip(realPhotos){
+// Miniature chiare delle foto/video del salone, sotto l'hero — la versione
+// nell'hero è a opacità 20% (sfondo del titolo), quasi invisibile: qui il
+// cliente vede i contenuti per davvero. Nascosta quando il salone non ha
+// foto/video propri. I video mostrano un'icona play e si aprono nel
+// lightbox con i controlli nativi invece che come <img>.
+function renderCustGalleryStrip(items){
   const strip=$('custGalleryStrip');
   if(!strip)return;
-  if(!realPhotos.length){strip.style.display='none';strip.innerHTML='';return;}
+  if(!items.length){strip.style.display='none';strip.innerHTML='';return;}
   strip.style.display='flex';
-  strip.innerHTML=realPhotos.map((u,i)=>`<img src="${u}" data-i="${i}" alt="Foto salone" style="width:84px; height:84px; flex-shrink:0; border-radius:12px; object-fit:cover; cursor:pointer; background:#f4f4f5;">`).join('');
-  const lightbox=$('custGalleryLightbox'),lightboxImg=$('custGalleryLightboxImg');
-  strip.querySelectorAll('img').forEach(img=>img.addEventListener('click',()=>{
-    lightboxImg.src=realPhotos[+img.dataset.i];
+  strip.innerHTML=items.map((it,i)=>it.type==='video'
+    ? `<div class="cust-gal-item" data-i="${i}" style="position:relative; width:84px; height:84px; flex-shrink:0; border-radius:12px; overflow:hidden; cursor:pointer; background:#18181b;">
+         <video src="${it.url}" muted style="width:100%; height:100%; object-fit:cover;"></video>
+         <span style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#fff; font-size:24px; background:rgba(0,0,0,0.25);">▶</span>
+       </div>`
+    : `<img class="cust-gal-item" src="${it.url}" data-i="${i}" alt="Foto salone" style="width:84px; height:84px; flex-shrink:0; border-radius:12px; object-fit:cover; cursor:pointer; background:#f4f4f5;">`
+  ).join('');
+  const lightbox=$('custGalleryLightbox'),lightboxImg=$('custGalleryLightboxImg'),lightboxVideo=$('custGalleryLightboxVideo');
+  strip.querySelectorAll('.cust-gal-item').forEach(el=>el.addEventListener('click',()=>{
+    const it=items[+el.dataset.i];
+    if(it.type==='video'){
+      lightboxImg.style.display='none';
+      lightboxVideo.style.display='block';
+      lightboxVideo.src=it.url;
+      lightboxVideo.play().catch(()=>{});
+    }else{
+      lightboxVideo.pause();lightboxVideo.removeAttribute('src');lightboxVideo.style.display='none';
+      lightboxImg.style.display='block';
+      lightboxImg.src=it.url;
+    }
     lightbox.style.display='flex';
   }));
 }
@@ -3209,7 +3252,12 @@ function renderSaloni(){
 }
 let salonEditId=null;
 // Galleria del salone in modifica: copia di lavoro finché non si salva.
+// Ogni voce è una foto (stringa URL, formato storico) oppure un video
+// ({url,type:'video'}) — così i saloni esistenti restano compatibili senza
+// migrazione dei dati.
 let smGalleryTemp=[];
+const galleryItemUrl=item=>typeof item==='string'?item:item.url;
+const galleryItemType=item=>typeof item==='string'?'photo':(item.type||'photo');
 // Colore tema del salone in modifica: copia di lavoro finché non si salva.
 let smThemeColor='#e5c158';
 function renderSmThemeSwatches(){
@@ -3225,11 +3273,18 @@ function renderSmThemeSwatches(){
 function renderSmGallery(){
   const wrap=$('smGalleryList');
   if(!wrap)return;
-  wrap.innerHTML=smGalleryTemp.map((u,i)=>`
+  wrap.innerHTML=smGalleryTemp.map((item,i)=>{
+    const url=galleryItemUrl(item),isVideo=galleryItemType(item)==='video';
+    const thumb=isVideo
+      ? `<video src="${url}" muted style="width:64px; height:64px; border-radius:10px; object-fit:cover; background:#18181b;"></video>
+         <span style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#fff; font-size:18px; pointer-events:none;">▶</span>`
+      : `<img src="${url}" alt="" style="width:64px; height:64px; border-radius:10px; object-fit:cover; background:#f4f4f5;">`;
+    return `
     <div style="position:relative; width:64px; height:64px;">
-      <img src="${u}" alt="" style="width:64px; height:64px; border-radius:10px; object-fit:cover; background:#f4f4f5;">
+      ${thumb}
       <button type="button" class="sm-gal-del" data-i="${i}" title="Rimuovi" style="position:absolute; top:-7px; right:-7px; width:20px; height:20px; border-radius:50%; border:none; background:#dc2626; color:#fff; font-size:12px; line-height:1; cursor:pointer;">✕</button>
-    </div>`).join('')||'<div style="font-size:11px; color:#a1a1aa;">Nessuna foto nella galleria.</div>';
+    </div>`;
+  }).join('')||'<div style="font-size:11px; color:#a1a1aa;">Nessuna foto o video nella galleria.</div>';
   wrap.querySelectorAll('.sm-gal-del').forEach(b=>b.addEventListener('click',()=>{
     smGalleryTemp.splice(+b.dataset.i,1);renderSmGallery();
   }));
@@ -3817,7 +3872,13 @@ async function boot(){
   });
   $('altOv').addEventListener('click',closeAlt);
   $('altSkip').addEventListener('click',closeAlt);
-  $('custGalleryLightbox')?.addEventListener('click',()=>{ $('custGalleryLightbox').style.display='none'; });
+  $('custGalleryLightbox')?.addEventListener('click',()=>{
+    $('custGalleryLightbox').style.display='none';
+    $('custGalleryLightboxVideo')?.pause();
+  });
+  // Stops clicks on the video's native controls (play/pause/scrub) from
+  // bubbling up and closing the lightbox — only tapping the backdrop should.
+  $('custGalleryLightboxVideo')?.addEventListener('click',e=>e.stopPropagation());
   $('submitReviewBtn').addEventListener('click', submitBarberReview);
   
   // Wire Homepage Ad Editor save button
@@ -4047,6 +4108,24 @@ async function boot(){
         renderSmGallery();
       }
       if(st)st.textContent='✓ Foto caricate — ricordati di salvare';
+    }catch(err){
+      if(st)st.textContent='Errore: '+err.message;
+    }finally{
+      e.target.value='';
+    }
+  });
+  $('smGalleryVideoFile')?.addEventListener('change',async e=>{
+    const files=Array.from(e.target.files||[]);
+    if(!files.length)return;
+    const st=$('smGalleryStatus');
+    try{
+      for(let i=0;i<files.length;i++){
+        if(st)st.textContent=`Caricamento video ${i+1}/${files.length}...`;
+        const url=await uploadVideoFile(files[i]);
+        smGalleryTemp.push({url,type:'video'});
+        renderSmGallery();
+      }
+      if(st)st.textContent='✓ Video caricati — ricordati di salvare';
     }catch(err){
       if(st)st.textContent='Errore: '+err.message;
     }finally{

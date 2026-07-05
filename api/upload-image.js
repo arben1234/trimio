@@ -1,9 +1,11 @@
 import { put } from '@vercel/blob';
 
 // Accepts { filename, dataBase64, contentType } and stores the decoded image
-// in Vercel Blob storage, returning its public URL. The client reads the
-// selected file via FileReader.readAsDataURL() and posts the base64 payload
-// as JSON (simpler than multipart parsing in a Vercel serverless function).
+// or short video in Vercel Blob storage, returning its public URL. The client
+// reads the selected file via FileReader.readAsDataURL() and posts the base64
+// payload as JSON (simpler than multipart parsing in a Vercel serverless
+// function) — this keeps the request body limit as the hard cap, so videos
+// must stay short/small (a few seconds), not full-length clips.
 const MAX_BYTES = 4 * 1024 * 1024; // keep comfortably under Vercel's request body limit
 
 export default async function handler(req, res) {
@@ -26,13 +28,13 @@ export default async function handler(req, res) {
     if (!filename || !dataBase64 || !contentType) {
       return res.status(400).json({ error: 'Missing filename, dataBase64 or contentType' });
     }
-    if (!contentType.startsWith('image/')) {
-      return res.status(400).json({ error: 'Only image uploads are allowed' });
+    if (!contentType.startsWith('image/') && !contentType.startsWith('video/')) {
+      return res.status(400).json({ error: 'Only image or video uploads are allowed' });
     }
 
     const buffer = Buffer.from(dataBase64, 'base64');
     if (buffer.length > MAX_BYTES) {
-      return res.status(413).json({ error: `Image too large — max ${Math.round(MAX_BYTES / 1024 / 1024)}MB` });
+      return res.status(413).json({ error: `File troppo grande — max ${Math.round(MAX_BYTES / 1024 / 1024)}MB` });
     }
 
     // Preferred backend: Vercel Blob (when the store works).
