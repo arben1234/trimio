@@ -2174,12 +2174,12 @@ function updateNavMenu() {
   if (!SESSION_FOR_MENU || !SESSION_FOR_MENU.role) {
     // Guest / Customer level
     if (custSalon && custSalon.name) {
-      // Specific Salon page context (remove home option)
-      const hasMyBookings=getMyBookingsForSalon(custSalon.id).length>0;
+      // Specific Salon page context (remove home option) — "Le mie
+      // prenotazioni" lives only in the automatic banner on the page
+      // itself, not duplicated here in the menu.
       html += `
         <option value="" disabled selected>☰ Menu: ${custSalon.name}</option>
         <option value="booking">📅 Prenota in questo Salone</option>
-        ${hasMyBookings?'<option value="my_bookings">📋 Le mie prenotazioni</option>':''}
         <option value="login_owner">🔑 Login Proprietario (Owner)</option>
         <option value="login_barber">🔑 Login Staf / Barbiere</option>
       `;
@@ -4094,13 +4094,6 @@ async function boot(){
     } else if (val === 'booking') {
       if (custSalon) {
         showView('vCustomer');
-      } else {
-        showView('vLogin');
-      }
-    } else if (val === 'my_bookings') {
-      if (custSalon) {
-        showView('vCustomer');
-        renderMyBookingsModal();
       } else {
         showView('vLogin');
       }
