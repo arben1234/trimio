@@ -1717,11 +1717,18 @@ function renderCustMyBookingBanner(){
   const banner=$('custMyBookingBanner');
   if(!banner||!custSalon)return;
   const mine=getMyBookingsForSalon(custSalon.id);
+  if(!mine.length){banner.style.display='none';return;}
   const today=todayISO();
   const upcoming=mine.filter(b=>b.status!=='cancelled'&&b.dateISO>=today)
     .sort((a,b)=>(a.dateISO+a.time).localeCompare(b.dateISO+b.time))[0];
-  if(!upcoming){banner.style.display='none';return;}
-  $('custMyBookingBannerText').textContent=`${upcoming.dateLabel} alle ${upcoming.time} · ${upcoming.workerName}`;
+  // With an upcoming booking, headline its date/time; otherwise (only
+  // past/cancelled ones on record) keep the banner as a generic entry point
+  // instead of hiding it — the point of this banner is that "my bookings"
+  // stays reachable at any time without a menu, not just while something's
+  // still upcoming.
+  $('custMyBookingBannerText').textContent=upcoming
+    ?`${upcoming.dateLabel} alle ${upcoming.time} · ${upcoming.workerName}`
+    :'Vedi lo storico delle tue prenotazioni';
   banner.style.display='flex';
 }
 
