@@ -2131,11 +2131,20 @@ function updateNavMenu() {
   const menu = $('navMenu');
   if (!menu) return;
 
+  // A salon's customer page must always show the customer menu — never the
+  // admin/staff one — no matter what session happens to be sitting in this
+  // browser (e.g. an admin/owner/barber session left over from earlier use
+  // on the same phone). Same rule as the header back-arrow and logo fixes:
+  // unconditional, no session-based exception, so a visitor scanning a QR
+  // code never lands on "Pannello Admin" by accident.
+  const onCustomerPage = document.querySelector('.view.on')?.id === 'vCustomer';
+  const SESSION_FOR_MENU = onCustomerPage ? null : SESSION;
+
   // Admin has exactly ONE navigation: the dashboard sidebar. This header
   // dropdown must never duplicate its sections — while on the public
   // Homepage it only offers the single way INTO the dashboard (plus logout),
   // and inside the dashboard it's hidden entirely.
-  if (SESSION && SESSION.role === 'admin') {
+  if (SESSION_FOR_MENU && SESSION_FOR_MENU.role === 'admin') {
     const onDash = document.querySelector('.view.on')?.id === 'vDash';
     if (onDash) {
       menu.style.display = 'none';
@@ -2162,7 +2171,7 @@ function updateNavMenu() {
 
   let html = '';
 
-  if (!SESSION || !SESSION.role) {
+  if (!SESSION_FOR_MENU || !SESSION_FOR_MENU.role) {
     // Guest / Customer level
     if (custSalon && custSalon.name) {
       // Specific Salon page context (remove home option)
@@ -2185,15 +2194,15 @@ function updateNavMenu() {
     }
   } else {
     // Logged in user level (owner / barber — admin already handled above)
-    const roleLabel = SESSION.role === 'owner' ? 'Owner' : 'Staf';
-    const nameLabel = SESSION.name ? SESSION.name.split(' ')[0] : '';
+    const roleLabel = SESSION_FOR_MENU.role === 'owner' ? 'Owner' : 'Staf';
+    const nameLabel = SESSION_FOR_MENU.name ? SESSION_FOR_MENU.name.split(' ')[0] : '';
     html += `
       <option value="" disabled selected>👤 ${roleLabel}: ${nameLabel}</option>
       <option value="logout">🚪 Esci (Logout)</option>
       <option value="dashboard">📊 Vai alla Dashboard</option>
     `;
 
-    if (SESSION.role === 'owner') {
+    if (SESSION_FOR_MENU.role === 'owner') {
       html += `
         <option value="" disabled>--- Sezioni Owner ---</option>
         <option value="nav_oggi">📅 Appuntamenti Oggi</option>
@@ -2202,7 +2211,7 @@ function updateNavMenu() {
         <option value="nav_stats">📊 Statistiche Salone</option>
         <option value="nav_recensioni">⭐ Recensioni Ricevute</option>
       `;
-    } else if (SESSION.role === 'barber') {
+    } else if (SESSION_FOR_MENU.role === 'barber') {
       html += `
         <option value="" disabled>--- Sezioni Staf ---</option>
         <option value="nav_oggi">📅 Appuntamenti Oggi</option>
