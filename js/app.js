@@ -119,14 +119,14 @@ function wireImagePicker(fileInputId,urlInputId,previewId,statusId){
 // which would lose contrast on black) — replaces the default gold (--gold)
 // scoped to #vCustomer only, so the admin dashboard keeps its own gold.
 const SALON_THEME_PALETTE=[
-  {name:'Oro',hex:'#e5c158'},
-  {name:'Smeraldo',hex:'#10b981'},
-  {name:'Zaffiro',hex:'#3b82f6'},
-  {name:'Bordeaux',hex:'#ef4444'},
-  {name:'Ametista',hex:'#a78bfa'},
-  {name:'Rame',hex:'#d97706'},
-  {name:'Turchese',hex:'#2dd4bf'},
-  {name:'Argento',hex:'#94a3b8'}
+  {name:'Oro',hex:'#e5c158',rgb:'229,193,88'},
+  {name:'Smeraldo',hex:'#10b981',rgb:'16,185,129'},
+  {name:'Zaffiro',hex:'#3b82f6',rgb:'59,130,246'},
+  {name:'Bordeaux',hex:'#ef4444',rgb:'239,68,68'},
+  {name:'Ametista',hex:'#a78bfa',rgb:'167,139,250'},
+  {name:'Rame',hex:'#d97706',rgb:'217,119,6'},
+  {name:'Turchese',hex:'#2dd4bf',rgb:'45,212,191'},
+  {name:'Argento',hex:'#94a3b8',rgb:'148,163,184'}
 ];
 const DEFAULT_SLOTS=['09:00','09:30','10:00','10:30','11:00','11:30','12:00','14:30','15:00','15:30','16:00','16:30','17:00','17:30','18:00','18:30'];
 const DEFAULT_SERVICES=[
@@ -1641,7 +1641,12 @@ function renderCustGalleryStrip(realPhotos){
 // initCustomer()), or a salon's theme color would never show up until the
 // customer manually reloads the page.
 function applyCustomerTheme(salon){
-  $('vCustomer').style.setProperty('--gold', salon.themeColor || '#e5c158');
+  const hex=salon.themeColor||'#e5c158';
+  const preset=SALON_THEME_PALETTE.find(c=>c.hex===hex);
+  const rgb=preset?preset.rgb:'229,193,88';
+  const el=$('vCustomer');
+  el.style.setProperty('--gold', hex);
+  el.style.setProperty('--gold-rgb', rgb);
 }
 
 function initCustomer(salon){
