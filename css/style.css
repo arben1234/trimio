@@ -300,7 +300,7 @@ body{background:#f1f5f9;min-height:100vh;display:flex;align-items:center;justify
 .bc-role {
   font-size: 11px;
   font-weight: 800;
-  color: var(--gold);
+  color: #fff;
   text-transform: uppercase;
   letter-spacing: 1.2px;
   margin-bottom: 12px;
@@ -312,7 +312,7 @@ body{background:#f1f5f9;min-height:100vh;display:flex;align-items:center;justify
   margin-bottom: 14px;
   padding: 0 12px;
 }
-.bc-status{font-size:11px;margin-top:4px;opacity:.65;color:var(--gold);}
+.bc-status{font-size:11px;margin-top:4px;opacity:.85;color:#fff;font-weight:700;}
 .bc-vac{font-size:10px;color:#d97706;margin-top:3px;font-weight:600;}
 /* dates & slots */
 .dates{display:flex;gap:10px;overflow-x:auto;margin:0 -24px 4px;padding:0 24px 6px;scrollbar-width:none;}
@@ -647,7 +647,7 @@ body{background:#f1f5f9;min-height:100vh;display:flex;align-items:center;justify
   color: #111;
 }
 .rev-stars {
-  color: var(--gold);
+  color: #e5c158;
   font-weight: 700;
   font-size: 11px;
 }
@@ -688,7 +688,7 @@ body{background:#f1f5f9;min-height:100vh;display:flex;align-items:center;justify
   user-select: none;
 }
 .star-select.active {
-  color: var(--gold);
+  color: #e5c158;
   transform: scale(1.1);
 }
 
