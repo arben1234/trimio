@@ -792,6 +792,13 @@ function initCloudSync() {
               showView('vHome');
             } else {
               custSalon = refreshed;
+              // The hero (background photo + gallery carousel) is rendered once
+              // from whatever salon snapshot was available at initCustomer() time
+              // — usually a stale/default copy, since this cloud fetch is still
+              // in flight then. Re-render it now that the real bgImage/gallery
+              // (uploaded via KV) have arrived, or a salon's photos never show
+              // to customers who load the page fresh.
+              if (typeof initCustHero === 'function') initCustHero(refreshed);
               if (custStep === 0 && typeof renderBarberGrid === 'function') renderBarberGrid();
               if (custStep === 1 && typeof renderCustServices === 'function') renderCustServices();
               if (custStep === 2 && typeof renderCustTimes === 'function') renderCustTimes();
@@ -861,7 +868,13 @@ function initCloudSync() {
               renderHomepage();
               showView('vHome');
             } else if (refreshed) {
+              // Only rebuild the hero carousel if the photo set actually changed
+              // — this poll runs every 4s, and re-initing unconditionally would
+              // reset the carousel back to photo 0 constantly.
+              const heroChanged = JSON.stringify([custSalon.bgImage, custSalon.gallery])
+                !== JSON.stringify([refreshed.bgImage, refreshed.gallery]);
               custSalon = refreshed;
+              if (heroChanged && typeof initCustHero === 'function') initCustHero(refreshed);
             }
           }
 
@@ -3439,7 +3452,7 @@ function closeSide(){$('side').classList.remove('show');$('ov').classList.remove
 function closeModal(id){$(id).classList.remove('show');}
 
 /* ---- ERRORS ---- */
-function showErr(el,msg){const e=$(el);e.textContent=msg;e.classList.add('show');return false;}
+function showErr(el,msg){const e=$(el);e.textContent=msg;e.classList.add('show');e.scrollIntoView({behavior:'smooth',block:'center'});return false;}
 function clearErr(el){$(el).classList.remove('show');}
 function showInfo(el,msg){$(el).textContent=msg;$(el).classList.add('show');}
 function clearInfo(el){$(el).classList.remove('show');}
