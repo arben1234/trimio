@@ -2267,7 +2267,14 @@ function showView(view){
   // Hidden on Homepage (the admin landing page — nothing to go "back" to)
   // and on the login screen (its back arrow fell through to browser
   // history.back(), which could land on an unrelated external page).
-  if (hBack) hBack.style.display = (isHome || isLogin) ? 'none' : 'flex';
+  // Also hidden for guest customers on their salon page: at step 0 there's
+  // nowhere sensible to go back to, so it fell through to showing the staff
+  // login screen — confusing for a plain customer. The wizard's own "←"
+  // button (cBack) already covers stepping back through steps 1-3, so
+  // nothing is lost. Staff/admin previewing a salon page keep the arrow —
+  // for them it's a real shortcut back to the dashboard.
+  const isGuestOnCustomerPage = view === 'vCustomer' && !(SESSION && SESSION.role);
+  if (hBack) hBack.style.display = (isHome || isLogin || isGuestOnCustomerPage) ? 'none' : 'flex';
   
   // Reset window scroll position to the top of the page on view switch
   window.scrollTo(0, 0);
