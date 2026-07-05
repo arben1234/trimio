@@ -2253,17 +2253,17 @@ function showView(view){
   $('gear').style.display='none';
   updateNavMenu();
   const hBack = $('hBack');
-  // Hidden on Homepage (the admin landing page — nothing to go "back" to)
-  // and on the login screen (its back arrow fell through to browser
-  // history.back(), which could land on an unrelated external page).
-  // Also hidden for guest customers on their salon page: at step 0 there's
-  // nowhere sensible to go back to, so it fell through to showing the staff
-  // login screen — confusing for a plain customer. The wizard's own "←"
-  // button (cBack) already covers stepping back through steps 1-3, so
-  // nothing is lost. Staff/admin previewing a salon page keep the arrow —
-  // for them it's a real shortcut back to the dashboard.
-  const isGuestOnCustomerPage = view === 'vCustomer' && !(SESSION && SESSION.role);
-  if (hBack) hBack.style.display = (isHome || isLogin || isGuestOnCustomerPage) ? 'none' : 'flex';
+  // Hidden on Homepage (the admin landing page — nothing to go "back" to),
+  // on the login screen (its back arrow fell through to browser
+  // history.back(), which could land on an unrelated external page), and
+  // always on a salon's customer page — a visitor arriving via a QR code/
+  // shared link must never be one tap away from the staff login screen
+  // (it fell through there whenever there was nothing sensible to go back
+  // to, e.g. a leftover staff session on the same phone/browser). The
+  // wizard's own "←" button (cBack) already covers stepping back through
+  // steps 1-3; staff/admin previewing a salon page use the nav menu's
+  // "Vai alla Dashboard" instead.
+  if (hBack) hBack.style.display = (isHome || isLogin || view === 'vCustomer') ? 'none' : 'flex';
   
   // Reset window scroll position to the top of the page on view switch
   window.scrollTo(0, 0);
