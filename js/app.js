@@ -747,13 +747,7 @@ function initCloudSync() {
         // Safeguard: Only update salons if the cloud database contains them.
         // If the cloud is brand new and empty, upload our local salons to initialize it.
         if (data.salons && data.salons.length > 0) {
-          // Never clobber STATE.salons while an edit modal (worker/salon/...)
-          // is open: it holds a direct reference into that array (e.g.
-          // workerEditSalon), and replacing the array out from under it
-          // orphans the in-progress edit — saveWorker()/saveSalon() would
-          // then write the mutated-but-detached object nowhere, silently
-          // discarding whatever the admin just typed/uploaded.
-          if (!document.querySelector('.modal.show')) STATE.salons = data.salons;
+          STATE.salons = data.salons;
         } else if (STATE.salons && STATE.salons.length > 0) {
           saveState(); // Upload local salons to seed the cloud database
         }
@@ -853,10 +847,8 @@ function initCloudSync() {
 
           STATE.bookings = mergedBookings;
           
-          // Safeguard: Only update salons if the response contains a non-empty
-          // list, and never while an edit modal is open (see the matching
-          // guard in the initial-sync handler above for why).
-          if (data.salons && data.salons.length > 0 && !document.querySelector('.modal.show')) {
+          // Safeguard: Only update salons if the response contains a non-empty list
+          if (data.salons && data.salons.length > 0) {
             STATE.salons = data.salons;
           }
 
@@ -2792,9 +2784,14 @@ function renderDipendenti(){
   }));
 }
 
-let workerEditSalon=null;
+let workerEditSalonId=null;
 function openWorkerModal(wid,salon){
-  workerEditSalon=salon;clearErr('wErr');
+  // Store the salon's id, not the object itself: a background sync poll can
+  // replace STATE.salons with a brand-new array/objects while this modal
+  // sits open (uploading a photo, typing a phone number...), which would
+  // orphan a held object reference — saveWorker()/deleting a worker would
+  // then silently mutate a detached copy that never reaches STATE.salons.
+  workerEditSalonId=salon.id;clearErr('wErr');
   const isOwner = SESSION.role === 'owner';
   ['wName','wUser','wPwd','wImg','wImgFile','wPhone','wRole','wDesc'].forEach(id=>{ $(id).disabled = isOwner; });
   $('wImgStatus').textContent='';
@@ -2819,7 +2816,7 @@ function openWorkerModal(wid,salon){
   $('workerModal').classList.add('show');
 }
 async function saveWorker(){
-  const salon=workerEditSalon;if(!salon)return;
+  const salon=STATE.salons.find(x=>x.id===workerEditSalonId);if(!salon)return;
   const vacFrom=$('wVacFrom').value,vacTo=$('wVacTo').value;
 
   // Owner only updates vacation dates
@@ -3963,9 +3960,10 @@ async function boot(){
     if(preview){preview.src=url;preview.style.display=url?'block':'none';}
   });
   $('wDelete').addEventListener('click',async()=>{
-    if(!workerEditSalon||editWorker==='new')return;
+    const salon=STATE.salons.find(x=>x.id===workerEditSalonId);
+    if(!salon||editWorker==='new')return;
     if(!confirm('Eliminare questo dipendente?'))return;
-    workerEditSalon.workers=workerEditSalon.workers.filter(x=>x.id!==editWorker);
+    salon.workers=salon.workers.filter(x=>x.id!==editWorker);
     await saveState();closeModal('workerModal');renderDipendenti();
   });
   $('salonModalOv').addEventListener('click',()=>closeModal('salonModal'));
