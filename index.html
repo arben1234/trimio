@@ -286,6 +286,18 @@
       <div class="err" id="cErr"></div>
       <div class="info-box" id="cInfo"></div>
 
+      <!-- Banner "hai già una prenotazione" — visibile solo se questo
+           dispositivo ha una prenotazione salvata (non annullata) per
+           questo salone; si aggiorna da solo col polling cloud, così resta
+           corretta anche se il salone la conferma/annulla nel frattempo. -->
+      <div id="custMyBookingBanner" style="display:none; cursor:pointer; background:#18181b; border:1px solid #27272a; border-radius:14px; padding:14px 16px; margin-bottom:16px; align-items:center; justify-content:space-between; gap:10px;">
+        <div style="min-width:0;">
+          <div style="font-size:11px; color:#a1a1aa; font-weight:700; text-transform:uppercase; letter-spacing:0.4px;">📋 La tua prenotazione</div>
+          <div id="custMyBookingBannerText" style="font-size:13px; color:#fff; font-weight:600; margin-top:2px;">—</div>
+        </div>
+        <div style="color:var(--gold); font-size:12px; font-weight:700; flex-shrink:0;">Vedi →</div>
+      </div>
+
       <div class="step on" id="s0">
         <div class="title">Chi vuoi come barbiere?</div>
         <div class="barber-grid" id="barberGrid"></div>
@@ -810,11 +822,26 @@
   </div>
 </div>
 
+<!-- Modal: Le mie prenotazioni (cliente) — mostra le prenotazioni fatte da
+     questo dispositivo per il salone corrente, recuperate dallo STATE
+     sincronizzato in modo che lo stato (confermata/annullata/completata)
+     sia sempre aggiornato. -->
+<div class="modal" id="myBookingsModal">
+  <div class="modal-ov" id="myBookingsModalOv" onclick="closeModal('myBookingsModal')"></div>
+  <div class="modal-sheet">
+    <div class="modal-h">Le mie prenotazioni</div>
+    <div id="myBookingsList"></div>
+    <div class="srv-save">
+      <button class="b-cancel" onclick="closeModal('myBookingsModal')" style="width:100%;">Chiudi</button>
+    </div>
+  </div>
+</div>
+
 <!-- Printable / PDF-export view for the admin statistics table — hidden on
      screen, shown only via @media print (see css/style.css), so the browser's
      own "Save as PDF" print target produces a clean report. -->
 <div id="printableStats"></div>
 
-<script src="/js/app.min.js?v=20260705_0500"></script>
+<script src="/js/app.min.js?v=20260705_0600"></script>
 </body>
 </html>

@@ -838,6 +838,11 @@ function initCloudSync() {
               if (custStep === 0 && typeof renderBarberGrid === 'function') renderBarberGrid();
               if (custStep === 1 && typeof renderCustServices === 'function') renderCustServices();
               if (custStep === 2 && typeof renderCustTimes === 'function') renderCustTimes();
+              // This initial fetch is what actually populates STATE.bookings
+              // with server data — re-run the banner now that it has real
+              // bookings to look up (initCustomer() ran earlier with none yet).
+              if (typeof renderCustMyBookingBanner === 'function') renderCustMyBookingBanner();
+              if (typeof updateNavMenu === 'function') updateNavMenu();
             }
           }
         }
@@ -912,6 +917,12 @@ function initCloudSync() {
               custSalon = refreshed;
               if (typeof applyCustomerTheme === 'function') applyCustomerTheme(refreshed);
               if (heroChanged && typeof initCustHero === 'function') initCustHero(refreshed);
+              // Keeps the "you have a booking" banner/modal in sync with
+              // server-side status changes (e.g. the salon cancelling it)
+              // without the customer having to do anything.
+              if (typeof renderCustMyBookingBanner === 'function') renderCustMyBookingBanner();
+              if (typeof renderMyBookingsModal === 'function' && $('myBookingsModal')?.classList.contains('show')) renderMyBookingsModal();
+              if (typeof updateNavMenu === 'function') updateNavMenu();
             }
           }
 
@@ -1587,6 +1598,33 @@ const custData={barberId:null,barberName:null,dateISO:null,dateLabel:null,time:n
 let custSalon=null;
 let lastBookingId=null;
 
+// Remembers which bookings THIS device made (booking ids only — the actual
+// data is always re-fetched live from STATE.bookings, so status changes made
+// by the salon show up automatically) so the customer can find their
+// appointment again after closing/reopening the Home-Screen app, without an
+// account system. Capped so a device used at many salons over time doesn't
+// grow this forever.
+const MY_BOOKINGS_KEY='trimio_my_bookings';
+function rememberMyBooking(id){
+  if(!canStore)return;
+  try{
+    let ids=JSON.parse(localStorage.getItem(MY_BOOKINGS_KEY)||'[]');
+    ids=ids.filter(x=>x!==id);
+    ids.push(id);
+    if(ids.length>30)ids=ids.slice(-30);
+    localStorage.setItem(MY_BOOKINGS_KEY,JSON.stringify(ids));
+  }catch(e){}
+}
+function getMyBookingsForSalon(salonId){
+  if(!canStore)return[];
+  let ids=[];
+  try{ids=JSON.parse(localStorage.getItem(MY_BOOKINGS_KEY)||'[]');}catch(e){}
+  if(!ids.length)return[];
+  return(STATE.bookings||[])
+    .filter(b=>b.salonId===salonId&&ids.includes(b.id))
+    .sort((a,b)=>(b.dateISO+b.time).localeCompare(a.dateISO+a.time));
+}
+
 // Keep the PWA manifest's start_url pointed at the page currently shown, so
 // "Aggiungi alla schermata Home" installs an app that reopens THIS page
 // (e.g. /#BARBER_ART) instead of the root admin login. This is the fix that
@@ -1710,6 +1748,43 @@ function initCustomer(salon){
 
   custStep=0;Object.keys(custData).forEach(k=>custData[k]=null);
   renderCustStep();renderBarberGrid();
+  renderCustMyBookingBanner();
+}
+
+// Shows a compact "you already have a booking" card at the top of the
+// booking flow — the whole point is that it's visible the moment the
+// customer reopens the Home-Screen app, without hunting through a menu.
+// Headlines the soonest upcoming, non-cancelled booking; the click-through
+// modal (below) lists everything this device has ever booked here.
+function renderCustMyBookingBanner(){
+  const banner=$('custMyBookingBanner');
+  if(!banner||!custSalon)return;
+  const mine=getMyBookingsForSalon(custSalon.id);
+  const today=todayISO();
+  const upcoming=mine.filter(b=>b.status!=='cancelled'&&b.dateISO>=today)
+    .sort((a,b)=>(a.dateISO+a.time).localeCompare(b.dateISO+b.time))[0];
+  if(!upcoming){banner.style.display='none';return;}
+  $('custMyBookingBannerText').textContent=`${upcoming.dateLabel} alle ${upcoming.time} · ${upcoming.workerName}`;
+  banner.style.display='flex';
+}
+
+function renderMyBookingsModal(){
+  if(!custSalon)return;
+  const mine=getMyBookingsForSalon(custSalon.id);
+  $('myBookingsList').innerHTML=mine.length?mine.map(b=>`
+    <div class="acard ${b.status==='completed'?'completed':b.status==='cancelled'?'cancelled':''}">
+      <div class="acard-main">
+        <div class="acard-info">
+          <div class="acard-name">${b.workerName}</div>
+          <div class="acard-svc">${b.service}${b.status==='cancelled'?' · Annullata':b.status==='completed'?' · Completata':''}</div>
+        </div>
+        <div class="acard-right">
+          <div class="acard-time">${b.time}</div>
+          <div class="acard-price" style="color:#71717a;">${b.dateLabel}</div>
+        </div>
+      </div>
+    </div>`).join(''):'<div style="font-size:13px; color:#888; text-align:center; padding:20px 0;">Nessuna prenotazione trovata su questo dispositivo.</div>';
+  openModal('myBookingsModal');
 }
 
 function renderBarberGrid(){
@@ -1926,6 +2001,8 @@ async function doSubmit(){
     $('cActions').style.display='none';$('cFooter').style.display='none';
     document.querySelectorAll('#vCustomer .dots .dot').forEach(d=>d.classList.add('on'));
     lastBookingId=bk.id;
+    rememberMyBooking(bk.id);
+    renderCustMyBookingBanner();
     // Il permesso notifiche è già stato concesso in una prenotazione
     // precedente → riattiva il promemoria per QUESTA prenotazione in
     // silenzio, senza chiedere di nuovo "Attiva".
@@ -2100,9 +2177,11 @@ function updateNavMenu() {
     // Guest / Customer level
     if (custSalon && custSalon.name) {
       // Specific Salon page context (remove home option)
+      const hasMyBookings=getMyBookingsForSalon(custSalon.id).length>0;
       html += `
         <option value="" disabled selected>☰ Menu: ${custSalon.name}</option>
         <option value="booking">📅 Prenota in questo Salone</option>
+        ${hasMyBookings?'<option value="my_bookings">📋 Le mie prenotazioni</option>':''}
         <option value="login_owner">🔑 Login Proprietario (Owner)</option>
         <option value="login_barber">🔑 Login Staf / Barbiere</option>
       `;
@@ -3879,6 +3958,7 @@ async function boot(){
   // Stops clicks on the video's native controls (play/pause/scrub) from
   // bubbling up and closing the lightbox — only tapping the backdrop should.
   $('custGalleryLightboxVideo')?.addEventListener('click',e=>e.stopPropagation());
+  $('custMyBookingBanner')?.addEventListener('click',renderMyBookingsModal);
   $('submitReviewBtn').addEventListener('click', submitBarberReview);
   
   // Wire Homepage Ad Editor save button
@@ -4014,6 +4094,13 @@ async function boot(){
     } else if (val === 'booking') {
       if (custSalon) {
         showView('vCustomer');
+      } else {
+        showView('vLogin');
+      }
+    } else if (val === 'my_bookings') {
+      if (custSalon) {
+        showView('vCustomer');
+        renderMyBookingsModal();
       } else {
         showView('vLogin');
       }
