@@ -61,7 +61,7 @@
     <button class="gear" id="gear" style="display:none">⚙</button>
     
     <!-- Left: Logo & Title (with active salon name below) -->
-    <div id="hBrandLogoWrapper" style="display:flex; align-items:center; gap:8px; cursor:pointer;" onclick="location.hash='';">
+    <div id="hBrandLogoWrapper" style="display:flex; align-items:center; gap:8px; cursor:pointer;" onclick="onHeaderLogoClick();">
       <img src="/logo.png" alt="TRIMIO" style="height:28px; width:28px; border-radius:50%; border:none; background:transparent; flex-shrink:0; object-fit: cover;">
       <div style="display:flex; flex-direction:column; text-align:left;">
         <span style="font-family:'Cinzel', serif; font-weight:900; font-size:14px; letter-spacing:1.5px; color:#fff; line-height:1.2;">TRIMIO</span>
@@ -840,6 +840,6 @@
      own "Save as PDF" print target produces a clean report. -->
 <div id="printableStats"></div>
 
-<script src="/js/app.min.js?v=20260705_1000"></script>
+<script src="/js/app.min.js?v=20260705_1100"></script>
 </body>
 </html>

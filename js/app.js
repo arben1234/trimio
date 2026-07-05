@@ -2215,6 +2215,20 @@ function updateNavMenu() {
   menu.innerHTML = html;
 }
 
+// Header logo click: normally clears the hash to go "home" — but for a
+// guest customer sitting on a salon's page (reached via QR code/shared
+// link), clearing the hash falls through the hashchange handler straight
+// to the staff/admin login screen (no session, no hash = nowhere else to
+// route them). That's the exact leak the header back-arrow fix already
+// closed for hBack — this closes the same leak for the logo. A no-op
+// leaves the guest right where they are; staff/admin keep the normal
+// "go home" behavior.
+function onHeaderLogoClick(){
+  const onCustomerPage=document.querySelector('.view.on')?.id==='vCustomer';
+  if(onCustomerPage&&!(SESSION&&SESSION.role))return;
+  location.hash='';
+}
+
 /* ================================================================
    VIEW SWITCH
 ================================================================ */
@@ -4459,5 +4473,6 @@ window.dashAction = dashAction;
 window.showBarberReviews = showBarberReviews;
 window.openWorkerModal = openWorkerModal;
 window.deleteSalonModalWorker = deleteSalonModalWorker;
+window.onHeaderLogoClick = onHeaderLogoClick;
 
 boot();
