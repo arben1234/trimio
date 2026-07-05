@@ -1582,8 +1582,8 @@ const DOC_PATH_SLUG=(()=>{try{const m=location.pathname.match(/^\/s\/([^\/]+)\/?
 // gallery) diventa un carosello automatico con puntini cliccabili.
 let custHeroTimer=null;
 function initCustHero(salon){
-  const photos=[salon.bgImage,...(salon.gallery||[])].filter(Boolean);
-  if(!photos.length)photos.push('https://images.unsplash.com/photo-1503951914875-452162b0f3f1?w=800&q=70&fit=crop');
+  const realPhotos=[salon.bgImage,...(salon.gallery||[])].filter(Boolean);
+  const photos=realPhotos.length?realPhotos.slice():['https://images.unsplash.com/photo-1503951914875-452162b0f3f1?w=800&q=70&fit=crop'];
   const bg=$('custHeroBg'),dots=$('custHeroDots');
   if(custHeroTimer){clearInterval(custHeroTimer);custHeroTimer=null;}
   let idx=0;
@@ -1599,6 +1599,23 @@ function initCustHero(salon){
   }
   show(0);
   if(photos.length>1)custHeroTimer=setInterval(()=>show((idx+1)%photos.length),4000);
+  renderCustGalleryStrip(realPhotos);
+}
+
+// Miniature chiare delle foto del salone, sotto l'hero — la versione nell'hero
+// è a opacità 20% (sfondo del titolo), quasi invisibile: qui il cliente vede
+// le foto per davvero. Nascosta quando il salone non ha foto proprie.
+function renderCustGalleryStrip(realPhotos){
+  const strip=$('custGalleryStrip');
+  if(!strip)return;
+  if(!realPhotos.length){strip.style.display='none';strip.innerHTML='';return;}
+  strip.style.display='flex';
+  strip.innerHTML=realPhotos.map((u,i)=>`<img src="${u}" data-i="${i}" alt="Foto salone" style="width:84px; height:84px; flex-shrink:0; border-radius:12px; object-fit:cover; cursor:pointer; background:#f4f4f5;">`).join('');
+  const lightbox=$('custGalleryLightbox'),lightboxImg=$('custGalleryLightboxImg');
+  strip.querySelectorAll('img').forEach(img=>img.addEventListener('click',()=>{
+    lightboxImg.src=realPhotos[+img.dataset.i];
+    lightbox.style.display='flex';
+  }));
 }
 
 function initCustomer(salon){
@@ -3754,6 +3771,7 @@ async function boot(){
   });
   $('altOv').addEventListener('click',closeAlt);
   $('altSkip').addEventListener('click',closeAlt);
+  $('custGalleryLightbox')?.addEventListener('click',()=>{ $('custGalleryLightbox').style.display='none'; });
   $('submitReviewBtn').addEventListener('click', submitBarberReview);
   
   // Wire Homepage Ad Editor save button
