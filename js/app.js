@@ -1783,8 +1783,40 @@ function renderMyBookingsModal(){
           <div class="acard-price" style="color:#71717a;">${b.dateLabel}</div>
         </div>
       </div>
+      ${b.status==='confirmed'?`<div class="acard-acts"><button class="act" data-cancel-mybk="${b.id}">Annulla prenotazione</button></div>`:''}
     </div>`).join(''):'<div style="font-size:13px; color:#888; text-align:center; padding:20px 0;">Nessuna prenotazione trovata su questo dispositivo.</div>';
+  $('myBookingsList').querySelectorAll('[data-cancel-mybk]').forEach(btn=>{
+    btn.addEventListener('click',()=>customerCancelBooking(btn.dataset.cancelMybk,btn));
+  });
   openModal('myBookingsModal');
+}
+
+// Re-entry guard mirrors doSubmit()'s custSubmitting: prevents a slow save
+// from being triggered twice by a fast double-tap on the cancel button.
+let custCancelling=false;
+async function customerCancelBooking(id,btn){
+  if(custCancelling)return;
+  const b=(STATE.bookings||[]).find(x=>x.id===id);
+  if(!b||b.status!=='confirmed')return;
+  if(!confirm(`Annullare la prenotazione del ${b.dateLabel} alle ${b.time}?`))return;
+  custCancelling=true;
+  const original=btn.textContent;
+  btn.disabled=true;btn.textContent='...';
+  b.status='cancelled';
+  try{
+    const r=await saveState();
+    if(!r.ok){
+      b.status='confirmed';
+      alert('Impossibile annullare la prenotazione, riprova.');
+    }
+  }catch(e){
+    b.status='confirmed';
+    alert('Impossibile annullare la prenotazione, riprova.');
+  }finally{
+    custCancelling=false;
+    renderCustMyBookingBanner();
+    renderMyBookingsModal();
+  }
 }
 
 function renderBarberGrid(){
