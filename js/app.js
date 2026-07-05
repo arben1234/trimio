@@ -806,6 +806,7 @@ function initCloudSync() {
               showView('vHome');
             } else {
               custSalon = refreshed;
+              if (typeof applyCustomerTheme === 'function') applyCustomerTheme(refreshed);
               // The hero (background photo + gallery carousel) is rendered once
               // from whatever salon snapshot was available at initCustomer() time
               // — usually a stale/default copy, since this cloud fetch is still
@@ -888,6 +889,7 @@ function initCloudSync() {
               const heroChanged = JSON.stringify([custSalon.bgImage, custSalon.gallery])
                 !== JSON.stringify([refreshed.bgImage, refreshed.gallery]);
               custSalon = refreshed;
+              if (typeof applyCustomerTheme === 'function') applyCustomerTheme(refreshed);
               if (heroChanged && typeof initCustHero === 'function') initCustHero(refreshed);
             }
           }
@@ -1632,6 +1634,16 @@ function renderCustGalleryStrip(realPhotos){
   }));
 }
 
+// Per-salon accent color, scoped to #vCustomer only (CSS custom properties
+// cascade to descendants, not siblings) so the admin dashboard keeps gold
+// regardless of which salon's page was last viewed. Must be re-applied every
+// time custSalon is refreshed from the cloud sync (not just on initial
+// initCustomer()), or a salon's theme color would never show up until the
+// customer manually reloads the page.
+function applyCustomerTheme(salon){
+  $('vCustomer').style.setProperty('--gold', salon.themeColor || '#e5c158');
+}
+
 function initCustomer(salon){
   custSalon=salon;
   // Remember the last salon page visited: a Home-Screen/PWA launch loses the
@@ -1641,10 +1653,7 @@ function initCustomer(salon){
   updateManifestLink();
   $('hBrand').textContent=salon.name;
   $('hSlug').textContent='#'+salon.slug;$('hSlug').style.display='inline-block';
-  // Per-salon accent color, scoped to #vCustomer only (CSS custom properties
-  // cascade to descendants, not siblings) so the admin dashboard keeps gold
-  // regardless of which salon's page was last viewed.
-  $('vCustomer').style.setProperty('--gold', salon.themeColor || '#e5c158');
+  applyCustomerTheme(salon);
 
   // Set Salon booking page hero elements
   $('custHeroTitle').textContent = salon.name;
