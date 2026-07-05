@@ -114,6 +114,20 @@ function wireImagePicker(fileInputId,urlInputId,previewId,statusId){
   });
 }
 
+// Curated per-salon accent palette: each hex chosen to stay readable as text
+// on the app's dark cards/hero (bright/mid-tone, not a true "dark" shade,
+// which would lose contrast on black) — replaces the default gold (--gold)
+// scoped to #vCustomer only, so the admin dashboard keeps its own gold.
+const SALON_THEME_PALETTE=[
+  {name:'Oro',hex:'#e5c158'},
+  {name:'Smeraldo',hex:'#10b981'},
+  {name:'Zaffiro',hex:'#3b82f6'},
+  {name:'Bordeaux',hex:'#ef4444'},
+  {name:'Ametista',hex:'#a78bfa'},
+  {name:'Rame',hex:'#d97706'},
+  {name:'Turchese',hex:'#2dd4bf'},
+  {name:'Argento',hex:'#94a3b8'}
+];
 const DEFAULT_SLOTS=['09:00','09:30','10:00','10:30','11:00','11:30','12:00','14:30','15:00','15:30','16:00','16:30','17:00','17:30','18:00','18:30'];
 const DEFAULT_SERVICES=[
   {id:'sv0',name:'Taglio',dur:'30 min',price:15},
@@ -1590,7 +1604,7 @@ function initCustHero(salon){
   const show=i=>{
     idx=i;
     bg.style.backgroundImage=`url('${photos[i]}')`;
-    if(dots)dots.querySelectorAll('span').forEach((d,k)=>{d.style.background=k===i?'#e5c158':'rgba(255,255,255,0.45)';});
+    if(dots)dots.querySelectorAll('span').forEach((d,k)=>{d.style.background=k===i?'var(--gold)':'rgba(255,255,255,0.45)';});
   };
   if(dots){
     dots.style.display=photos.length>1?'flex':'none';
@@ -1627,6 +1641,10 @@ function initCustomer(salon){
   updateManifestLink();
   $('hBrand').textContent=salon.name;
   $('hSlug').textContent='#'+salon.slug;$('hSlug').style.display='inline-block';
+  // Per-salon accent color, scoped to #vCustomer only (CSS custom properties
+  // cascade to descendants, not siblings) so the admin dashboard keeps gold
+  // regardless of which salon's page was last viewed.
+  $('vCustomer').style.setProperty('--gold', salon.themeColor || '#e5c158');
 
   // Set Salon booking page hero elements
   $('custHeroTitle').textContent = salon.name;
@@ -3178,6 +3196,18 @@ function renderSaloni(){
 let salonEditId=null;
 // Galleria del salone in modifica: copia di lavoro finché non si salva.
 let smGalleryTemp=[];
+// Colore tema del salone in modifica: copia di lavoro finché non si salva.
+let smThemeColor='#e5c158';
+function renderSmThemeSwatches(){
+  const wrap=$('smThemeSwatches');
+  if(!wrap)return;
+  wrap.innerHTML=SALON_THEME_PALETTE.map(c=>`
+    <button type="button" data-hex="${c.hex}" title="${c.name}" style="width:34px; height:34px; border-radius:50%; background:${c.hex}; cursor:pointer; border:3px solid ${c.hex===smThemeColor?'#18181b':'transparent'}; box-shadow:0 0 0 1px #e4e4e7;"></button>
+  `).join('');
+  wrap.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{
+    smThemeColor=b.dataset.hex;renderSmThemeSwatches();
+  }));
+}
 function renderSmGallery(){
   const wrap=$('smGalleryList');
   if(!wrap)return;
@@ -3207,6 +3237,7 @@ function openSalonModal(sid){
     ['smName','smSlug','smCity','smAddress','smPhone','smPromo','smOwnerUser','smOwnerPwd','smBgImage'].forEach(id=>$(id).value='');
     $('smBgImagePreview').style.display='none';
     smGalleryTemp=[];renderSmGallery();
+    smThemeColor='#e5c158';renderSmThemeSwatches();
 
     // Hide staff and services tabs for new unsaved salons
     $('tabSalonStaff').style.display = 'none';
@@ -3222,6 +3253,7 @@ function openSalonModal(sid){
     if(s.bgImage){$('smBgImagePreview').src=s.bgImage;$('smBgImagePreview').style.display='block';}
     else{$('smBgImagePreview').style.display='none';}
     smGalleryTemp=(s.gallery||[]).slice();renderSmGallery();
+    smThemeColor=s.themeColor||'#e5c158';renderSmThemeSwatches();
 
     // Show tabs for existing salons
     $('tabSalonStaff').style.display = '';
@@ -3256,13 +3288,13 @@ async function saveSalon(){
   if(salonEditId==='new'){
     if(!oUser||!oPwd)return showErr('smErr','Username e password proprietario obbligatori');
     STATE.salons.push({
-      id:'salon'+Date.now(),name,slug,city,address,phone,promo,bgImage:bgImg,gallery:smGalleryTemp.slice(),closedDays:[],bookingDays:30,
+      id:'salon'+Date.now(),name,slug,city,address,phone,promo,bgImage:bgImg,gallery:smGalleryTemp.slice(),themeColor:smThemeColor,closedDays:[],bookingDays:30,
       services:DEFAULT_SERVICES.map(s=>({...s})),workers:[],ownerUsername:oUser,ownerPassword:oPwd
     });
   } else {
     const s=STATE.salons.find(x=>x.id===salonEditId);if(!s)return;
     s.name=name;s.slug=slug;s.city=city;s.address=address;s.phone=phone;s.promo=promo;s.bgImage=bgImg;
-    s.gallery=smGalleryTemp.slice();
+    s.gallery=smGalleryTemp.slice();s.themeColor=smThemeColor;
     if(oUser)s.ownerUsername=oUser;if(oPwd)s.ownerPassword=oPwd;
     
     // Save Services list prices and durations
