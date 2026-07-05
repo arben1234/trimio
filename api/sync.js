@@ -238,7 +238,7 @@ async function sendPushNotifications(newBookings, kvUrl, kvToken) {
     const activeSubs = [...subscriptions];
 
     for (const bk of newBookings) {
-      const title = `Nuovo Rezervim: ${bk.name}`;
+      const title = `Nuova Prenotazione: ${bk.name}`;
       const body = `${bk.workerName} - ${bk.service} il ${bk.dateLabel} alle ${bk.time}`;
 
       const payload = JSON.stringify({

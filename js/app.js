@@ -2744,8 +2744,23 @@ function wireActs(c){c.querySelectorAll('.act').forEach(b=>b.addEventListener('c
   if(b.dataset.act==='notify'){notifyCustomerNow(b.dataset.id,b);return;}
   dashAction(b.dataset.act,b.dataset.id);
 }));}
+// "Fatto" only makes sense once the appointment has actually started — a
+// barber marking a future slot as done would let it silently disappear from
+// "da fare" lists before the client even showed up.
+function isBookingInFuture(b){
+  const today=todayISO();
+  if(b.dateISO>today)return true;
+  if(b.dateISO<today)return false;
+  const now=new Date();
+  const nowStr=`${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+  return b.time>nowStr;
+}
 async function dashAction(act,id){
   const b=STATE.bookings.find(x=>x.id===id);if(!b)return;
+  if(act==='done'&&isBookingInFuture(b)){
+    alert(`Non puoi segnare come "Fatto" un appuntamento futuro (${b.dateLabel} alle ${b.time}). Attendi che arrivi l'orario dell'appuntamento.`);
+    return;
+  }
   b.status=act==='done'?'completed':'cancelled';
   await saveState();renderDash();renderNewBookingsPanel();
 }
