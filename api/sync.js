@@ -4,6 +4,7 @@ import {
   tryAcquireSlotLock, promoteLock, releaseSlotLock, hsetBooking,
   ensureMigratedV2, getAdminDb, setAdminDb
 } from '../lib/kv.js';
+import { sendCustomerText } from '../lib/sms.js';
 
 // VAPID public key is safe to keep in source — it's meant to be shipped to
 // browsers (same value already embedded in js/app.js for pushManager.subscribe).
@@ -104,6 +105,7 @@ export default async function handler(req, res) {
         const bookingsMap = await getAllBookings(kvUrl, kvToken);
         const newBks = Array.isArray(newData.bookings) ? newData.bookings : [];
         const addedBks = [];
+        const staffCancelledBks = [];
         const conflicts = [];
         // Salons are needed to translate each booking's service into a
         // duration for the overlap check below.
@@ -147,6 +149,11 @@ export default async function handler(req, res) {
               bookingsMap.set(nb.id, merged);
               if (merged.status === 'cancelled') {
                 await releaseSlotLock(kvUrl, kvToken, merged);
+                // Only a STAFF-initiated cancellation is news to the customer —
+                // if they cancelled it themselves there's nothing to tell them.
+                if (existing.status !== 'cancelled' && merged.cancelledBy === 'staff') {
+                  staffCancelledBks.push(merged);
+                }
               }
             }
           } catch (itemErr) {
@@ -197,6 +204,15 @@ export default async function handler(req, res) {
             await sendPushNotifications(addedBks, kvUrl, kvToken);
           } catch (err) {
             console.error('[SYNC] Push notifications job error:', err);
+          }
+        }
+        if (staffCancelledBks.length > 0) {
+          console.log(`[SYNC] ${staffCancelledBks.length} booking(s) cancelled by staff. Notifying customers...`);
+          try {
+            const salonsForNotif = await getSalonsDb(kvUrl, kvToken);
+            await sendCancellationNotifications(staffCancelledBks, salonsForNotif, kvUrl, kvToken);
+          } catch (err) {
+            console.error('[SYNC] Cancellation notifications job error:', err);
           }
         }
 
@@ -293,5 +309,53 @@ async function sendPushNotifications(newBookings, kvUrl, kvToken) {
     }
   } catch (err) {
     console.error('[PUSH] error:', err);
+  }
+}
+
+// Tells a customer immediately when the SALON cancels their booking (as
+// opposed to the customer cancelling it themselves, which needs no
+// notification — they already know). Falls back to SMS/WhatsApp when the
+// customer never opted into push, same as the manual notify-customer button.
+async function sendCancellationNotifications(cancelledBookings, salons, kvUrl, kvToken) {
+  let subscriptions = [];
+  if (VAPID_PRIVATE_KEY) {
+    try {
+      const subResp = await fetch(`${kvUrl}/get/push_subscriptions`, { headers: { Authorization: `Bearer ${kvToken}` } });
+      if (subResp.ok) {
+        const subResData = await subResp.json();
+        if (subResData.result) {
+          let val = JSON.parse(subResData.result);
+          if (typeof val === 'string') val = JSON.parse(val);
+          if (Array.isArray(val)) subscriptions = val;
+        }
+      }
+    } catch (err) {
+      console.error('[CANCEL-NOTIFY] Failed to read subscriptions:', err.message);
+    }
+  }
+
+  for (const bk of cancelledBookings) {
+    const salon = salons.find(s => s.id === bk.salonId);
+    const firstName = (bk.name || '').trim().split(' ')[0] || 'cliente';
+    const body = `Gentile ${firstName}, la tua prenotazione del ${bk.dateLabel} alle ore ${bk.time} con ${bk.workerName}, presso ${salon ? salon.name : 'TRIMIO'}, è stata annullata dal salone.`;
+
+    const targets = VAPID_PRIVATE_KEY ? subscriptions.filter(s => s.role === 'customer' && s.bookingId === bk.id) : [];
+    let delivered = 0;
+    const payload = JSON.stringify({ title: 'Prenotazione annullata', body, url: '/' });
+    for (const target of targets) {
+      try {
+        await webPush.sendNotification(target.subscription, payload);
+        delivered++;
+      } catch (err) {
+        console.error('[CANCEL-NOTIFY] Push failed:', err.message);
+      }
+    }
+    if (delivered === 0 && bk.phone) {
+      try {
+        await sendCustomerText(bk.phone, body);
+      } catch (err) {
+        console.error('[CANCEL-NOTIFY] SMS fallback failed:', err.message);
+      }
+    }
   }
 }

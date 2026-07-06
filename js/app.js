@@ -128,7 +128,7 @@ const SALON_THEME_PALETTE=[
   {name:'Turchese',hex:'#2dd4bf',rgb:'45,212,191'},
   {name:'Argento',hex:'#94a3b8',rgb:'148,163,184'}
 ];
-const DEFAULT_SLOTS=['09:00','09:30','10:00','10:30','11:00','11:30','12:00','14:30','15:00','15:30','16:00','16:30','17:00','17:30','18:00','18:30'];
+const DEFAULT_SLOTS=['09:00','09:30','10:00','10:30','11:00','11:30','12:00','14:30','15:00','15:30','16:00','16:30','17:00','17:30','18:00','18:30','19:00','19:30','20:00','20:30'];
 const DEFAULT_SERVICES=[
   {id:'sv0',name:'Taglio',dur:'30 min',price:15},
   {id:'sv1',name:'Barba',dur:'20 min',price:12},
@@ -1599,9 +1599,21 @@ function getMyBookingsForSalon(salonId){
   let ids=[];
   try{ids=JSON.parse(localStorage.getItem(MY_BOOKINGS_KEY)||'[]');}catch(e){}
   if(!ids.length)return[];
+  const today=new Date(todayISO()+'T00:00:00');
   return(STATE.bookings||[])
-    .filter(b=>b.salonId===salonId&&ids.includes(b.id))
-    .sort((a,b)=>(b.dateISO+b.time).localeCompare(a.dateISO+a.time));
+    // A booking the customer cancelled themselves drops out of their own
+    // list entirely (they already know); one the salon cancelled stays
+    // visible, tagged "Annullata", since that's news to them.
+    .filter(b=>b.salonId===salonId&&ids.includes(b.id)&&!(b.status==='cancelled'&&b.cancelledBy==='customer'))
+    // Nearest to today first (whichever direction, upcoming or past), not
+    // simply newest-first — the closest appointment in time is the most
+    // relevant one to see at the top of the list.
+    .sort((a,b)=>{
+      const da=Math.abs(new Date(a.dateISO+'T00:00:00')-today);
+      const db=Math.abs(new Date(b.dateISO+'T00:00:00')-today);
+      if(da!==db)return da-db;
+      return a.time.localeCompare(b.time);
+    });
 }
 
 // Keep the PWA manifest's start_url pointed at the page currently shown, so
@@ -1766,15 +1778,15 @@ async function customerCancelBooking(id,btn){
   custCancelling=true;
   const original=btn.textContent;
   btn.disabled=true;btn.textContent='...';
-  b.status='cancelled';
+  b.status='cancelled';b.cancelledBy='customer';
   try{
     const r=await saveState();
     if(!r.ok){
-      b.status='confirmed';
+      b.status='confirmed';delete b.cancelledBy;
       alert('Impossibile annullare la prenotazione, riprova.');
     }
   }catch(e){
-    b.status='confirmed';
+    b.status='confirmed';delete b.cancelledBy;
     alert('Impossibile annullare la prenotazione, riprova.');
   }finally{
     custCancelling=false;
@@ -2762,6 +2774,7 @@ async function dashAction(act,id){
     return;
   }
   b.status=act==='done'?'completed':'cancelled';
+  if(act==='cancel')b.cancelledBy='staff';
   await saveState();renderDash();renderNewBookingsPanel();
 }
 
