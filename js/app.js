@@ -1473,28 +1473,34 @@ function busyIntervalsFor(salonId,iso,workerId){
     .filter(Boolean)
     .sort((a,b)=>a.start-b.start);
 }
-// Finestre di lavoro derivate dalla griglia timeSlots del salone (slot da 30
-// min consecutivi = una finestra; il buco pranzo le separa). L'ultimo slot
-// rappresenta ancora 30 minuti di lavoro, quindi la finestra chiude a +30.
+// Finestre di lavoro derivate dalla griglia timeSlots del salone: slot a 30
+// min consecutivi = una finestra unica: il buco pranzo (o altri buchi) la
+// separano dalla successiva. "close" è un margine generoso oltre l'ultimo
+// slot della griglia (non un nuovo slot selezionabile — vedi freeTimesFor,
+// che sceglie gli orari SOLO dalla griglia) così un servizio più lungo di
+// 30 min può comunque iniziare proprio all'ultimo slot mostrato (es. le
+// 20:30, anche per un servizio da 45 min) invece di sparire prima per non
+// "sforare" un limite calcolato a soli +30 minuti.
 function workWindows(salon){
   const mins=((salon&&salon.timeSlots)||DEFAULT_SLOTS).map(timeToMin).filter(v=>v!==null).sort((a,b)=>a-b);
   const wins=[];
   for(const t of mins){
     const last=wins[wins.length-1];
-    if(last&&t<=last.end)last.end=Math.max(last.end,t+30);
-    else wins.push({start:t,end:t+30});
+    if(last&&t<=last.slots[last.slots.length-1]+30)last.slots.push(t);
+    else wins.push({slots:[t]});
   }
+  wins.forEach(w=>{w.close=w.slots[w.slots.length-1]+90;});
   return wins;
 }
 function freeTimesFor(salon,workerId,iso,durMin){
   const busy=busyIntervalsFor(salon.id,iso,workerId);
   const out=[];
   for(const w of workWindows(salon)){
-    let t=w.start;
-    while(t+durMin<=w.end){
+    for(const t of w.slots){
+      if(t+durMin>w.close)continue;
       const hit=busy.find(b=>t<b.end&&t+durMin>b.start);
-      if(hit){t=hit.end;continue;}
-      out.push(minToTime(t));t+=durMin;
+      if(hit)continue;
+      out.push(minToTime(t));
     }
   }
   return out;
