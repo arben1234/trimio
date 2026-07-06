@@ -1465,6 +1465,14 @@ function serviceDurMin(salon,serviceName){
   const n=s?parseInt(s.dur,10):NaN;
   return Number.isFinite(n)&&n>0?n:30;
 }
+// End time of a booking given its salon/service/start — shown alongside the
+// start time so the client/barber/owner see at a glance when the service
+// actually finishes, not just when it starts.
+function bookingEndTime(salon,serviceName,startTime){
+  const startMin=timeToMin(startTime);
+  if(startMin===null)return null;
+  return minToTime(startMin+serviceDurMin(salon,serviceName));
+}
 function busyIntervalsFor(salonId,iso,workerId){
   const salon=getSalonById(salonId);
   return STATE.bookings
@@ -1744,8 +1752,9 @@ function renderCustMyBookingBanner(){
   // instead of hiding it — the point of this banner is that "my bookings"
   // stays reachable at any time without a menu, not just while something's
   // still upcoming.
+  const upcomingEnd=upcoming?bookingEndTime(custSalon,upcoming.service,upcoming.time):null;
   $('custMyBookingBannerText').textContent=upcoming
-    ?`${upcoming.dateLabel} alle ${upcoming.time} · ${upcoming.workerName}`
+    ?`${upcoming.dateLabel} alle ${upcoming.time}${upcomingEnd?'-'+upcomingEnd:''} · ${upcoming.workerName}`
     :'Vedi lo storico delle tue prenotazioni';
   banner.style.display='flex';
 }
@@ -1753,7 +1762,9 @@ function renderCustMyBookingBanner(){
 function renderMyBookingsModal(){
   if(!custSalon)return;
   const mine=getMyBookingsForSalon(custSalon.id);
-  $('myBookingsList').innerHTML=mine.length?mine.map(b=>`
+  $('myBookingsList').innerHTML=mine.length?mine.map(b=>{
+    const end=bookingEndTime(custSalon,b.service,b.time);
+    return`
     <div class="acard ${b.status==='completed'?'completed':b.status==='cancelled'?'cancelled':''}">
       <div class="acard-main">
         <div class="acard-info">
@@ -1761,12 +1772,13 @@ function renderMyBookingsModal(){
           <div class="acard-svc">${b.service}${b.status==='cancelled'?' · Annullata':b.status==='completed'?' · Completata':''}</div>
         </div>
         <div class="acard-right">
-          <div class="acard-time">${b.time}</div>
+          <div class="acard-time">${end?`${b.time}-${end}`:b.time}</div>
           <div class="acard-price" style="color:#71717a;">${b.dateLabel}</div>
         </div>
       </div>
       ${b.status==='confirmed'?`<div class="acard-acts"><button class="act" data-cancel-mybk="${b.id}">Annulla prenotazione</button></div>`:''}
-    </div>`).join(''):'<div style="font-size:13px; color:#888; text-align:center; padding:20px 0;">Nessuna prenotazione trovata su questo dispositivo.</div>';
+    </div>`;
+  }).join(''):'<div style="font-size:13px; color:#888; text-align:center; padding:20px 0;">Nessuna prenotazione trovata su questo dispositivo.</div>';
   $('myBookingsList').querySelectorAll('[data-cancel-mybk]').forEach(btn=>{
     btn.addEventListener('click',()=>customerCancelBooking(btn.dataset.cancelMybk,btn));
   });
@@ -2734,6 +2746,7 @@ function renderOggi(){
 
 /* LIVELLO 2: vede il barbiere nella card; LIVELLO 3: non lo vede */
 function apptCard(b,showActs){
+  const endTime=bookingEndTime(getSalonById(b.salonId),b.service,b.time);
   // "Fatto" (mark service as completed/arrived): barber + admin.
   // "Annulla" (cancel): barber + owner. Admin does not cancel bookings.
   const canMarkDone = showActs && SESSION && (SESSION.role === 'admin' || SESSION.role === 'barber');
@@ -2755,7 +2768,7 @@ function apptCard(b,showActs){
         <div class="acard-name">${b.name||'Cliente'}${src}</div>
         <div class="acard-svc">${b.service}</div>${phoneRow}${barberRow}
       </div>
-      <div class="acard-right"><div class="acard-time">${b.time}</div><div class="acard-price">€${b.price}</div></div>
+      <div class="acard-right"><div class="acard-time">${endTime?`${b.time}-${endTime}`:b.time}</div><div class="acard-price">€${b.price}</div></div>
     </div>${acts}</div>`;
 }
 function wireActs(c){c.querySelectorAll('.act').forEach(b=>b.addEventListener('click',(e)=>{
