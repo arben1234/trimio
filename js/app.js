@@ -2284,7 +2284,6 @@ function updateNavMenu() {
         <option value="nav_oggi">📅 Appuntamenti Oggi</option>
         <option value="nav_calendario">📅 Calendario Completo</option>
         <option value="nav_recensioni">⭐ Mie Recensioni</option>
-        <option value="pause">🕐 Le mie Pause</option>
       `;
     }
   }
@@ -2615,6 +2614,7 @@ function navItems(){
       {sec:'prossimi',   ic:'🕐',label:'Prossimi'},
       {sec:'clienti',    ic:'👥',label:'Clienti'},
       {sec:'recensioni',  ic:'💬',label:'Le mie recensioni'},
+      {sec:'pause',      ic:'☕',label:'Le mie Pause'},
       {sec:'stats',      ic:'📊',label:'Statistiche'},
     ];
   }
@@ -2632,6 +2632,11 @@ function buildNav(){
     b.addEventListener('click',()=>{
       if(it.sec==='logout') {
         doLogout();
+      } else if(it.sec==='pause') {
+        // Il barbiere imposta le proprie pause (pausa pranzo + riposo
+        // settimanale) senza toccare i propri dati anagrafici.
+        const s=getSalon();
+        if(s && SESSION && SESSION.workerId) openBreakModal(SESSION.workerId, s);
       } else if(it.sec==='home' || it.sec==='newSalon') {
         location.hash = adminHashFor(it.sec);
       } else if (SESSION && SESSION.role === 'admin') {
@@ -3041,7 +3046,7 @@ function renderDipendenti(){
   targetSalon.workers.forEach(w=>{
     const vacLabel=w.vacFrom&&w.vacTo?`<span class="vac-tag">Ferie ${w.vacFrom} → ${w.vacTo}</span>`:'';
     const showDel = r==='admin'; // Only admin can delete staff
-    const showBreak = r==='admin'; // Pause e riposo: admin (o il barbiere stesso dal proprio menu)
+    const showBreak = r==='admin'||r==='owner'; // Pause e riposo: gestibili da admin e proprietario (o dal barbiere stesso dal proprio menu)
     html+=`<div class="worker-card${w.vacFrom?' on-vac':''}">
       <div class="av">${initials(w.name)}</div>
       <div class="wc-info"><div class="wc-name">${w.name}${vacLabel}</div><div class="wc-meta">@${w.username}</div></div>
@@ -4258,10 +4263,6 @@ async function boot(){
     } else if (val === 'dashboard') {
       showView('vDash');
       initDash();
-    } else if (val === 'pause') {
-      // Il barbiere imposta le proprie pause dal menu, senza toccare i dati.
-      const salon = getSalon();
-      if (salon && SESSION && SESSION.workerId) openBreakModal(SESSION.workerId, salon);
     } else if (val === 'admin_new_salon') {
       location.hash = adminHashFor('newSalon');
     } else if (val === 'logout') {

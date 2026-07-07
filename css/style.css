@@ -537,6 +537,10 @@ body{background:#f1f5f9;min-height:100vh;display:flex;align-items:center;justify
 /* modals */
 .modal{position:fixed;inset:0;z-index:1000;display:none;}
 .modal.show{display:block;}
+/* The "Pause e Riposo" modal can be launched on top of the salon modal
+   (admin Staff tab → 🕐 Pause), so it must sit above other modals to stay
+   clickable instead of being covered by the one opened first. */
+#breakModal{z-index:1300;}
 .modal-ov{position:absolute;inset:0;background:rgba(0,0,0,.5);}
 .modal-sheet{position:absolute;left:0;right:0;bottom:0;background:#fff;border-radius:22px 22px 0 0;padding:22px 20px 28px;animation:slideup .3s cubic-bezier(.2,.9,.3,1);max-height:90%;overflow-y:auto;}
 .modal-h{font-size:19px;font-weight:800;margin-bottom:16px;}
