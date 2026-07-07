@@ -541,6 +541,13 @@ body{background:#f1f5f9;min-height:100vh;display:flex;align-items:center;justify
 .modal-sheet{position:absolute;left:0;right:0;bottom:0;background:#fff;border-radius:22px 22px 0 0;padding:22px 20px 28px;animation:slideup .3s cubic-bezier(.2,.9,.3,1);max-height:90%;overflow-y:auto;}
 .modal-h{font-size:19px;font-weight:800;margin-bottom:16px;}
 .d-lbl{display:block;font-size:12px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-bottom:7px;}
+/* Selettore giorni di riposo settimanale (modal dipendente) */
+.offday-picker{display:flex;flex-wrap:wrap;gap:8px;}
+.offday-chip{display:inline-flex;align-items:center;justify-content:center;min-width:46px;padding:9px 12px;border:2px solid #e8e8e8;border-radius:12px;font-size:14px;font-weight:600;color:#333;cursor:pointer;user-select:none;transition:all .15s;}
+.offday-chip:hover{border-color:#bbb;}
+.offday-chip.on{background:#000;border-color:#000;color:#fff;}
+.offday-chip input{position:absolute;opacity:0;width:0;height:0;pointer-events:none;}
+.offday-chip:has(input:disabled){opacity:.5;cursor:not-allowed;}
 .msel{width:100%;padding:13px;border:2px solid #e8e8e8;border-radius:12px;font-size:15px;font-family:inherit;background:#fff;margin-bottom:14px;}
 .msel:focus{outline:none;border-color:#000;}
 /* salon list (admin) */

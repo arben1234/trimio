@@ -26,6 +26,12 @@ function relDay(iso){
   return Math.floor(diff/30)+' mesi fa';
 }
 const isOnVacation=(w,iso)=>!!(w.vacFrom&&w.vacTo&&iso>=w.vacFrom&&iso<=w.vacTo);
+// Riposo settimanale: giorni della settimana (0=Dom … 6=Sab, come getDay())
+// in cui il barbiere non lavora, indipendente per ogni barbiere.
+const OFFDAY_DEFS=[[1,'Lun'],[2,'Mar'],[3,'Mer'],[4,'Gio'],[5,'Ven'],[6,'Sab'],[0,'Dom']];
+const isWeeklyOff=(w,iso)=>Array.isArray(w.offDays)&&w.offDays.includes(new Date(iso+'T00:00:00').getDay());
+// Etichetta compatta dei giorni di riposo, es. "Lun" o "Lun, Dom".
+const offDaysLabel=w=>(Array.isArray(w.offDays)?OFFDAY_DEFS.filter(([v])=>w.offDays.includes(v)).map(([,l])=>l):[]).join(', ');
 const freqTag=m=>m>=2?{l:'Fedele',c:'f-fedele'}:m>=1?{l:'Regolare',c:'f-regolare'}:{l:'Da riattivare',c:'f-occ'};
 
 // Simple Italian phone format check: optional +39/0039 prefix, then 6-12
@@ -1475,11 +1481,19 @@ function bookingEndTime(salon,serviceName,startTime){
 }
 function busyIntervalsFor(salonId,iso,workerId){
   const salon=getSalonById(salonId);
-  return STATE.bookings
+  const out=STATE.bookings
     .filter(b=>b.salonId===salonId&&b.dateISO===iso&&b.workerId===workerId&&b.status!=='cancelled')
     .map(b=>{const s=timeToMin(b.time);return s===null?null:{start:s,end:s+serviceDurMin(salon,b.service)};})
-    .filter(Boolean)
-    .sort((a,b)=>a.start-b.start);
+    .filter(Boolean);
+  // Pausa pranzo personale del barbiere: vale ogni giorno lavorativo e blocca
+  // gli slot che la attraversano, come una prenotazione fissa. Separata dal
+  // buco pranzo del salone (griglia timeSlots), che invece vale per tutti.
+  const worker=salon&&(salon.workers||[]).find(x=>x.id===workerId);
+  if(worker&&worker.breakFrom&&worker.breakTo){
+    const bs=timeToMin(worker.breakFrom),be=timeToMin(worker.breakTo);
+    if(bs!==null&&be!==null&&be>bs)out.push({start:bs,end:be});
+  }
+  return out.sort((a,b)=>a.start-b.start);
 }
 // Finestre di lavoro derivate dalla griglia timeSlots del salone: slot a 30
 // min consecutivi = una finestra unica: il buco pranzo (o altri buchi) la
@@ -1501,6 +1515,9 @@ function workWindows(salon){
   return wins;
 }
 function freeTimesFor(salon,workerId,iso,durMin){
+  // Nel giorno di riposo settimanale il barbiere non ha alcuno slot libero.
+  const worker=(salon.workers||[]).find(x=>x.id===workerId);
+  if(worker&&isWeeklyOff(worker,iso))return[];
   const busy=busyIntervalsFor(salon.id,iso,workerId);
   const out=[];
   for(const w of workWindows(salon)){
@@ -1835,6 +1852,7 @@ function renderBarberGrid(){
       <div class="bc-stars" onclick="event.stopPropagation(); showBarberReviews('${w.id}')">${starsHtml}</div>
       <div class="bc-status">${vac?'In ferie 🌴':'Disponibile'}</div>
       ${vac&&w.vacTo?`<div class="bc-vac">Fino al ${w.vacTo}</div>`:''}
+      ${!vac&&offDaysLabel(w)?`<div class="bc-vac">Riposo: ${offDaysLabel(w)}</div>`:''}
     </div>`;
   }).join('');
   $('barberGrid').querySelectorAll('.barber-card:not(.on-vacation)').forEach(el=>el.addEventListener('click',()=>{
@@ -1864,7 +1882,11 @@ function renderCustTimes(){
   }
 
   if(!times.length){
-    $('times').innerHTML=`<div class="empty" style="grid-column:1/-1"><div class="empty-t">Nessun orario disponibile per questo giorno.<br>Prova un altro giorno o un altro barbiere.</div></div>`;
+    const w=custSalon.workers.find(x=>x.id===custData.barberId);
+    const restMsg=w&&isWeeklyOff(w,custData.dateISO)
+      ? `${custData.barberName.split(' ')[0]} riposa in questo giorno.<br>Scegli un altro giorno o un altro barbiere.`
+      : `Nessun orario disponibile per questo giorno.<br>Prova un altro giorno o un altro barbiere.`;
+    $('times').innerHTML=`<div class="empty" style="grid-column:1/-1"><div class="empty-t">${restMsg}</div></div>`;
     return;
   }
 
@@ -1982,6 +2004,7 @@ async function doSubmit(){
       const free=custSalon.workers.filter(w=>{
         if(w.id===custData.barberId)return false;
         if(isOnVacation(w,custData.dateISO))return false;
+        if(isWeeklyOff(w,custData.dateISO))return false;
         return!slotConflicts(custSalon.id,w.id,custData.dateISO,custData.time,durMin);
       });
       nextBtn.disabled=false;
@@ -2005,6 +2028,7 @@ async function doSubmit(){
       const free=custSalon.workers.filter(w=>{
         if(w.id===custData.barberId)return false;
         if(isOnVacation(w,custData.dateISO))return false;
+        if(isWeeklyOff(w,custData.dateISO))return false;
         return!slotConflicts(custSalon.id,w.id,custData.dateISO,custData.time,durMin);
       });
       nextBtn.disabled=false;
@@ -2099,6 +2123,7 @@ function renderSalonModalWorkers(s) {
       </div>
       <div style="display:flex; gap:6px;">
         <button type="button" class="btn btn-ghost" data-smwedit="${w.id}" style="padding:4px 8px; font-size:11px; border:1px solid #ccc; border-radius:6px; background:#fff;">Modifica</button>
+        <button type="button" class="btn btn-ghost" data-smwbreak="${w.id}" style="padding:4px 8px; font-size:11px; border:1px solid #ccc; border-radius:6px; background:#fff;">🕐 Pause</button>
         <button type="button" class="btn btn-ghost" data-smwdel="${w.id}" style="padding:4px 8px; font-size:11px; color:#ef4444; border:1px solid #fecaca; border-radius:6px; background:#fff;">Elimina</button>
       </div>
     </div>
@@ -2108,6 +2133,11 @@ function renderSalonModalWorkers(s) {
     e.preventDefault(); e.stopPropagation();
     const salon = STATE.salons.find(x => x.id === s.id);
     if (salon) openWorkerModal(btn.dataset.smwedit, salon);
+  }));
+  container.querySelectorAll('[data-smwbreak]').forEach(btn => btn.addEventListener('click', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    const salon = STATE.salons.find(x => x.id === s.id);
+    if (salon) openBreakModal(btn.dataset.smwbreak, salon);
   }));
   container.querySelectorAll('[data-smwdel]').forEach(btn => btn.addEventListener('click', (e) => {
     e.preventDefault(); e.stopPropagation();
@@ -2254,6 +2284,7 @@ function updateNavMenu() {
         <option value="nav_oggi">📅 Appuntamenti Oggi</option>
         <option value="nav_calendario">📅 Calendario Completo</option>
         <option value="nav_recensioni">⭐ Mie Recensioni</option>
+        <option value="pause">🕐 Le mie Pause</option>
       `;
     }
   }
@@ -2308,7 +2339,7 @@ function showView(view){
 
   $('mainBody').classList.toggle('flush',isDash);
   document.querySelector('.head').style.display=isDash?'none':'';
-  if(!isDash){closeSide();['modal','workerModal','salonModal','userModal'].forEach(closeModal);}
+  if(!isDash){closeSide();['modal','workerModal','breakModal','salonModal','userModal'].forEach(closeModal);}
   $('gear').style.display='none';
   updateNavMenu();
   const hBack = $('hBack');
@@ -3010,16 +3041,18 @@ function renderDipendenti(){
   targetSalon.workers.forEach(w=>{
     const vacLabel=w.vacFrom&&w.vacTo?`<span class="vac-tag">Ferie ${w.vacFrom} → ${w.vacTo}</span>`:'';
     const showDel = r==='admin'; // Only admin can delete staff
+    const showBreak = r==='admin'; // Pause e riposo: admin (o il barbiere stesso dal proprio menu)
     html+=`<div class="worker-card${w.vacFrom?' on-vac':''}">
       <div class="av">${initials(w.name)}</div>
       <div class="wc-info"><div class="wc-name">${w.name}${vacLabel}</div><div class="wc-meta">@${w.username}</div></div>
-      ${canEdit?`<div class="wc-btns"><button class="iconbtn" data-wedit="${w.id}">✏️</button>${showDel?`<button class="iconbtn del" data-wdel="${w.id}">🗑️</button>`:''}</div>`:''}
+      ${canEdit?`<div class="wc-btns"><button class="iconbtn" data-wedit="${w.id}">✏️</button>${showBreak?`<button class="iconbtn" title="Pause e riposo" data-wbreak="${w.id}">🕐</button>`:''}${showDel?`<button class="iconbtn del" data-wdel="${w.id}">🗑️</button>`:''}</div>`:''}
     </div>`;
   });
   if(!targetSalon.workers.length)html+=`<div class="empty" style="padding:30px 0"><div class="empty-t">Nessun dipendente</div></div>`;
   $('dipendentiList').innerHTML=html;
   $('addWorkerBtn').style.display=r==='admin'?'block':'none'; // Only admin can add staff
   $('dipendentiList').querySelectorAll('[data-wedit]').forEach(b=>b.addEventListener('click',()=>openWorkerModal(b.dataset.wedit,targetSalon)));
+  $('dipendentiList').querySelectorAll('[data-wbreak]').forEach(b=>b.addEventListener('click',()=>openBreakModal(b.dataset.wbreak,targetSalon)));
   $('dipendentiList').querySelectorAll('[data-wdel]').forEach(b=>b.addEventListener('click',async()=>{
     if(!confirm('Eliminare questo dipendente?'))return;
     targetSalon.workers=targetSalon.workers.filter(x=>x.id!==b.dataset.wdel);
@@ -3028,6 +3061,21 @@ function renderDipendenti(){
 }
 
 let workerEditSalonId=null;
+// Riempie un selettore di giorni di riposo settimanale (usato nel modal Pause).
+function setOffDaysUI(boxId,offDays,disabled){
+  const set=new Set((offDays||[]).map(Number));
+  const box=$(boxId);if(!box)return;
+  box.innerHTML=OFFDAY_DEFS.map(([v,l])=>
+    `<label class="offday-chip${set.has(v)?' on':''}"><input type="checkbox" value="${v}"${set.has(v)?' checked':''}${disabled?' disabled':''}>${l}</label>`
+  ).join('');
+  box.querySelectorAll('input').forEach(inp=>inp.addEventListener('change',()=>{
+    inp.closest('.offday-chip').classList.toggle('on',inp.checked);
+  }));
+}
+function getOffDaysUI(boxId){
+  const box=$(boxId);if(!box)return[];
+  return[...box.querySelectorAll('input:checked')].map(i=>Number(i.value));
+}
 function openWorkerModal(wid,salon){
   // Store the salon's id, not the object itself: a background sync poll can
   // replace STATE.salons with a brand-new array/objects while this modal
@@ -3061,8 +3109,8 @@ function openWorkerModal(wid,salon){
 async function saveWorker(){
   const salon=STATE.salons.find(x=>x.id===workerEditSalonId);if(!salon)return;
   const vacFrom=$('wVacFrom').value,vacTo=$('wVacTo').value;
-
-  // Owner only updates vacation dates
+  // Owner only updates vacation dates (no access to the rest of the barber's
+  // data). Lunch break + weekly rest live in the separate "Pause" modal.
   if (SESSION.role === 'owner') {
     const w=salon.workers.find(x=>x.id===editWorker);
     if(w) {
@@ -3105,6 +3153,42 @@ async function saveWorker(){
     const s = STATE.salons.find(x => x.id === salonEditId);
     if (s) renderSalonModalWorkers(s);
   }
+}
+
+/* ================================================================
+   PAUSE E RIPOSO — modal separato dai dati del barbiere.
+   Vi accedono il barbiere stesso (per sé) e l'admin (per ogni barbiere);
+   contiene SOLO la pausa pranzo personale e il riposo settimanale.
+================================================================ */
+let breakEditSalonId=null,breakEditWorkerId=null;
+function openBreakModal(wid,salon){
+  if(!salon)return;
+  breakEditSalonId=salon.id;breakEditWorkerId=wid;
+  const w=salon.workers.find(x=>x.id===wid);if(!w)return;
+  clearErr('bkErr');
+  $('breakModalH').textContent='Pause e Riposo · '+(w.name||'').split(' ')[0];
+  $('bkBreakFrom').value=w.breakFrom||'';
+  $('bkBreakTo').value=w.breakTo||'';
+  setOffDaysUI('bkOffDays',w.offDays,false);
+  $('breakModal').classList.add('show');
+}
+async function saveBreak(){
+  const salon=STATE.salons.find(x=>x.id===breakEditSalonId);if(!salon)return;
+  const w=salon.workers.find(x=>x.id===breakEditWorkerId);if(!w)return;
+  const from=$('bkBreakFrom').value,to=$('bkBreakTo').value;
+  // Pausa pranzo: o entrambi vuoti (nessuna pausa) o un intervallo valido.
+  if((from&&!to)||(!from&&to))return showErr('bkErr','Inserisci sia inizio che fine della pausa pranzo');
+  if(from&&to){
+    const a=timeToMin(from),b=timeToMin(to);
+    if(a===null||b===null)return showErr('bkErr','Orario pausa non valido');
+    if(b<=a)return showErr('bkErr','La fine della pausa deve essere dopo l\'inizio');
+  }
+  w.breakFrom=from;w.breakTo=to;
+  w.offDays=getOffDaysUI('bkOffDays');
+  await saveState();
+  closeModal('breakModal');
+  // L'admin vede la lista dipendenti: aggiornala (il barbiere non ce l'ha).
+  if(SESSION.role==='admin'||SESSION.role==='owner')renderDipendenti();
 }
 
 /* ---- STATISTICHE ----
@@ -4174,6 +4258,10 @@ async function boot(){
     } else if (val === 'dashboard') {
       showView('vDash');
       initDash();
+    } else if (val === 'pause') {
+      // Il barbiere imposta le proprie pause dal menu, senza toccare i dati.
+      const salon = getSalon();
+      if (salon && SESSION && SESSION.workerId) openBreakModal(SESSION.workerId, salon);
     } else if (val === 'admin_new_salon') {
       location.hash = adminHashFor('newSalon');
     } else if (val === 'logout') {
@@ -4213,6 +4301,9 @@ async function boot(){
   $('workerModalOv').addEventListener('click',()=>closeModal('workerModal'));
   $('wCancel').addEventListener('click',()=>closeModal('workerModal'));
   $('wSave').addEventListener('click',saveWorker);
+  $('breakModalOv').addEventListener('click',()=>closeModal('breakModal'));
+  $('bkCancel').addEventListener('click',()=>closeModal('breakModal'));
+  $('bkSave').addEventListener('click',saveBreak);
   wireImagePicker('wImgFile','wImg','wImgPreview','wImgStatus');
   $('wImg').addEventListener('input',()=>{
     const preview=$('wImgPreview');const url=$('wImg').value.trim();
@@ -4527,6 +4618,7 @@ window.selectReviewStar = selectReviewStar;
 window.dashAction = dashAction;
 window.showBarberReviews = showBarberReviews;
 window.openWorkerModal = openWorkerModal;
+window.openBreakModal = openBreakModal;
 window.deleteSalonModalWorker = deleteSalonModalWorker;
 window.onHeaderLogoClick = onHeaderLogoClick;
 

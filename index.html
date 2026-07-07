@@ -41,7 +41,7 @@
     l.href='/api/manifest?start='+encodeURIComponent(start);
   })();
   </script>
-  <link rel="stylesheet" href="/css/style.css?v=202607050500">
+  <link rel="stylesheet" href="/css/style.css?v=202607071300">
   <!-- Firebase Compatibility SDKs -->
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
@@ -670,6 +670,33 @@
         </div>
       </div>
 
+      <!-- MODAL: Pause e Riposo (barbiere stesso + admin) -->
+      <div class="modal" id="breakModal">
+        <div class="modal-ov" id="breakModalOv"></div>
+        <div class="modal-sheet">
+          <div class="modal-h" id="breakModalH">Pause e Riposo</div>
+          <div class="err" id="bkErr"></div>
+          <label class="d-lbl">Pausa pranzo</label>
+          <div style="display:flex; gap:10px; align-items:center; margin-bottom:6px;">
+            <div style="flex:1;">
+              <div style="font-size:11px; color:#888; margin-bottom:4px;">Dalle</div>
+              <input class="minput" id="bkBreakFrom" type="time" style="margin-bottom:0;">
+            </div>
+            <div style="flex:1;">
+              <div style="font-size:11px; color:#888; margin-bottom:4px;">Alle</div>
+              <input class="minput" id="bkBreakTo" type="time" style="margin-bottom:0;">
+            </div>
+          </div>
+          <div style="font-size:11px; color:#999; margin-bottom:16px;">Lascia vuoto se non fai pausa pranzo.</div>
+          <label class="d-lbl">Riposo settimanale</label>
+          <div id="bkOffDays" class="offday-picker" style="margin-bottom:14px"></div>
+          <div class="srv-save">
+            <button class="b-cancel" id="bkCancel">Annulla</button>
+            <button class="b-save" id="bkSave">Salva</button>
+          </div>
+        </div>
+      </div>
+
       <!-- MODAL: Salone (Livello 1 admin) -->
       <div class="modal" id="salonModal">
         <div class="modal-ov" id="salonModalOv"></div>
@@ -840,6 +867,6 @@
      own "Save as PDF" print target produces a clean report. -->
 <div id="printableStats"></div>
 
-<script src="/js/app.min.js?v=20260706_0700"></script>
+<script src="/js/app.min.js?v=20260707_1300"></script>
 </body>
 </html>
