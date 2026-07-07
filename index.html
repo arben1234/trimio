@@ -41,7 +41,7 @@
     l.href='/api/manifest?start='+encodeURIComponent(start);
   })();
   </script>
-  <link rel="stylesheet" href="/css/style.css?v=202607071500">
+  <link rel="stylesheet" href="/css/style.css?v=202607071700">
   <!-- Firebase Compatibility SDKs -->
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
@@ -680,14 +680,14 @@
           <div style="display:flex; gap:10px; align-items:center; margin-bottom:6px;">
             <div style="flex:1;">
               <div style="font-size:11px; color:#888; margin-bottom:4px;">Dalle</div>
-              <input class="minput" id="bkBreakFrom" type="time" style="margin-bottom:0;">
+              <select class="msel" id="bkBreakFrom" style="margin-bottom:0;"></select>
             </div>
             <div style="flex:1;">
               <div style="font-size:11px; color:#888; margin-bottom:4px;">Alle</div>
-              <input class="minput" id="bkBreakTo" type="time" style="margin-bottom:0;">
+              <select class="msel" id="bkBreakTo" style="margin-bottom:0;"></select>
             </div>
           </div>
-          <div style="font-size:11px; color:#999; margin-bottom:16px;">Lascia vuoto se non fai pausa pranzo.</div>
+          <div style="font-size:11px; color:#999; margin-bottom:16px;">Orari in formato 24h. Lascia su “—” se non fai pausa pranzo.</div>
           <label class="d-lbl">Riposo settimanale</label>
           <div id="bkOffDays" class="offday-picker" style="margin-bottom:14px"></div>
           <div class="srv-save">
@@ -867,6 +867,6 @@
      own "Save as PDF" print target produces a clean report. -->
 <div id="printableStats"></div>
 
-<script src="/js/app.min.js?v=20260707_1500"></script>
+<script src="/js/app.min.js?v=20260707_1700"></script>
 </body>
 </html>

@@ -3166,14 +3166,24 @@ async function saveWorker(){
    contiene SOLO la pausa pranzo personale e il riposo settimanale.
 ================================================================ */
 let breakEditSalonId=null,breakEditWorkerId=null;
+// Riempie una <select> con orari in formato 24h (ogni 15 min, 08:00–21:00):
+// un <input type="time"> mostra AM/PM in alcuni dispositivi e "12:00" veniva
+// salvato come 00:00 (mezzanotte). La select con etichette 24h è inequivocabile.
+function fillBreakTimeSelect(id,val){
+  const el=$(id);if(!el)return;
+  let html='<option value="">—</option>';
+  for(let m=8*60;m<=21*60;m+=15){const t=minToTime(m);html+=`<option value="${t}">${t}</option>`;}
+  el.innerHTML=html;
+  el.value=val||'';
+}
 function openBreakModal(wid,salon){
   if(!salon)return;
   breakEditSalonId=salon.id;breakEditWorkerId=wid;
   const w=salon.workers.find(x=>x.id===wid);if(!w)return;
   clearErr('bkErr');
   $('breakModalH').textContent='Pause e Riposo · '+(w.name||'').split(' ')[0];
-  $('bkBreakFrom').value=w.breakFrom||'';
-  $('bkBreakTo').value=w.breakTo||'';
+  fillBreakTimeSelect('bkBreakFrom',w.breakFrom);
+  fillBreakTimeSelect('bkBreakTo',w.breakTo);
   setOffDaysUI('bkOffDays',w.offDays,false);
   $('breakModal').classList.add('show');
 }
