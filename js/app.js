@@ -1041,6 +1041,13 @@ async function initPushNotifications() {
     // 4. Send subscription to server if user is logged in
     await syncPushSubscriptionToServer(subscription);
 
+    // 5. The dashboard banner is often rendered before this subscribe() call
+    // resolves (both run concurrently on session restore), so it initially
+    // shows "inactive"/"Attiva" — refresh it now so it flips to "active"
+    // on its own instead of leaving a stale prompt the owner/barber feels
+    // they have to click every time they open the app.
+    if (typeof renderPushNotifBanner === 'function') renderPushNotifBanner();
+
   } catch (err) {
     console.error('Failed to initialize push notifications:', err);
   }
