@@ -692,6 +692,18 @@
           <div style="font-size:11px; color:#999; margin-bottom:16px;">Orari in formato 24h. Lascia su “—” se non fai pausa pranzo.</div>
           <label class="d-lbl">Riposo settimanale</label>
           <div id="bkOffDays" class="offday-picker" style="margin-bottom:14px"></div>
+          <label class="d-lbl">Ferie</label>
+          <div style="display:flex; gap:10px; align-items:center; margin-bottom:6px;">
+            <div style="flex:1;">
+              <div style="font-size:11px; color:#888; margin-bottom:4px;">Dal</div>
+              <input class="minput" id="bkVacFrom" type="date" style="margin-bottom:0;">
+            </div>
+            <div style="flex:1;">
+              <div style="font-size:11px; color:#888; margin-bottom:4px;">Al</div>
+              <input class="minput" id="bkVacTo" type="date" style="margin-bottom:0;">
+            </div>
+          </div>
+          <div style="font-size:11px; color:#999; margin-bottom:16px;">Lascia entrambi vuoti se non hai ferie programmate.</div>
           <div class="srv-save">
             <button class="b-cancel" id="bkCancel">Annulla</button>
             <button class="b-save" id="bkSave">Salva</button>
@@ -869,6 +881,6 @@
      own "Save as PDF" print target produces a clean report. -->
 <div id="printableStats"></div>
 
-<script src="/js/app.min.js?v=20260708_1530"></script>
+<script src="/js/app.min.js?v=20260709_0000"></script>
 </body>
 </html>

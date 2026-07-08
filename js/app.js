@@ -2663,7 +2663,7 @@ function navItems(){
       {sec:'prossimi',   ic:'🕐',label:'Prossimi'},
       {sec:'clienti',    ic:'👥',label:'Clienti'},
       {sec:'recensioni',  ic:'💬',label:'Le mie recensioni'},
-      {sec:'pause',      ic:'☕',label:'Le mie Pause'},
+      {sec:'pause',      ic:'☕',label:'Pause e Ferie'},
       {sec:'stats',      ic:'📊',label:'Statistiche'},
     ];
   }
@@ -2682,8 +2682,8 @@ function buildNav(){
       if(it.sec==='logout') {
         doLogout();
       } else if(it.sec==='pause') {
-        // Il barbiere imposta le proprie pause (pausa pranzo + riposo
-        // settimanale) senza toccare i propri dati anagrafici.
+        // Il barbiere imposta da sé pausa pranzo, riposo settimanale e
+        // ferie, senza toccare i propri dati anagrafici.
         const s=getSalon();
         if(s && SESSION && SESSION.workerId) openBreakModal(SESSION.workerId, s);
       } else if(it.sec==='home' || it.sec==='newSalon') {
@@ -3210,9 +3210,10 @@ async function saveWorker(){
 }
 
 /* ================================================================
-   PAUSE E RIPOSO — modal separato dai dati del barbiere.
-   Vi accedono il barbiere stesso (per sé) e l'admin (per ogni barbiere);
-   contiene SOLO la pausa pranzo personale e il riposo settimanale.
+   PAUSE, RIPOSO E FERIE — modal separato dai dati anagrafici del barbiere.
+   Vi accedono il barbiere stesso (per sé, incluse le proprie ferie) e
+   l'admin (per ogni barbiere); contiene la pausa pranzo, il riposo
+   settimanale e le date di ferie.
 ================================================================ */
 let breakEditSalonId=null,breakEditWorkerId=null;
 // Riempie una <select> con orari in formato 24h (ogni 15 min, 08:00–21:00):
@@ -3230,10 +3231,12 @@ function openBreakModal(wid,salon){
   breakEditSalonId=salon.id;breakEditWorkerId=wid;
   const w=salon.workers.find(x=>x.id===wid);if(!w)return;
   clearErr('bkErr');
-  $('breakModalH').textContent='Pause e Riposo · '+(w.name||'').split(' ')[0];
+  $('breakModalH').textContent='Pause, Riposo e Ferie · '+(w.name||'').split(' ')[0];
   fillBreakTimeSelect('bkBreakFrom',w.breakFrom);
   fillBreakTimeSelect('bkBreakTo',w.breakTo);
   setOffDaysUI('bkOffDays',w.offDays,false);
+  $('bkVacFrom').value=w.vacFrom||'';
+  $('bkVacTo').value=w.vacTo||'';
   $('breakModal').classList.add('show');
 }
 async function saveBreak(){
@@ -3247,12 +3250,19 @@ async function saveBreak(){
     if(a===null||b===null)return showErr('bkErr','Orario pausa non valido');
     if(b<=a)return showErr('bkErr','La fine della pausa deve essere dopo l\'inizio');
   }
+  const vacFrom=$('bkVacFrom').value,vacTo=$('bkVacTo').value;
+  // Ferie: o entrambe vuote (nessuna ferie) o un intervallo valido.
+  if((vacFrom&&!vacTo)||(!vacFrom&&vacTo))return showErr('bkErr','Inserisci sia la data di inizio che di fine ferie');
+  if(vacFrom&&vacTo&&vacTo<vacFrom)return showErr('bkErr','La fine delle ferie deve essere dopo l\'inizio');
   w.breakFrom=from;w.breakTo=to;
   w.offDays=getOffDaysUI('bkOffDays');
+  w.vacFrom=vacFrom;w.vacTo=vacTo;
   await saveState();
   closeModal('breakModal');
   // L'admin vede la lista dipendenti: aggiornala (il barbiere non ce l'ha).
   if(SESSION.role==='admin'||SESSION.role==='owner')renderDipendenti();
+  // Il barbiere vede subito le proprie ferie riflesse in "Oggi"/Calendario.
+  if(SESSION.role==='barber')renderDash();
 }
 
 /* ---- STATISTICHE ----
