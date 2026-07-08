@@ -1502,40 +1502,47 @@ function busyIntervalsFor(salonId,iso,workerId){
   }
   return out.sort((a,b)=>a.start-b.start);
 }
-// Finestre di lavoro derivate dalla griglia timeSlots del salone: slot a 30
-// min consecutivi = una finestra unica: il buco pranzo (o altri buchi) la
-// separano dalla successiva. "close" è un margine generoso oltre l'ultimo
-// slot della griglia (non un nuovo slot selezionabile — vedi freeTimesFor,
-// che sceglie gli orari SOLO dalla griglia) così un servizio più lungo di
-// 30 min può comunque iniziare proprio all'ultimo slot mostrato (es. le
-// 20:30, anche per un servizio da 45 min) invece di sparire prima per non
-// "sforare" un limite calcolato a soli +30 minuti.
-function workWindows(salon){
-  const mins=((salon&&salon.timeSlots)||DEFAULT_SLOTS).map(timeToMin).filter(v=>v!==null).sort((a,b)=>a-b);
-  const wins=[];
-  for(const t of mins){
-    const last=wins[wins.length-1];
-    if(last&&t<=last.slots[last.slots.length-1]+30)last.slots.push(t);
-    else wins.push({slots:[t]});
-  }
-  wins.forEach(w=>{w.close=w.slots[w.slots.length-1]+90;});
-  return wins;
-}
-function freeTimesFor(salon,workerId,iso,durMin){
-  // Nel giorno di riposo settimanale il barbiere non ha alcuno slot libero.
-  const worker=(salon.workers||[]).find(x=>x.id===workerId);
-  if(worker&&isWeeklyOff(worker,iso))return[];
-  const busy=busyIntervalsFor(salon.id,iso,workerId);
+// Unisce intervalli busy che si sovrappongono o si toccano, in ordine.
+function mergeIntervals(busy){
+  const sorted=[...busy].sort((a,b)=>a.start-b.start);
   const out=[];
-  for(const w of workWindows(salon)){
-    for(const t of w.slots){
-      if(t+durMin>w.close)continue;
-      const hit=busy.find(b=>t<b.end&&t+durMin>b.start);
-      if(hit)continue;
-      out.push(minToTime(t));
-    }
+  for(const b of sorted){
+    const last=out[out.length-1];
+    if(last&&b.start<=last.end)last.end=Math.max(last.end,b.end);
+    else out.push({...b});
   }
   return out;
+}
+// Fasce orarie di INIZIO valide (in minuti) per un servizio da durMin,
+// calcolate sottraendo durMin dal bordo destro di ogni fascia solo quando
+// quel bordo è un impegno reale (pausa/prenotazione) — non quando è la
+// chiusura della griglia: lì ogni servizio può ancora iniziare fino a
+// lastStart, regola di business ereditata dal fix "20:30 closing-slot"
+// (un servizio da 45 min può iniziare proprio alle 20:30 e sforare oltre).
+// Sostituisce il vecchio sistema a griglia fissa da 30 min: ora qualsiasi
+// orario (a step di minuti liberi) può essere proposto/validato.
+function freeRangesFor(salon,workerId,iso,durMin){
+  const worker=(salon.workers||[]).find(x=>x.id===workerId);
+  if(worker&&isWeeklyOff(worker,iso))return[];
+  const mins=((salon&&salon.timeSlots)||DEFAULT_SLOTS).map(timeToMin).filter(v=>v!==null);
+  const openMin=Math.min(...mins),lastStart=Math.max(...mins);
+  const merged=mergeIntervals(busyIntervalsFor(salon.id,iso,workerId));
+  const ranges=[];
+  let cursor=openMin;
+  for(const b of merged){
+    if(cursor>lastStart)break;
+    if(b.start>=cursor){
+      const end=Math.min(b.start-durMin,lastStart);
+      if(end>=cursor)ranges.push({start:cursor,end});
+    }
+    cursor=Math.max(cursor,b.end);
+  }
+  if(cursor<=lastStart)ranges.push({start:cursor,end:lastStart});
+  return ranges;
+}
+function isTimeInRanges(t,ranges){
+  const m=timeToMin(t);
+  return m!==null&&ranges.some(r=>m>=r.start&&m<=r.end);
 }
 function slotConflicts(salonId,workerId,iso,time,durMin){
   const s=timeToMin(time);
@@ -1876,39 +1883,89 @@ function renderBarberGrid(){
   }));
 }
 
+// Ore selezionabili nel time-picker, derivate dai limiti reali della griglia
+// del salone (non più usata come lista di slot, solo per i confini apertura/
+// ultimo-orario-di-inizio).
+function timePickerHourOpts(salon){
+  const mins=((salon&&salon.timeSlots)||DEFAULT_SLOTS).map(timeToMin).filter(v=>v!==null);
+  const openH=Math.floor(Math.min(...mins)/60),lastH=Math.floor(Math.max(...mins)/60);
+  const out=[];
+  for(let h=openH;h<=lastH;h++)out.push(String(h).padStart(2,'0'));
+  return out;
+}
+const MIN_STEP_OPTS=['00','05','10','15','20','25','30','35','40','45','50','55'];
+
+// Fasce libere calcolate per il rendering corrente (usate anche da
+// updateCustTimeValidity e validateCust, per non ricalcolare due volte con
+// eventuali risultati diversi tra un frame e l'altro).
+let custTimeRanges=[];
+
+function setCustTimePicker(mins){
+  const h=Math.floor(mins/60),m=mins%60;
+  const snapped=Math.round(m/5)*5;
+  $('custHour').value=String(h+(snapped===60?1:0)).padStart(2,'0');
+  $('custMin').value=String(snapped===60?0:snapped).padStart(2,'0');
+  custData.time=`${$('custHour').value}:${$('custMin').value}`;
+}
+
+function updateCustTimeValidity(){
+  if(!$('custHour').value||!$('custMin').value)return;
+  custData.time=`${$('custHour').value}:${$('custMin').value}`;
+  clearErr('cErr');
+  const msg=$('timeAvailMsg');
+  if(isTimeInRanges(custData.time,custTimeRanges)){
+    msg.innerHTML='✓ Orario disponibile';
+    msg.className='time-avail-msg ok';
+  } else {
+    msg.innerHTML='✗ Orario occupato — scegli un orario in una fascia libera sopra';
+    msg.className='time-avail-msg bad';
+  }
+}
+
 function renderCustTimes(){
-  // Orari calcolati sulla durata del servizio scelto (per questo il servizio
+  // Fasce calcolate sulla durata del servizio scelto (per questo il servizio
   // viene ora scelto PRIMA dell'orario), indipendenti per ogni barbiere.
   const dur=serviceDurMin(custSalon,custData.service);
-  let times=freeTimesFor(custSalon,custData.barberId,custData.dateISO,dur);
+  let ranges=freeRangesFor(custSalon,custData.barberId,custData.dateISO,dur);
 
   if(custData.dateISO===todayISO()){
     const now=new Date();
-    const nowStr=`${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-    times=times.filter(t=>t>=nowStr);
+    const nowMin=now.getHours()*60+now.getMinutes();
+    ranges=ranges.map(r=>({start:Math.max(r.start,nowMin),end:r.end})).filter(r=>r.start<=r.end);
   }
+  custTimeRanges=ranges;
 
-  if(!times.length){
+  if(!ranges.length){
     const w=custSalon.workers.find(x=>x.id===custData.barberId);
     const restMsg=w&&isWeeklyOff(w,custData.dateISO)
       ? `${custData.barberName.split(' ')[0]} riposa in questo giorno.<br>Scegli un altro giorno o un altro barbiere.`
       : `Nessun orario disponibile per questo giorno.<br>Prova un altro giorno o un altro barbiere.`;
+    $('freeRanges').innerHTML='';
+    $('timePicker').style.display='none';
+    $('timeAvailMsg').innerHTML='';
     $('times').innerHTML=`<div class="empty" style="grid-column:1/-1"><div class="empty-t">${restMsg}</div></div>`;
+    custData.time=null;
     return;
   }
 
-  $('times').innerHTML=times.map(t=>`<div class="slot${custData.time===t?' sel':''}" data-t="${t}">${t}</div>`).join('');
-
-  $('times').querySelectorAll('.slot').forEach(el=>el.addEventListener('click',()=>{
-    $('times').querySelectorAll('.slot').forEach(x=>x.classList.remove('sel'));
-    el.classList.add('sel');custData.time=el.dataset.t;clearErr('cErr');
-
-    // Auto-advance to confirmation after a slight delay
-    setTimeout(() => {
-      custStep = 3;
-      renderCustStep();
-    }, 180);
+  $('times').innerHTML='';
+  $('timePicker').style.display='flex';
+  $('freeRanges').innerHTML=ranges.map(r=>
+    `<div class="range-chip" data-s="${r.start}">${minToTime(r.start)} – ${minToTime(r.end)}</div>`
+  ).join('');
+  $('freeRanges').querySelectorAll('.range-chip').forEach(el=>el.addEventListener('click',()=>{
+    setCustTimePicker(parseInt(el.dataset.s,10));
+    updateCustTimeValidity();
   }));
+
+  $('custHour').innerHTML=timePickerHourOpts(custSalon).map(h=>`<option value="${h}">${h}</option>`).join('');
+  $('custMin').innerHTML=MIN_STEP_OPTS.map(m=>`<option value="${m}">${m}</option>`).join('');
+
+  // Riparte dall'orario già scelto se ancora valido (es. tornando indietro),
+  // altrimenti dall'inizio della prima fascia libera.
+  const startMin=(custData.time&&isTimeInRanges(custData.time,ranges))?timeToMin(custData.time):ranges[0].start;
+  setCustTimePicker(startMin);
+  updateCustTimeValidity();
 }
 
 function renderCustServices(){
@@ -1978,6 +2035,9 @@ function validateCust(){
       if(custData.time < currentTimeStr) {
         return showErr('cErr','Questo orario è già passato. Seleziona un altro orario.');
       }
+    }
+    if(!isTimeInRanges(custData.time,custTimeRanges)){
+      return showErr('cErr','Questo orario è occupato. Scegli un orario in una fascia libera.');
     }
   }
   if(s===3){
@@ -3756,31 +3816,69 @@ function openNewApptModal(){
   fillModalTimes();
   $('modal').classList.add('show');
 }
+// Fasce libere calcolate per il rendering corrente del modal (usate anche
+// da updateManualTimeValidity e saveManualAppt).
+let manualTimeRanges=[];
+function updateManualTimeValidity(){
+  if(!$('mTimeHour').value||!$('mTimeMin').value)return;
+  const time=`${$('mTimeHour').value}:${$('mTimeMin').value}`;
+  const msg=$('mTimeMsg');
+  if(isTimeInRanges(time,manualTimeRanges)){
+    msg.innerHTML='✓ Orario disponibile';
+    msg.className='time-avail-msg ok';
+  } else {
+    msg.innerHTML='✗ Orario occupato — scegli un orario in una fascia libera sopra';
+    msg.className='time-avail-msg bad';
+  }
+}
 function fillModalTimes(){
   const salon=getSalon();if(!salon)return;
   const iso=$('mDate').value;const wid=$('mBarber').value;
-  // Orari dipendenti dalla durata del servizio selezionato, come nel flusso
+  // Fasce dipendenti dalla durata del servizio selezionato, come nel flusso
   // cliente: ogni prenotazione libera il barbiere alla fine effettiva del
   // servizio, non alla mezz'ora successiva.
   const srv=(salon.services||DEFAULT_SERVICES).find(s=>s.id===$('mSrv').value);
   const dur=serviceDurMin(salon,srv?srv.name:null);
-  const prev=$('mTime').value;
-  const times=freeTimesFor(salon,wid,iso,dur);
-  $('mTime').innerHTML=times.length
-    ? times.map(t=>`<option value="${t}">${t}</option>`).join('')
-    : `<option value="" disabled selected>Nessun orario disponibile</option>`;
-  if(prev&&times.includes(prev))$('mTime').value=prev;
+  const prevTime=$('mTimeHour').value&&$('mTimeMin').value?`${$('mTimeHour').value}:${$('mTimeMin').value}`:null;
+  const ranges=freeRangesFor(salon,wid,iso,dur);
+  manualTimeRanges=ranges;
+
+  if(!ranges.length){
+    $('mFreeRanges').innerHTML='';
+    $('mTimePicker').style.display='none';
+    $('mTimeMsg').innerHTML='Nessun orario disponibile per questo giorno.';
+    $('mTimeMsg').className='time-avail-msg bad';
+    return;
+  }
+  $('mTimePicker').style.display='flex';
+  $('mFreeRanges').innerHTML=ranges.map(r=>
+    `<div class="range-chip" data-s="${r.start}">${minToTime(r.start)} – ${minToTime(r.end)}</div>`
+  ).join('');
+  $('mFreeRanges').querySelectorAll('.range-chip').forEach(el=>el.addEventListener('click',()=>{
+    const s=parseInt(el.dataset.s,10);
+    $('mTimeHour').value=String(Math.floor(s/60)).padStart(2,'0');
+    $('mTimeMin').value=String(s%60).padStart(2,'0');
+    updateManualTimeValidity();
+  }));
+
+  $('mTimeHour').innerHTML=timePickerHourOpts(salon).map(h=>`<option value="${h}">${h}</option>`).join('');
+  $('mTimeMin').innerHTML=MIN_STEP_OPTS.map(m=>`<option value="${m}">${m}</option>`).join('');
+  const startMin=(prevTime&&isTimeInRanges(prevTime,ranges))?timeToMin(prevTime):ranges[0].start;
+  $('mTimeHour').value=String(Math.floor(startMin/60)).padStart(2,'0');
+  $('mTimeMin').value=String(startMin%60).padStart(2,'0');
+  updateManualTimeValidity();
 }
 // Same double-tap protection as doSubmit: one in-flight save at a time.
 let manualApptSaving=false;
 async function saveManualAppt(){
   if(manualApptSaving)return;
   const salon=getSalon();if(!salon)return;
-  const name=$('mName').value.trim();const iso=$('mDate').value;const time=$('mTime').value;
+  const name=$('mName').value.trim();const iso=$('mDate').value;
+  const time=$('mTimeHour').value&&$('mTimeMin').value?`${$('mTimeHour').value}:${$('mTimeMin').value}`:'';
   const wid=$('mBarber').value;const worker=salon.workers.find(w=>w.id===wid);
   const srv=(salon.services||DEFAULT_SERVICES).find(s=>s.id===$('mSrv').value);
   if(name.length<2)return showErr('mErr','Inserisci il nome del cliente');
-  if(!time||$('mTime').options[$('mTime').selectedIndex]?.disabled)return showErr('mErr','Seleziona un orario disponibile');
+  if(!time||!isTimeInRanges(time,manualTimeRanges))return showErr('mErr','Seleziona un orario disponibile');
   manualApptSaving=true;
   const saveBtn=$('mSave');
   if(saveBtn){saveBtn.disabled=true;saveBtn.textContent='…';}
@@ -4098,6 +4196,8 @@ async function boot(){
   // ---- Customer wiring ----
   $('cNext').addEventListener('click',custNext);
   $('cBack').addEventListener('click',custBack);
+  $('custHour').addEventListener('change',updateCustTimeValidity);
+  $('custMin').addEventListener('change',updateCustTimeValidity);
   $('again').addEventListener('click',()=>location.reload());
   $('cname').addEventListener('input',e=>{custData.name=e.target.value;clearErr('cErr');});
   $('cphone').addEventListener('input',e=>{custData.phone=e.target.value;});
@@ -4311,6 +4411,8 @@ async function boot(){
   $('mDate').addEventListener('change',fillModalTimes);
   $('mBarber').addEventListener('change',fillModalTimes);
   $('mSrv').addEventListener('change',fillModalTimes);
+  $('mTimeHour').addEventListener('change',updateManualTimeValidity);
+  $('mTimeMin').addEventListener('change',updateManualTimeValidity);
   $('addSrvBtn').addEventListener('click',()=>{editSrv='new';renderServizi();});
   $('addWorkerBtn').addEventListener('click',()=>{
     const salon=SESSION.role==='admin'?getSalonById(dipSalonId):getSalon();
