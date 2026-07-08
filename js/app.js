@@ -2006,12 +2006,11 @@ function validateCust(){
   }
   if(s===3){
     if(!custData.name||custData.name.trim().length<2)return showErr('cErr','Inserisci il tuo nome');
-    if((custData.phone||'').trim()){
-      const formatted=formatItalianPhone(custData.phone);
-      if(!isValidItalianPhone(formatted))return showErr('cErr','Numero di telefono non valido. Es. +39 345 678 9012');
-      custData.phone=formatted;
-      $('cphone').value=formatted;
-    }
+    if(!(custData.phone||'').trim())return showErr('cErr','Inserisci il tuo numero di telefono');
+    const formatted=formatItalianPhone(custData.phone);
+    if(!isValidItalianPhone(formatted))return showErr('cErr','Numero di telefono non valido. Es. +39 345 678 9012');
+    custData.phone=formatted;
+    $('cphone').value=formatted;
   }
   return true;
 }
