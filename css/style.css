@@ -58,7 +58,7 @@ body{background:#f1f5f9;min-height:100vh;display:flex;align-items:center;justify
   color: #18181b;
   border-color: #d4d4d8;
 }
-.actions{display:flex;gap:11px;margin-top:20px;flex-shrink:0;position:sticky;bottom:0;background:#fff;padding-bottom:8px;z-index:10;}
+.actions{display:flex;gap:11px;margin-top:auto;flex-shrink:0;position:sticky;bottom:0;background:#fff;padding-top:20px;padding-bottom:8px;z-index:10;}
 .view{display:none;flex-direction:column;flex:1;}
 .view.on{display:flex;}
 .view#vDash{display:none;}

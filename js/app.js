@@ -2339,6 +2339,14 @@ function onHeaderLogoClick(){
    VIEW SWITCH
 ================================================================ */
 function showView(view){
+  // HARD RULE: vHome is the central admin/platform homepage (all salons,
+  // "Login Amministratore", etc.) — it must never be the page a logged-in
+  // owner or barber lands on, no matter which code path called showView().
+  // A staff session always belongs on its own salon's dashboard.
+  if (view === 'vHome' && SESSION && (SESSION.role === 'owner' || SESSION.role === 'barber')) {
+    view = 'vDash';
+    if (typeof initDash === 'function') initDash();
+  }
   ['vHome','vCustomer','vLogin','vDash'].forEach(v=>$(v).classList.remove('on'));
   $(view).classList.add('on');
   const isDash=view==='vDash';
@@ -2539,6 +2547,17 @@ function initDash(){
   const r=SESSION.role;
   const salon=getSalon();
 
+  // HARD RULE: owner/barber dashboards are always scoped to one salon. If the
+  // salon can't be resolved (deleted, or session pointing at a stale/foreign
+  // id), never render — that would fall back to the generic "TRIMIO · Admin"
+  // sidebar and look like the admin page leaked into a salon's staff view.
+  // Log out instead of showing an ambiguous dashboard.
+  if (r !== 'admin' && !salon) {
+    alert(`Il tuo salone non è stato trovato. Effettua nuovamente l'accesso dalla pagina del tuo salone.`);
+    doLogout();
+    return;
+  }
+
   // sidebar header
   $('sideSalon').textContent=salon?salon.name:'TRIMIO · Admin';
   $('sideSlug').textContent=salon?'#'+salon.slug:'Sistema centrale';
@@ -2632,7 +2651,6 @@ function navItems(){
       {sec:'prossimi',    ic:'🕐',label:'Prossimi'},
       {sec:'clienti',     ic:'👥',label:'Clienti'},
       {sec:'recensioni',  ic:'💬',label:'Recensioni'},
-      {sec:'dipendenti',  ic:'💈',label:'Dipendenti'},
       {sec:'servizi',     ic:'✂️',label:'Servizi'},
       {sec:'stats',       ic:'📊',label:'Statistiche'},
     ];
@@ -4597,8 +4615,28 @@ async function boot(){
     if (SESSION && SESSION.role) {
       // If owner or barber, check if salon is still active
       if (SESSION.role !== 'admin' && SESSION.salonId) {
-        const s = STATE.salons.find(x => x.id === SESSION.salonId);
-        if (s && s.inactive) {
+        let s = STATE.salons.find(x => x.id === SESSION.salonId);
+        if (!s && initialCloudSync) {
+          // The salon isn't in the local snapshot yet — could just be a fresh
+          // install/origin still waiting on its first cloud sync. Give it a
+          // chance before treating this staff session as orphaned, otherwise
+          // an owner/barber reopening the app can briefly fall through to a
+          // salon-less dashboard that renders with the generic "Admin"
+          // sidebar label — the exact admin/salon mix-up this guards against.
+          await Promise.race([initialCloudSync, new Promise(r => setTimeout(r, 8000))]);
+          s = STATE.salons.find(x => x.id === SESSION.salonId);
+        }
+        if (!s) {
+          // RULE: a non-admin session with no matching salon must NEVER fall
+          // through to a rendered dashboard (it would show as an unlabeled/
+          // admin-looking page). Log out cleanly instead — staff/owner pages
+          // and the admin page must never be conflated.
+          SESSION = {role:null,salonId:null,workerId:null,name:null};
+          if (canStore) {
+            try { localStorage.removeItem(SESSION_KEY); } catch(e){}
+          }
+          alert(`Il tuo salone non è stato trovato. Effettua nuovamente l'accesso dalla pagina del tuo salone.`);
+        } else if (s.inactive) {
           SESSION = {role:null,salonId:null,workerId:null,name:null};
           if (canStore) {
             try { localStorage.removeItem(SESSION_KEY); } catch(e){}
