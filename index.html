@@ -305,15 +305,8 @@
       <div class="step" id="s1">
         <div class="title">Quando vuoi venire?</div>
         <div class="dates" id="dates"></div>
-        <div class="eyebrow">Fasce orarie libere</div>
-        <div class="free-ranges" id="freeRanges"></div>
+        <div class="eyebrow">Orari disponibili</div>
         <div class="times" id="times"></div>
-        <div class="time-picker" id="timePicker">
-          <select class="msel tp-sel" id="custHour"></select>
-          <span class="tp-sep">:</span>
-          <select class="msel tp-sel" id="custMin"></select>
-        </div>
-        <div class="time-avail-msg" id="timeAvailMsg"></div>
       </div>
 
       <div class="step" id="s2">
@@ -632,13 +625,7 @@
           <label class="d-lbl">Servizio</label>
           <select class="msel" id="mSrv"></select>
           <label class="d-lbl">Ora</label>
-          <div class="free-ranges" id="mFreeRanges"></div>
-          <div class="time-picker" id="mTimePicker" style="margin-bottom:10px;">
-            <select class="msel tp-sel" id="mTimeHour"></select>
-            <span class="tp-sep">:</span>
-            <select class="msel tp-sel" id="mTimeMin"></select>
-          </div>
-          <div class="time-avail-msg" id="mTimeMsg" style="margin-bottom:14px;"></div>
+          <select class="msel" id="mTime"></select>
           <div class="srv-save">
             <button class="b-cancel" id="mCancel">Annulla</button>
             <button class="b-save" id="mSave">Salva appuntamento</button>
@@ -882,6 +869,6 @@
      own "Save as PDF" print target produces a clean report. -->
 <div id="printableStats"></div>
 
-<script src="/js/app.min.js?v=20260708_1400"></script>
+<script src="/js/app.min.js?v=20260708_1530"></script>
 </body>
 </html>
