@@ -847,7 +847,10 @@ function initCloudSync() {
       updateUIStatus(false);
     });
 
-  // Polling every 4 seconds to sync status changes and new bookings
+  // Polling every 30 seconds to sync status changes and new bookings.
+  // Was 4s — at 3 KV commands per poll that's ~65K commands/day per open
+  // tab alone, enough to exhaust Upstash's free 500K/month quota in under
+  // a day with only a couple of dashboards open. 30s cuts that ~7.5x.
   setInterval(async () => {
     if (isSaving) return; // Skip polling updates while we are actively saving to prevent overwrites
     try {
@@ -932,7 +935,7 @@ function initCloudSync() {
       console.error("Polling sync error:", e);
       updateUIStatus(false);
     }
-  }, 4000);
+  }, 30000);
 }
 
 /* ======== SINC ALERTS & NOTIFICHE APPLICAZIONE ======== */
