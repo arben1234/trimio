@@ -528,7 +528,7 @@ body{background:#f1f5f9;min-height:100vh;display:flex;align-items:center;justify
 .side-item{display:flex;align-items:center;gap:13px;padding:13px 14px;border:none;background:none;border-radius:12px;font-size:15px;font-weight:600;color:#444;cursor:pointer;font-family:inherit;text-align:left;}
 .side-item .ic{font-size:17px;width:22px;text-align:center;}
 .side-item.active{background:#000;color:#fff;}
-.side-bot{padding:14px 18px;border-top:1px solid #eee;display:flex;align-items:center;gap:12px;}
+.side-bot{padding:14px 18px;border-top:1px solid #eee;display:flex;align-items:center;justify-content:flex-end;gap:12px;}
 .side-av{width:38px;height:38px;border-radius:50%;background:#e8e8e8;display:flex;align-items:center;justify-content:center;font-weight:700;color:#555;flex-shrink:0;}
 .side-prof{flex:1;min-width:0;}
 .side-prof .n{font-size:14px;font-weight:700;}
