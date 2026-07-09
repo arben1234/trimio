@@ -5,7 +5,7 @@
    values `vercel dev` would use). Does not require Vercel CLI login.
 
    NOTE: this talks to the SAME live Vercel/Upstash KV database as the
-   production deployment (https://trimio-two.vercel.app/) — bookings,
+   production deployment (https://trimio.org/) — bookings,
    logins and salon changes made here are real and will also be visible
    in production, they are not sandboxed.
 

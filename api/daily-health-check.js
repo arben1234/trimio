@@ -37,7 +37,7 @@ export default async function handler(req, res) {
   const report = {};
   const kvUrl = process.env.KV_REST_API_URL;
   const kvToken = process.env.KV_REST_API_TOKEN;
-  const host = req.headers.host || 'trimio-two.vercel.app';
+  const host = req.headers.host || 'trimio.org';
   const base = `${/^(localhost|127\.)/.test(host) ? 'http' : 'https'}://${host}`;
 
   if (!VAPID_PRIVATE_KEY) problems.push('VAPID_PRIVATE_KEY mancante: nessuna notifica push può partire');

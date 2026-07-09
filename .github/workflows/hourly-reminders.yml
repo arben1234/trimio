@@ -16,4 +16,4 @@ jobs:
     steps:
       - name: Trigger reminder check
         run: |
-          curl -fsS --max-time 60 "https://trimio-two.vercel.app/api/send-reminders"
+          curl -fsSL --max-time 60 "https://trimio.org/api/send-reminders"

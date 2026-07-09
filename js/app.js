@@ -3889,7 +3889,7 @@ function getCurrentBaseURL(){
   const loc=(window.location.origin||'')+'/';
   if(!loc.startsWith('http') || loc.includes('localhost') || loc.includes('127.0.0.1')){
     // Dynamic fallback to the live Vercel URL so the QR code can be scanned on mobile from localhost/local file
-    return 'https://trimio-two.vercel.app/';
+    return 'https://trimio.org/';
   }
   return loc;
 }
