@@ -691,7 +691,7 @@ async function saveState(){
       body: JSON.stringify({
         bookings: cleanBookings,
         salons: STATE.salons,
-        admin: STATE.admin
+        admin: { username: STATE.admin.username }
       })
     });
     if (syncResp.ok) {
@@ -772,12 +772,12 @@ function initCloudSync() {
           saveState(); // Upload local salons to seed the cloud database
         }
 
-        // Admin credentials: adopt whatever the server has (so a password
-        // change made from any device is picked up everywhere); if the
-        // server has none yet, keep the local default and it'll be pushed
-        // up on the next saveState().
-        if (data.admin && typeof data.admin.username === 'string' && data.admin.username && typeof data.admin.password === 'string' && data.admin.password) {
-          STATE.admin = data.admin;
+        // Admin username: adopt whatever the server has (so a username
+        // change made from any device is picked up everywhere). The password
+        // is never shipped by the server at all anymore — /api/login and
+        // /api/change-password read/write it directly in KV.
+        if (data.admin && typeof data.admin.username === 'string' && data.admin.username) {
+          STATE.admin.username = data.admin.username;
         }
 
         if (data.bookings) {
@@ -881,8 +881,8 @@ function initCloudSync() {
             STATE.salons = data.salons;
           }
 
-          if (data.admin && typeof data.admin.username === 'string' && data.admin.username && typeof data.admin.password === 'string' && data.admin.password) {
-            STATE.admin = data.admin;
+          if (data.admin && typeof data.admin.username === 'string' && data.admin.username) {
+            STATE.admin.username = data.admin.username;
           }
 
           localStorage.setItem(SK, JSON.stringify({ ...STATE, bookings: fbBookings }));
@@ -2443,7 +2443,23 @@ function onLoginSuccess() {
   }
 }
 
-function doLogin(){
+// Server-side credential check (api/login.js) — the client never holds
+// plaintext passwords locally anymore, so login can't be verified in-browser.
+async function tryLogin(payload){
+  try {
+    const resp = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    return await resp.json();
+  } catch (e) {
+    console.error('Login request failed:', e);
+    return { success: false, error: 'network_error' };
+  }
+}
+
+async function doLogin(){
   const usr=$('lusr').value.trim();
   const pwd=$('lpw').value;
   if(!usr||!pwd)return showErr('lErr','Inserisci username e password');
@@ -2456,7 +2472,8 @@ function doLogin(){
   // context is set, even if they happen to match what was typed.
   if (!loginSalonContext) {
     // LIVELLO 1 — Amministratore
-    if(usr===STATE.admin.username&&pwd===STATE.admin.password){
+    const r = await tryLogin({ role: 'admin', username: usr, password: pwd });
+    if (r && r.success) {
       SESSION={role:'admin',salonId:null,workerId:null,name:'Amministratore'};
       saveSession();
       onLoginSuccess();
@@ -2465,34 +2482,29 @@ function doLogin(){
     return showErr('lErr', 'Accesso riservato agli amministratori. I proprietari e i barbieri accedono dalla pagina del proprio salone.');
   }
 
-  const targetSalons = STATE.salons.filter(s => s.id === loginSalonContext);
-
   // LIVELLO 2 — Proprietario salone (only when this screen was reached via
   // "Login Proprietario", or the generic role-agnostic staff entry)
   if (loginRoleContext === 'owner' || loginRoleContext === null) {
-    for (const s of targetSalons) {
-      if (usr === s.ownerUsername && pwd === s.ownerPassword) {
-        if (s.inactive) return showErr('lErr', 'Questo salone è inattivo. Accesso negato.');
-        SESSION = {role:'owner', salonId:s.id, workerId:null, name:'Proprietario · '+s.name};
-        saveSession();
-        onLoginSuccess();
-        return;
-      }
+    const r = await tryLogin({ role: 'owner', salonId: loginSalonContext, username: usr, password: pwd });
+    if (r && r.error === 'salon_inactive') return showErr('lErr', 'Questo salone è inattivo. Accesso negato.');
+    if (r && r.success) {
+      SESSION = {role:'owner', salonId:r.salonId, workerId:null, name:'Proprietario · '+r.salonName};
+      saveSession();
+      onLoginSuccess();
+      return;
     }
   }
 
   // LIVELLO 3 — Barbiere (dipendente) (only when this screen was reached via
   // "Login Staf/Barbiere", or the generic role-agnostic staff entry)
   if (loginRoleContext === 'barber' || loginRoleContext === null) {
-    for (const s of targetSalons) {
-      const w = s.workers.find(x => x.username === usr && x.password === pwd);
-      if (w) {
-        if (s.inactive) return showErr('lErr', 'Questo salone è inattivo. Accesso negato.');
-        SESSION = {role:'barber', salonId:s.id, workerId:w.id, name:w.name};
-        saveSession();
-        onLoginSuccess();
-        return;
-      }
+    const r = await tryLogin({ role: 'barber', salonId: loginSalonContext, username: usr, password: pwd });
+    if (r && r.error === 'salon_inactive') return showErr('lErr', 'Questo salone è inattivo. Accesso negato.');
+    if (r && r.success) {
+      SESSION = {role:'barber', salonId:r.salonId, workerId:r.workerId, name:r.name};
+      saveSession();
+      onLoginSuccess();
+      return;
     }
   }
 
@@ -3183,19 +3195,16 @@ async function saveWorker(){
       salon.workers.push({id:'w'+Date.now(),name,username:usr,password:pwd,img,phone,role,desc,vacFrom,vacTo,reviews:[]});
     } else {
       const w=salon.workers.find(x=>x.id===editWorker);if(!w)return;
-      w.name=name;w.username=usr;if(pwd)w.password=pwd;
+      w.name=name;w.username=usr;
       w.img=img;w.phone=phone;w.role=role;w.desc=desc;w.vacFrom=vacFrom;w.vacTo=vacTo;
+      // Password lives only server-side now — a change here must go through
+      // the verified admin_set endpoint, never through the generic bulk save.
+      if (pwd) {
+        const r = await adminSetPassword({ targetType: 'barber', salonId: salon.id, workerId: w.id, newPassword: pwd });
+        if (!r || !r.success) return; // adminSetPassword already alerted the reason
+      }
     }
   }
-  
-  // Auto-generate credentials for new employee if they match defaults
-  salon.workers.forEach(w => {
-    if (w.password === 'barber123') {
-      const firstName = w.name.split(' ')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
-      w.username = firstName;
-      w.password = firstName + '123';
-    }
-  });
 
   await saveState();
   closeModal('workerModal');
@@ -3660,8 +3669,14 @@ async function saveSalon(){
     const s=STATE.salons.find(x=>x.id===salonEditId);if(!s)return;
     s.name=name;s.slug=slug;s.city=city;s.address=address;s.phone=phone;s.promo=promo;s.bgImage=bgImg;
     s.gallery=smGalleryTemp.slice();s.themeColor=smThemeColor;
-    if(oUser)s.ownerUsername=oUser;if(oPwd)s.ownerPassword=oPwd;
-    
+    if(oUser)s.ownerUsername=oUser;
+    // Owner password lives only server-side now — changing it goes through
+    // the verified admin_set endpoint, never the generic bulk save.
+    if(oPwd){
+      const r = await adminSetPassword({ targetType: 'owner', salonId: s.id, newPassword: oPwd });
+      if (!r || !r.success) return; // adminSetPassword already alerted the reason
+    }
+
     // Save Services list prices and durations
     const priceInputs = $('smServicesList').querySelectorAll('.sm-svc-price');
     const durInputs = $('smServicesList').querySelectorAll('.sm-svc-dur');
@@ -3717,34 +3732,47 @@ function renderUtenti(){
   });
   $('utentiList').innerHTML=html;
   // Reset is immediate and always lands on the same predictable default
-  // (name+123) — no free-typed password from the admin — so there's one
-  // fixed recovery value to communicate to the owner/barber over the phone.
+  // (name+123) — computed server-side now (defaultResetPassword lives in
+  // api/change-password.js too) since the client can't touch passwords
+  // directly anymore. The admin's own current password is required as
+  // proof of identity, same pattern as /api/reset-all-data.
   $('utentiList').querySelectorAll('[data-utype="owner"]').forEach(b=>b.addEventListener('click',async()=>{
     const s=STATE.salons.find(x=>x.id===b.dataset.usid);if(!s)return;
-    const newPwd=defaultResetPassword(s.ownerUsername);
-    if(!confirm(`Reimpostare la password di "${s.ownerUsername}" (Proprietario · ${s.name}) a "${newPwd}"?`))return;
-    s.ownerPassword=newPwd;
-    await saveState();
-    alert(`Password reimpostata: ${newPwd}`);
+    if(!confirm(`Reimpostare la password di "${s.ownerUsername}" (Proprietario · ${s.name}) al valore predefinito?`))return;
+    const r = await adminSetPassword({ targetType: 'owner', salonId: s.id });
+    if (r && r.success) alert(`Password reimpostata: ${r.newPassword}`);
   }));
   $('utentiList').querySelectorAll('[data-utype="barber"]').forEach(b=>b.addEventListener('click',async()=>{
     const s=STATE.salons.find(x=>x.id===b.dataset.usid);const w=s?.workers.find(x=>x.id===b.dataset.uwid);if(!w)return;
-    const newPwd=defaultResetPassword(w.name);
-    if(!confirm(`Reimpostare la password di "${w.name}" (${s.name}) a "${newPwd}"?`))return;
-    w.password=newPwd;
-    await saveState();
-    alert(`Password reimpostata: ${newPwd}`);
+    if(!confirm(`Reimpostare la password di "${w.name}" (${s.name}) al valore predefinito?`))return;
+    const r = await adminSetPassword({ targetType: 'barber', salonId: s.id, workerId: w.id });
+    if (r && r.success) alert(`Password reimpostata: ${r.newPassword}`);
   }));
 }
-// Predictable recovery password: first name/word, lowercased, accents and
-// punctuation stripped, + "123" — e.g. "Marco Rossi" -> "marco123".
-function defaultResetPassword(name){
-  const noAccents=(name||'').normalize('NFD').split('').filter(ch=>{
-    const code=ch.charCodeAt(0);
-    return code<0x0300||code>0x036f; // strip combining diacritical marks left behind by NFD
-  }).join('');
-  const base=noAccents.trim().split(/\s+/)[0].toLowerCase().replace(/[^a-z0-9]/g,'');
-  return (base||'utente')+'123';
+
+// Shared helper for every admin-only password mutation (reset to default,
+// or set an explicit new one from the salon editor) — always proven via the
+// admin's own current password, since there is no server-side session to
+// check otherwise. Returns the parsed response, or null on network failure.
+async function adminSetPassword({ targetType, salonId, workerId, newPassword }){
+  const adminPassword = prompt('Conferma la tua password di amministratore per procedere:');
+  if (adminPassword === null) return null;
+  try {
+    const resp = await fetch('/api/change-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'admin_set', adminPassword, targetType, salonId, workerId, newPassword })
+    });
+    const r = await resp.json().catch(() => ({}));
+    if (!r.success) {
+      alert(r.error === 'wrong_admin_password' ? 'Password amministratore errata.' : 'Errore durante l\'operazione.');
+      return null;
+    }
+    return r;
+  } catch (e) {
+    alert('Errore di connessione al server.');
+    return null;
+  }
 }
 async function saveUserModal(){
   // The only remaining caller of this modal is the owner/barber self-service
@@ -3757,15 +3785,28 @@ async function saveUserModal(){
   if(pwd.length<4)return showErr('umErr','La nuova password deve avere almeno 4 caratteri.');
   if(pwd!==pwd2)return showErr('umErr','Le due password non coincidono.');
   const salon=getSalon();if(!salon)return;
-  if(SESSION.role==='owner'){
-    if(curPwd!==salon.ownerPassword)return showErr('umErr','Password attuale non corretta.');
-    salon.ownerPassword=pwd;
-  } else if(SESSION.role==='barber'){
-    const w=salon.workers.find(x=>x.id===SESSION.workerId);if(!w)return;
-    if(curPwd!==w.password)return showErr('umErr','Password attuale non corretta.');
-    w.password=pwd;
+  if(SESSION.role!=='owner'&&SESSION.role!=='barber')return;
+  try {
+    const resp = await fetch('/api/change-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'self',
+        role: SESSION.role,
+        salonId: salon.id,
+        workerId: SESSION.role === 'barber' ? SESSION.workerId : undefined,
+        currentPassword: curPwd,
+        newPassword: pwd
+      })
+    });
+    const r = await resp.json().catch(() => ({}));
+    if (!r.success) {
+      return showErr('umErr', r.error === 'wrong_current_password' ? 'Password attuale non corretta.' : 'Errore durante il cambio password.');
+    }
+  } catch (e) {
+    return showErr('umErr', 'Errore di connessione al server.');
   }
-  await saveState();closeModal('userModal');
+  closeModal('userModal');
   alert('Password aggiornata con successo.');
 }
 
@@ -4191,7 +4232,9 @@ async function boot(){
   $('resetAllDataBtn')?.addEventListener('click', async () => {
     const typed = prompt('Questa azione ELIMINA PERMANENTEMENTE tutti i saloni e le prenotazioni. Per confermare, inserisci la tua password di amministratore:');
     if (typed === null) return;
-    if (typed !== STATE.admin.password) { alert('Password errata. Operazione annullata.'); return; }
+    // The client no longer holds the real admin password locally to
+    // pre-check against — /api/reset-all-data verifies it server-side and
+    // returns 401 if wrong.
     try {
       const resp = await fetch('/api/reset-all-data', {
         method: 'POST',
@@ -4217,18 +4260,25 @@ async function boot(){
     const newPwd = $('adminNewPwd').value;
     const newPwd2 = $('adminNewPwd2').value;
     clearErr('adminCredsErr');
-    if (curPwd !== STATE.admin.password) return showErr('adminCredsErr', 'Password attuale non corretta.');
     if (!newUser) return showErr('adminCredsErr', 'Inserisci un username.');
     if (!newPwd || newPwd.length < 4) return showErr('adminCredsErr', 'La nuova password deve avere almeno 4 caratteri.');
     if (newPwd !== newPwd2) return showErr('adminCredsErr', 'Le due password non coincidono.');
-    STATE.admin = { username: newUser, password: newPwd };
-    const r = await saveState();
-    if (r.ok) {
+    try {
+      const resp = await fetch('/api/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'admin_self', currentPassword: curPwd, newUsername: newUser, newPassword: newPwd })
+      });
+      const r = await resp.json().catch(() => ({}));
+      if (!r.success) {
+        return showErr('adminCredsErr', r.error === 'wrong_current_password' ? 'Password attuale non corretta.' : 'Errore di salvataggio, riprova.');
+      }
+      STATE.admin.username = r.username;
       $('adminCurPwd').value = ''; $('adminNewPwd').value = ''; $('adminNewPwd2').value = '';
       $('adminNewUser').value = STATE.admin.username;
       alert('Credenziali amministratore aggiornate con successo.');
-    } else {
-      showErr('adminCredsErr', 'Errore di salvataggio, riprova.');
+    } catch (e) {
+      showErr('adminCredsErr', 'Errore di connessione al server.');
     }
   });
 

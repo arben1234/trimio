@@ -2,7 +2,7 @@ import webPush from 'web-push';
 import {
   getSalonsDb, setSalonsDb, getAllBookings,
   tryAcquireSlotLock, promoteLock, releaseSlotLock, hsetBooking,
-  ensureMigratedV2, getAdminDb, setAdminDb
+  ensureMigratedV2, getAdminDb
 } from '../lib/kv.js';
 import { sendCustomerText } from '../lib/sms.js';
 
@@ -94,7 +94,19 @@ export default async function handler(req, res) {
           getAllBookings(kvUrl, kvToken),
           getAdminDb(kvUrl, kvToken)
         ]);
-        return res.status(200).json({ bookings: Array.from(bookingsMap.values()), salons, admin });
+        // Never ship plaintext credentials to the client — login and every
+        // password change now go through /api/login and /api/change-password,
+        // which read/write KV directly, so the client has no need to hold
+        // these locally at all.
+        const sanitizedSalons = salons.map(({ ownerPassword, workers, ...rest }) => ({
+          ...rest,
+          workers: (workers || []).map(({ password, ...w }) => w)
+        }));
+        return res.status(200).json({
+          bookings: Array.from(bookingsMap.values()),
+          salons: sanitizedSalons,
+          admin: { username: admin.username }
+        });
       }
 
       if (req.method === 'POST') {
@@ -178,18 +190,35 @@ export default async function handler(req, res) {
             // server-side list directly.
             const currentSalons = await getSalonsDb(kvUrl, kvToken);
             const salonMap = new Map(currentSalons.map(s => [s.id, s]));
-            for (const incoming of newData.salons) salonMap.set(incoming.id, incoming);
+            for (const incoming of newData.salons) {
+              // Credentials for anything that already exists must never be
+              // overwritten through this generic bulk-save path — the client
+              // no longer even holds real passwords locally (GET strips them),
+              // so any password it sends back here is stale/blank. Password
+              // changes only happen through /api/change-password. Brand-new
+              // salons/workers (not yet in KV) are the one exception, since
+              // that's the normal admin "create" flow setting an initial value.
+              const existing = salonMap.get(incoming.id);
+              if (existing) {
+                incoming.ownerPassword = existing.ownerPassword;
+                if (Array.isArray(incoming.workers)) {
+                  const existingWorkersById = new Map((existing.workers || []).map(w => [w.id, w]));
+                  incoming.workers = incoming.workers.map(w => {
+                    const ew = existingWorkersById.get(w.id);
+                    return ew ? { ...w, password: ew.password } : w;
+                  });
+                }
+              }
+              salonMap.set(incoming.id, incoming);
+            }
             await setSalonsDb(kvUrl, kvToken, Array.from(salonMap.values()));
           } else {
             console.warn('[SYNC] Ignoring malformed salons payload (not written to salons_db)');
           }
         }
 
-        if (newData.admin && typeof newData.admin === 'object'
-            && typeof newData.admin.username === 'string' && newData.admin.username
-            && typeof newData.admin.password === 'string' && newData.admin.password) {
-          await setAdminDb(kvUrl, kvToken, { username: newData.admin.username, password: newData.admin.password });
-        }
+        // Admin credential changes go exclusively through
+        // /api/change-password (action=admin_self) now — never accepted here.
 
         // Send push notifications for new bookings — must be awaited, not
         // fire-and-forget: Vercel's Node.js serverless runtime can freeze/
