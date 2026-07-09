@@ -1,5 +1,5 @@
 import webPush from 'web-push';
-import { getAllBookings, getSalonsDb } from '../lib/kv.js';
+import { getAllBookings, getSalonsDb, getBlob, setBlob } from '../lib/kv.js';
 import { twilioConfigured } from '../lib/sms.js';
 
 const VAPID_PUBLIC_KEY = 'BLLKr1SroPRHybfSN2OunQUzy6yd5hggq2fmAmT90LL32Pgyaa_VkoESjUq3DGk0bgD2a5tb17bSZHc2heLJXGo';
@@ -11,9 +11,11 @@ if (VAPID_PRIVATE_KEY) {
 // Daily self-check (vercel.json cron, ~7:30 Italy time). Verifies the parts
 // of the system that fail silently — database, salons, reminder delivery,
 // push subscriptions, the dynamic manifest — and sends ONE web-push to every
-// admin-role subscription ONLY when problems are found. A quiet morning
-// means everything passed (the full report is still in the JSON response,
-// visible from the Vercel cron logs).
+// admin-role subscription ONLY when problems are found, and at most ONCE per
+// Rome calendar day regardless of how many times this endpoint runs that day
+// (manual checks, retries, etc.) — see health_check_notified_date below. A
+// quiet morning means everything passed (the full report is still in the
+// JSON response, visible from the Vercel cron logs).
 function romeYesterdayISO() {
   const parts = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Europe/Rome', year: 'numeric', month: '2-digit', day: '2-digit'
@@ -22,6 +24,13 @@ function romeYesterdayISO() {
   const prev = new Date(Date.UTC(get('year'), get('month') - 1, get('day')) - 86400000);
   const pad = n => String(n).padStart(2, '0');
   return `${prev.getUTCFullYear()}-${pad(prev.getUTCMonth() + 1)}-${pad(prev.getUTCDate())}`;
+}
+function romeTodayISO() {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/Rome', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(new Date());
+  const get = t => parts.find(p => p.type === t).value;
+  return `${get('year')}-${get('month')}-${get('day')}`;
 }
 
 export default async function handler(req, res) {
@@ -127,21 +136,34 @@ export default async function handler(req, res) {
     problems.push(`Manifest dinamico non raggiungibile: ${e.message}`);
   }
 
-  // Notify every admin device — only when something is wrong
+  // Notify every admin device — only when something is wrong, and only ONCE
+  // per calendar day (Rome time). Without this, re-running the check (a
+  // second cron tick, a manual curl, the health-check being polled) would
+  // re-push the SAME already-known problem to every admin device every
+  // single time — the endpoint itself has no other rate limit.
   let notified = 0;
+  let alreadyNotifiedToday = false;
   if (problems.length && VAPID_PRIVATE_KEY) {
-    const targets = subscriptions.filter(s => s.role === 'admin');
-    const body = `Controllo delle 7:30 — ${problems.length} problem${problems.length === 1 ? 'a' : 'i'}:\n• ` + problems.slice(0, 4).join('\n• ');
-    const payload = JSON.stringify({ title: '⚠️ TRIMIO — Controllo giornaliero', body, url: '/' });
-    for (const target of targets) {
-      try {
-        await webPush.sendNotification(target.subscription, payload);
-        notified++;
-      } catch (err) {
-        console.error('[HEALTH] push to admin failed:', err.message);
+    const todayISO = romeTodayISO();
+    let lastNotifiedISO = null;
+    try { lastNotifiedISO = await getBlob(kvUrl, kvToken, 'health_check_notified_date'); } catch (e) {}
+    if (lastNotifiedISO === todayISO) {
+      alreadyNotifiedToday = true;
+    } else {
+      const targets = subscriptions.filter(s => s.role === 'admin');
+      const body = `Controllo delle 7:30 — ${problems.length} problem${problems.length === 1 ? 'a' : 'i'}:\n• ` + problems.slice(0, 4).join('\n• ');
+      const payload = JSON.stringify({ title: '⚠️ TRIMIO — Controllo giornaliero', body, url: '/' });
+      for (const target of targets) {
+        try {
+          await webPush.sendNotification(target.subscription, payload);
+          notified++;
+        } catch (err) {
+          console.error('[HEALTH] push to admin failed:', err.message);
+        }
       }
+      try { await setBlob(kvUrl, kvToken, 'health_check_notified_date', todayISO); } catch (e) {}
     }
   }
 
-  return res.status(200).json({ ok: problems.length === 0, problems, report, notified });
+  return res.status(200).json({ ok: problems.length === 0, problems, report, notified, alreadyNotifiedToday });
 }
