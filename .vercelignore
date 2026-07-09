@@ -1,0 +1,22 @@
+.env*
+node_modules
+.claude
+.git
+.vercel
+
+# Internal docs / source-of-truth — never serve these as static files
+CLAUDE.md
+README.md
+
+# Dev-only scripts, never needed at runtime
+build.cjs
+dev-server.js
+seed-cloud-db.cjs
+automate-kvdb-creation.js
+test-functionality.js
+test-npoint.js
+test-npoint-create.js
+test-run.js
+
+# Only the minified/protected bundle should ever be publicly reachable
+js/app.js
