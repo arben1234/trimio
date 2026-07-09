@@ -2422,7 +2422,7 @@ let loginSalonContext = null;
 // accepted unless loginSalonContext itself is null (root entry point).
 let loginRoleContext = null;
 
-function onLoginSuccess() {
+async function onLoginSuccess() {
   clearErr('lErr');
   $('lpw').value = '';
   // Ask for notification permission HERE — still synchronously inside the
@@ -2434,6 +2434,22 @@ function onLoginSuccess() {
         initPushNotifications();
       }
     }).catch(()=>{});
+  }
+  // STATE.bookings up to this point came from the PRE-login sync fetch,
+  // which had no session token yet and so got the anonymous/PII-stripped
+  // view (name/phone missing on every booking — see scopeBookingsForSession
+  // in api/sync.js). Re-fetch now that SESSION.token exists, so the
+  // dashboard (and checkNewBookingsOnOpen's "new bookings" toast right
+  // below) shows real customer names instead of "undefined".
+  if (SESSION && SESSION.token) {
+    try {
+      const resp = await fetch('/api/sync?t=' + Date.now(), { cache: 'no-store', headers: authHeaders() });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data && data.bookings) STATE.bookings = data.bookings;
+        if (data && data.salons && data.salons.length > 0) STATE.salons = data.salons;
+      }
+    } catch (e) { console.error('Post-login refresh failed:', e); }
   }
   // Admin lands on the public Homepage by default; the header dropdown's
   // "Vai alla Dashboard" option (shown whenever admin is outside the
