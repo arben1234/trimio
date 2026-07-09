@@ -16,7 +16,8 @@ export default function handler(req, res) {
   try {
     html = fs.readFileSync(path.join(process.cwd(), 'index.html'), 'utf8');
   } catch (e) {
-    return res.status(500).json({ error: 'index.html not bundled: ' + e.message });
+    console.error('[SALON-PAGE] index.html not bundled:', e);
+    return res.status(500).json({ error: 'Errore del server.' });
   }
 
   if (slug) {

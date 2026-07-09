@@ -1,6 +1,7 @@
 import webPush from 'web-push';
-import { getAllBookings, getSalonsDb } from '../lib/kv.js';
+import { getAllBookings, getSalonsDb, checkRateLimit } from '../lib/kv.js';
 import { sendCustomerText, twilioConfigured } from '../lib/sms.js';
+import { getVerifiedSession } from '../lib/auth.js';
 
 const VAPID_PUBLIC_KEY = 'BLLKr1SroPRHybfSN2OunQUzy6yd5hggq2fmAmT90LL32Pgyaa_VkoESjUq3DGk0bgD2a5tb17bSZHc2heLJXGo';
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY?.trim();
@@ -15,7 +16,7 @@ if (VAPID_PRIVATE_KEY) {
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -29,6 +30,15 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'KV database not configured' });
   }
 
+  // This fires a real SMS/WhatsApp send (Twilio cost) or a push straight to
+  // a real customer — only staff for THIS booking's own salon (or admin) may
+  // trigger it, and even a legitimate staff member mashing the button
+  // shouldn't be able to spam the same customer.
+  const session = getVerifiedSession(req);
+  if (!session || (session.role !== 'admin' && session.role !== 'owner' && session.role !== 'barber')) {
+    return res.status(401).json({ error: 'invalid_session' });
+  }
+
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
     const { bookingId } = body || {};
@@ -37,6 +47,17 @@ export default async function handler(req, res) {
     const bookingsMap = await getAllBookings(kvUrl, kvToken);
     const bk = bookingsMap.get(bookingId);
     if (!bk) return res.status(404).json({ error: 'Booking not found' });
+
+    if (session.role !== 'admin' && session.salonId !== bk.salonId) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    // Cooldown per booking, not per caller — stops the same customer from
+    // being messaged repeatedly regardless of who (or what) is calling.
+    const rl = await checkRateLimit(kvUrl, kvToken, `ratelimit:notify-customer:${bookingId}`, 1, 120);
+    if (!rl.allowed) {
+      return res.status(429).json({ success: false, error: 'rate_limited', reason: 'Attendi qualche minuto prima di inviare un altro promemoria a questo cliente.' });
+    }
 
     let subscriptions = [];
     const subResp = await fetch(`${kvUrl}/get/push_subscriptions`, { headers: { Authorization: `Bearer ${kvToken}` } });
@@ -85,6 +106,6 @@ export default async function handler(req, res) {
     return res.status(200).json({ success: sent > 0, sent });
   } catch (err) {
     console.error('[NOTIFY-CUSTOMER] Error:', err);
-    return res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: 'Errore del server, riprova.' });
   }
 }

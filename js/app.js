@@ -34,14 +34,6 @@ const isWeeklyOff=(w,iso)=>Array.isArray(w.offDays)&&w.offDays.includes(new Date
 const offDaysLabel=w=>(Array.isArray(w.offDays)?OFFDAY_DEFS.filter(([v])=>w.offDays.includes(v)).map(([,l])=>l):[]).join(', ');
 const freqTag=m=>m>=2?{l:'Fedele',c:'f-fedele'}:m>=1?{l:'Regolare',c:'f-regolare'}:{l:'Da riattivare',c:'f-occ'};
 
-// Simple Italian phone format check: optional +39/0039 prefix, then 6-12
-// digits (covers mobile 3xx and landline numbers of varying length),
-// ignoring spaces/dashes/dots used as separators.
-function isValidItalianPhone(phone){
-  const cleaned=(phone||'').trim().replace(/[\s\-.]/g,'');
-  return /^(\+39|0039)?\d{6,12}$/.test(cleaned);
-}
-
 // Downscales an image client-side (max 1200px, JPEG) before uploading —
 // phone photos are 3-10MB, far beyond what the KV image storage accepts,
 // and a hero/avatar never needs more than ~1200px anyway.
@@ -2488,6 +2480,9 @@ async function doLogin(){
   if (!loginSalonContext) {
     // LIVELLO 1 — Amministratore
     const r = await tryLogin({ role: 'admin', username: usr, password: pwd });
+    if (r && (r.error === 'service_unavailable' || r.error === 'network_error')) {
+      return showErr('lErr', 'Impossibile contattare il server. Riprova tra poco.');
+    }
     if (r && r.success) {
       SESSION={role:'admin',salonId:null,workerId:null,name:'Amministratore',token:r.sessionToken||null};
       saveSession();
@@ -2502,6 +2497,9 @@ async function doLogin(){
   if (loginRoleContext === 'owner' || loginRoleContext === null) {
     const r = await tryLogin({ role: 'owner', salonId: loginSalonContext, username: usr, password: pwd });
     if (r && r.error === 'salon_inactive') return showErr('lErr', 'Questo salone è inattivo. Accesso negato.');
+    if (r && (r.error === 'service_unavailable' || r.error === 'network_error')) {
+      return showErr('lErr', 'Impossibile contattare il server. Riprova tra poco.');
+    }
     if (r && r.success) {
       SESSION = {role:'owner', salonId:r.salonId, workerId:null, name:'Proprietario · '+r.salonName, token:r.sessionToken||null};
       saveSession();
@@ -2515,6 +2513,9 @@ async function doLogin(){
   if (loginRoleContext === 'barber' || loginRoleContext === null) {
     const r = await tryLogin({ role: 'barber', salonId: loginSalonContext, username: usr, password: pwd });
     if (r && r.error === 'salon_inactive') return showErr('lErr', 'Questo salone è inattivo. Accesso negato.');
+    if (r && (r.error === 'service_unavailable' || r.error === 'network_error')) {
+      return showErr('lErr', 'Impossibile contattare il server. Riprova tra poco.');
+    }
     if (r && r.success) {
       SESSION = {role:'barber', salonId:r.salonId, workerId:r.workerId, name:r.name, token:r.sessionToken||null};
       saveSession();
@@ -2916,7 +2917,7 @@ async function notifyCustomerNow(bookingId, btn){
   try{
     const resp=await fetch('/api/notify-customer',{
       method:'POST',
-      headers:{'Content-Type':'application/json'},
+      headers:{'Content-Type':'application/json', ...authHeaders()},
       body:JSON.stringify({bookingId})
     });
     const data=await resp.json().catch(()=>({}));

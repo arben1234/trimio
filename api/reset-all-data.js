@@ -35,6 +35,6 @@ export default async function handler(req, res) {
     return res.status(200).json({ success: true });
   } catch (err) {
     console.error('[RESET-ALL-DATA] Error:', err);
-    return res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: 'Errore del server, riprova.' });
   }
 }

@@ -1,5 +1,5 @@
-import { getVerifiedSession } from '../lib/auth.js';
-import { getAllBookings } from '../lib/kv.js';
+import { getVerifiedSession, getClientIp } from '../lib/auth.js';
+import { getAllBookings, checkRateLimit } from '../lib/kv.js';
 
 export default async function handler(req, res) {
   // CORS
@@ -29,6 +29,15 @@ export default async function handler(req, res) {
 
     if (!kvUrl || !kvToken) {
       return res.status(500).json({ error: 'KV Database not configured' });
+    }
+
+    // Caps mass-registration (e.g. scripting many fake customer
+    // subscriptions against guessed bookingIds to evict real ones from the
+    // 200-item cap below) without affecting normal use — one real
+    // device/session re-subscribes far less than this per hour.
+    const rl = await checkRateLimit(kvUrl, kvToken, `ratelimit:subscribe:${getClientIp(req)}`, 30, 3600);
+    if (!rl.allowed) {
+      return res.status(429).json({ error: 'rate_limited' });
     }
 
     // What role/salonId/workerId this subscription is actually trusted to be
@@ -105,6 +114,6 @@ export default async function handler(req, res) {
     return res.status(200).json({ success: true });
   } catch (error) {
     console.error('[SUBSCRIBE] Error:', error);
-    return res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: 'Errore del server, riprova.' });
   }
 }

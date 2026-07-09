@@ -6,6 +6,25 @@ import { put } from '@vercel/blob';
 // as JSON (simpler than multipart parsing in a Vercel serverless function).
 const MAX_BYTES = 4 * 1024 * 1024; // keep comfortably under Vercel's request body limit
 
+// The client declares contentType itself (it's just a string in the JSON
+// body) — trusting it alone would let any file up to MAX_BYTES be stored and
+// served back as if it were an image. This checks the actual leading bytes
+// against the real format signatures instead, covering everything the
+// client's own image-compression pipeline (canvas.toBlob) can produce.
+function isRealImage(buffer, contentType) {
+  if (buffer.length < 12) return false;
+  if (contentType === 'image/jpeg') return buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF;
+  if (contentType === 'image/png') {
+    const sig = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+    return sig.every((b, i) => buffer[i] === b);
+  }
+  if (contentType === 'image/gif') return buffer.toString('ascii', 0, 4) === 'GIF8';
+  if (contentType === 'image/webp') {
+    return buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP';
+  }
+  return false;
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -26,13 +45,13 @@ export default async function handler(req, res) {
     if (!filename || !dataBase64 || !contentType) {
       return res.status(400).json({ error: 'Missing filename, dataBase64 or contentType' });
     }
-    if (!contentType.startsWith('image/')) {
-      return res.status(400).json({ error: 'Only image uploads are allowed' });
-    }
 
     const buffer = Buffer.from(dataBase64, 'base64');
     if (buffer.length > MAX_BYTES) {
       return res.status(413).json({ error: `Image too large — max ${Math.round(MAX_BYTES / 1024 / 1024)}MB` });
+    }
+    if (!isRealImage(buffer, contentType)) {
+      return res.status(400).json({ error: 'Only real JPEG, PNG, GIF or WEBP images are allowed' });
     }
 
     // Preferred backend: Vercel Blob (when the store works).
@@ -76,6 +95,6 @@ export default async function handler(req, res) {
     return res.status(200).json({ success: true, url: `/api/image?id=${id}` });
   } catch (error) {
     console.error('[UPLOAD-IMAGE] Error:', error);
-    return res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: 'Errore durante il caricamento dell\'immagine.' });
   }
 }

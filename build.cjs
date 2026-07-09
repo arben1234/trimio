@@ -26,15 +26,32 @@ document.addEventListener('keydown', e => {
   }
 });
 (function() {
+  // A single slow tick here is NOT proof of open devtools — a GC pause or a
+  // busy main thread on a cheap/throttled phone (exactly the device profile
+  // of a real customer scanning a QR code in a shop) can occasionally blow
+  // past a low threshold too, and used to lock real customers out of
+  // booking entirely on the very first false alarm. Real devtools sitting on
+  // a "debugger" breakpoint reliably re-triggers on every tick, so requiring
+  // several CONSECUTIVE slow ticks (with any fast tick resetting the count)
+  // keeps the protection effective while making a one-off false positive
+  // from device jank require an outright unlucky streak instead of one blip.
+  let consecutiveSlow = 0;
+  const REQUIRED_STREAK = 3;
+  const SLOW_THRESHOLD_MS = 150;
   const check = function() {
     (function(a) {
       (function() {
         const b = function() {
           let c = new Date();
           debugger;
-          return new Date() - c > 80;
+          return new Date() - c > SLOW_THRESHOLD_MS;
         };
         if (b()) {
+          consecutiveSlow++;
+        } else {
+          consecutiveSlow = 0;
+        }
+        if (consecutiveSlow >= REQUIRED_STREAK) {
           document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;font-weight:bold;color:#ef4444;font-size:18px;text-align:center;padding:20px;background:#f9fafb;">Accesso protetto - Strumenti sviluppatore rilevati. I tentativi di ispezione del codice sono vietati.</div>';
         }
       })();

@@ -2,10 +2,11 @@ import webPush from 'web-push';
 import {
   getSalonsDb, setSalonsDb, getAllBookings,
   tryAcquireSlotLock, promoteLock, releaseSlotLock, hsetBooking,
+  acquireBarberDayLock, releaseBarberDayLock, checkRateLimit,
   ensureMigratedV2, getAdminDb
 } from '../lib/kv.js';
 import { sendCustomerText } from '../lib/sms.js';
-import { handleLogin, handleChangePassword, getVerifiedSession } from '../lib/auth.js';
+import { handleLogin, handleChangePassword, getVerifiedSession, getClientIp } from '../lib/auth.js';
 
 // Every booking carries the customer's name + phone. Sending that back
 // unscoped (as this endpoint used to) meant any anonymous visitor — or any
@@ -149,8 +150,20 @@ export default async function handler(req, res) {
 
         console.log('[SYNC] Saving database state to Vercel KV');
 
-        const bookingsMap = await getAllBookings(kvUrl, kvToken);
         const newBks = Array.isArray(newData.bookings) ? newData.bookings : [];
+        // Only anonymous callers (the public customer booking flow) are
+        // capped — staff carry a verified session token and legitimately
+        // batch-edit many bookings at once (status changes, etc.), which
+        // this must never throttle. A real customer never needs more than a
+        // handful of new bookings from one IP in ten minutes.
+        if (newBks.length && !getVerifiedSession(req)) {
+          const rl = await checkRateLimit(kvUrl, kvToken, `ratelimit:booking:${getClientIp(req)}`, 20, 600);
+          if (!rl.allowed) {
+            return res.status(429).json({ success: false, error: 'rate_limited', conflicts: [] });
+          }
+        }
+
+        const bookingsMap = await getAllBookings(kvUrl, kvToken);
         const addedBks = [];
         const staffCancelledBks = [];
         const conflicts = [];
@@ -172,23 +185,38 @@ export default async function handler(req, res) {
             }
 
             if (!existing) {
-              // Duration-aware overlap with any existing booking of the same
-              // barber+day (different start times can still collide).
-              if (nb.status !== 'cancelled'
-                  && overlapsExisting(nb, bookingsMap, salonsForDur.find(s => s.id === nb.salonId))) {
+              // Serialize the whole "check overlap, then claim the slot"
+              // sequence per barber+day — otherwise two concurrent requests
+              // can both read the same pre-write bookingsMap snapshot, both
+              // pass overlapsExisting(), and both succeed with genuinely
+              // overlapping times (the exact-slot SET NX below only catches
+              // identical start times, not different-but-overlapping ones).
+              const dayLocked = await acquireBarberDayLock(kvUrl, kvToken, nb.salonId, nb.workerId, nb.dateISO);
+              if (!dayLocked) {
                 conflicts.push({ id: nb.id, salonId: nb.salonId, workerId: nb.workerId, dateISO: nb.dateISO, time: nb.time });
                 continue;
               }
-              // Brand-new booking claiming a slot — must go through the atomic lock.
-              const acquired = await tryAcquireSlotLock(kvUrl, kvToken, nb);
-              if (!acquired) {
-                conflicts.push({ id: nb.id, salonId: nb.salonId, workerId: nb.workerId, dateISO: nb.dateISO, time: nb.time });
-                continue;
+              try {
+                // Duration-aware overlap with any existing booking of the same
+                // barber+day (different start times can still collide).
+                if (nb.status !== 'cancelled'
+                    && overlapsExisting(nb, bookingsMap, salonsForDur.find(s => s.id === nb.salonId))) {
+                  conflicts.push({ id: nb.id, salonId: nb.salonId, workerId: nb.workerId, dateISO: nb.dateISO, time: nb.time });
+                  continue;
+                }
+                // Brand-new booking claiming a slot — must go through the atomic lock.
+                const acquired = await tryAcquireSlotLock(kvUrl, kvToken, nb);
+                if (!acquired) {
+                  conflicts.push({ id: nb.id, salonId: nb.salonId, workerId: nb.workerId, dateISO: nb.dateISO, time: nb.time });
+                  continue;
+                }
+                await hsetBooking(kvUrl, kvToken, nb);
+                await promoteLock(kvUrl, kvToken, nb);
+                bookingsMap.set(nb.id, nb);
+                if (nb.status !== 'cancelled') addedBks.push(nb);
+              } finally {
+                await releaseBarberDayLock(kvUrl, kvToken, nb.salonId, nb.workerId, nb.dateISO);
               }
-              await hsetBooking(kvUrl, kvToken, nb);
-              await promoteLock(kvUrl, kvToken, nb);
-              bookingsMap.set(nb.id, nb);
-              if (nb.status !== 'cancelled') addedBks.push(nb);
             } else {
               // Update to an existing booking (e.g. status change) — no lock needed.
               const merged = { ...existing, ...nb };
@@ -265,9 +293,14 @@ export default async function handler(req, res) {
         if (addedBks.length > 0) {
           console.log(`[SYNC] Found ${addedBks.length} new bookings. Sending push notifications...`);
           try {
-            await sendPushNotifications(addedBks, kvUrl, kvToken);
+            await sendPushNotifications(addedBks, salonsForDur, kvUrl, kvToken);
           } catch (err) {
             console.error('[SYNC] Push notifications job error:', err);
+          }
+          try {
+            await sendCustomerBookingConfirmations(addedBks);
+          } catch (err) {
+            console.error('[SYNC] Customer confirmation job error:', err);
           }
         }
         if (staffCancelledBks.length > 0) {
@@ -285,7 +318,7 @@ export default async function handler(req, res) {
       }
     } catch (kvErr) {
       console.error('[SYNC] KV Database Error:', kvErr);
-      return res.status(500).json({ error: kvErr.message });
+      return res.status(500).json({ error: 'Errore del server, riprova.' });
     }
   }
 
@@ -298,7 +331,7 @@ export default async function handler(req, res) {
 }
 
 // Function to send web push notifications to all matching active subscriptions
-async function sendPushNotifications(newBookings, kvUrl, kvToken) {
+async function sendPushNotifications(newBookings, salons, kvUrl, kvToken) {
   if (!VAPID_PRIVATE_KEY) {
     console.warn('[PUSH] VAPID_PRIVATE_KEY not configured — skipping push notifications.');
     return;
@@ -341,10 +374,12 @@ async function sendPushNotifications(newBookings, kvUrl, kvToken) {
 
       console.log(`[PUSH] Sending notifications for booking "${bk.id}" to ${targets.length} targets`);
 
+      let barberNotified = false;
       for (const target of targets) {
         try {
           await webPush.sendNotification(target.subscription, payload);
           console.log(`[PUSH] Sent to ${target.role} (${target.subscription.endpoint.slice(0, 30)}...)`);
+          if (target.role === 'barber') barberNotified = true;
         } catch (err) {
           // If subscription is invalid/expired (410 Gone or 404 Not Found), remove it
           if (err.statusCode === 410 || err.statusCode === 404) {
@@ -356,6 +391,23 @@ async function sendPushNotifications(newBookings, kvUrl, kvToken) {
             }
           } else {
             console.error('[PUSH] Failed to send to target:', err.message);
+          }
+        }
+      }
+
+      // The barber is the one who actually needs to know a new appointment
+      // landed on their calendar — if push never reached them (no
+      // subscription registered yet, expired, or the send failed), fall
+      // back to SMS the same way cancellations already do, instead of them
+      // finding out only whenever they next happen to open the dashboard.
+      if (!barberNotified) {
+        const salon = (salons || []).find(s => s.id === bk.salonId);
+        const worker = salon && (salon.workers || []).find(w => w.id === bk.workerId);
+        if (worker && worker.phone) {
+          try {
+            await sendCustomerText(worker.phone, `Nuova prenotazione: ${bk.name} - ${bk.service} il ${bk.dateLabel} alle ${bk.time}.`);
+          } catch (err) {
+            console.error('[PUSH] Barber SMS fallback failed:', err.message);
           }
         }
       }
@@ -374,6 +426,23 @@ async function sendPushNotifications(newBookings, kvUrl, kvToken) {
     }
   } catch (err) {
     console.error('[PUSH] error:', err);
+  }
+}
+
+// A brand-new booking has no push subscription yet (the customer only ever
+// subscribes on the confirmation screen, AFTER the booking already exists
+// server-side) — without this, a customer got no confirmation of any kind
+// until the reminder or a cancellation. Phone number has been required at
+// booking time, so an immediate SMS receipt is always possible.
+async function sendCustomerBookingConfirmations(newBookings) {
+  for (const bk of newBookings) {
+    if (!bk.phone) continue;
+    const body = `Prenotazione confermata: ${bk.service} con ${bk.workerName} il ${bk.dateLabel} alle ${bk.time}. Grazie per aver scelto TRIMIO!`;
+    try {
+      await sendCustomerText(bk.phone, body);
+    } catch (err) {
+      console.error('[CONFIRM] SMS confirmation failed:', err.message);
+    }
   }
 }
 

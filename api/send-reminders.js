@@ -1,5 +1,5 @@
 import webPush from 'web-push';
-import { getAllBookings, hsetBooking, getSalonsDb } from '../lib/kv.js';
+import { getAllBookings, hsetBooking, getSalonsDb, claimReminderOnce } from '../lib/kv.js';
 import { sendCustomerText, twilioConfigured } from '../lib/sms.js';
 
 const VAPID_PUBLIC_KEY = 'BLLKr1SroPRHybfSN2OunQUzy6yd5hggq2fmAmT90LL32Pgyaa_VkoESjUq3DGk0bgD2a5tb17bSZHc2heLJXGo';
@@ -134,6 +134,11 @@ export default async function handler(req, res) {
     };
 
     for (const bk of dueTomorrow) {
+      // Atomic claim before sending — the daily cron and the hourly GitHub
+      // Action can both pick up the same due booking in overlapping runs;
+      // only whichever wins this SET NX actually sends (see
+      // claimReminderOnce in lib/kv.js).
+      if (!(await claimReminderOnce(kvUrl, kvToken, bk.id, 'tomorrow'))) continue;
       const salon = salons.find(s => s.id === bk.salonId);
       const firstName = (bk.name || '').trim().split(' ')[0] || 'cliente';
       await notifyBooking(bk, `Gentile ${firstName}! Ti ricordiamo che domani alle ore ${bk.time} hai un appuntamento prenotato con ${bk.workerName}, presso il salone ${salon ? salon.name : 'TRIMIO'}. Grazie per la fiducia!`);
@@ -142,6 +147,7 @@ export default async function handler(req, res) {
     }
 
     for (const bk of dueToday) {
+      if (!(await claimReminderOnce(kvUrl, kvToken, bk.id, 'today'))) continue;
       const salon = salons.find(s => s.id === bk.salonId);
       const firstName = (bk.name || '').trim().split(' ')[0] || 'cliente';
       await notifyBooking(bk, `Gentile ${firstName}! Ti ricordiamo il tuo appuntamento di oggi alle ore ${bk.time} con ${bk.workerName}, presso il salone ${salon ? salon.name : 'TRIMIO'}. A presto!`);
@@ -160,6 +166,6 @@ export default async function handler(req, res) {
     return res.status(200).json({ checked: dueTomorrow.length + dueToday.length, sent, smsSent, smsConfigured: twilioConfigured() });
   } catch (err) {
     console.error('[REMINDER] Error:', err);
-    return res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: 'internal_error' });
   }
 }
