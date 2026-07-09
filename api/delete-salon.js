@@ -1,4 +1,5 @@
 import { getSalonsDb, setSalonsDb, getAllBookings, releaseSlotLock, kvCmd, ensureMigratedV2 } from '../lib/kv.js';
+import { verifyAdminPassword } from '../lib/auth.js';
 
 export default async function handler(req, res) {
   // CORS
@@ -28,6 +29,13 @@ export default async function handler(req, res) {
         error: 'database_suspended',
         message: 'Il database Vercel KV non è configurato.'
       });
+    }
+
+    // Irreversible, and salon ids are predictable + publicly visible via
+    // /api/sync — must never be reachable with just an id. Same
+    // proof-of-identity pattern as reset-all-data.js.
+    if (!(await verifyAdminPassword(body.adminPassword, kvUrl, kvToken))) {
+      return res.status(401).json({ error: 'Incorrect admin password' });
     }
 
     await ensureMigratedV2(kvUrl, kvToken);

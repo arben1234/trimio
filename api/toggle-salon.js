@@ -1,4 +1,5 @@
 import { getSalonsDb, setSalonsDb, ensureMigratedV2 } from '../lib/kv.js';
+import { verifyAdminPassword } from '../lib/auth.js';
 
 export default async function handler(req, res) {
   // CORS
@@ -24,40 +25,35 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Missing salonId' });
     }
 
-    console.log(`[TOGGLE] salonId=${salonId}, inactive=${setInactive}`);
-
     const kvUrl = process.env.KV_REST_API_URL;
     const kvToken = process.env.KV_REST_API_TOKEN;
 
-    // PRIMARY: Vercel KV (Redis)
-    if (kvUrl && kvToken) {
-      await ensureMigratedV2(kvUrl, kvToken);
-      const salons = await getSalonsDb(kvUrl, kvToken);
-
-      // Find and toggle the salon
-      let found = false;
-      const salon = salons.find(s => s.id === salonId);
-      if (salon) {
-        salon.inactive = !!setInactive;
-        found = true;
-        console.log(`[TOGGLE] Found salon "${salon.name}", set inactive=${salon.inactive}`);
-      }
-
-      if (!found) {
-        return res.status(404).json({ error: 'Salon not found', salonId });
-      }
-
-      // Save back to KV
-      await setSalonsDb(kvUrl, kvToken, salons);
-
-      return res.status(200).json({ success: true, salonId, inactive: setInactive });
+    // Admin-only, destructive-adjacent action — salon ids are predictable
+    // (js/app.js generates them as 'salon'+Date.now()) and are visible in the
+    // public /api/sync response, so this must never be reachable with just an
+    // id. Same proof-of-identity pattern as reset-all-data.js.
+    if (!kvUrl || !kvToken) {
+      return res.status(403).json({ error: 'database_suspended', message: 'Il database Vercel Blob è stato sospeso. Per riattivare, collega un database Vercel KV.' });
+    }
+    if (!(await verifyAdminPassword(body.adminPassword, kvUrl, kvToken))) {
+      return res.status(401).json({ error: 'Incorrect admin password' });
     }
 
-    // FALLBACK
-    return res.status(403).json({
-      error: 'database_suspended',
-      message: 'Il database Vercel Blob è stato sospeso. Per riattivare, collega un database Vercel KV.'
-    });
+    console.log(`[TOGGLE] salonId=${salonId}, inactive=${setInactive}`);
+
+    await ensureMigratedV2(kvUrl, kvToken);
+    const salons = await getSalonsDb(kvUrl, kvToken);
+
+    const salon = salons.find(s => s.id === salonId);
+    if (!salon) {
+      return res.status(404).json({ error: 'Salon not found', salonId });
+    }
+    salon.inactive = !!setInactive;
+    console.log(`[TOGGLE] Found salon "${salon.name}", set inactive=${salon.inactive}`);
+
+    await setSalonsDb(kvUrl, kvToken, salons);
+
+    return res.status(200).json({ success: true, salonId, inactive: setInactive });
   } catch (error) {
     console.error('[TOGGLE] Error:', error);
     return res.status(500).json({ error: error.message });

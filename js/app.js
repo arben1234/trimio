@@ -664,6 +664,16 @@ let isSaving = false;
 // fresh install has no local copy of the cloud salons yet.
 let initialCloudSync = null;
 
+// Attaches the signed session token (issued at login, see doLogin) to
+// /api/sync and /api/subscribe requests so the server can tell an admin/
+// owner/barber apart from an anonymous visitor and scope PII accordingly —
+// without the client ever holding a plaintext password locally again.
+function authHeaders(){
+  return (typeof SESSION !== 'undefined' && SESSION && SESSION.token)
+    ? { 'Authorization': 'Bearer ' + SESSION.token }
+    : {};
+}
+
 async function saveState(){
   isSaving = true;
   const cleanBookings = (STATE.bookings || []).filter(b => !b.isDemo);
@@ -686,7 +696,8 @@ async function saveState(){
     const syncResp = await fetch('/api/sync', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        ...authHeaders()
       },
       body: JSON.stringify({
         bookings: cleanBookings,
@@ -753,7 +764,7 @@ function initCloudSync() {
   updateUIStatus(true);
 
   // Initial load from Vercel Cloud Blob with cache-busting to bypass browser cache
-  initialCloudSync = fetch('/api/sync?t=' + Date.now(), { cache: 'no-store' })
+  initialCloudSync = fetch('/api/sync?t=' + Date.now(), { cache: 'no-store', headers: authHeaders() })
     .then(r => {
       if (!r.ok) {
         updateUIStatus(false);
@@ -855,7 +866,7 @@ function initCloudSync() {
   setInterval(async () => {
     if (isSaving) return; // Skip polling updates while we are actively saving to prevent overwrites
     try {
-      const response = await fetch('/api/sync?t=' + Date.now(), { cache: 'no-store' });
+      const response = await fetch('/api/sync?t=' + Date.now(), { cache: 'no-store', headers: authHeaders() });
       if (response.ok) {
         updateUIStatus(true);
         const data = await response.json();
@@ -1116,17 +1127,19 @@ async function renderPushNotifBanner() {
 async function syncPushSubscriptionToServer(subscription) {
   if (!SESSION || !SESSION.role) return;
 
+  // role/salonId/workerId are no longer trusted from this payload server-side
+  // — the server derives them from the signed token in the Authorization
+  // header instead (see api/subscribe.js). Sent here too only so the
+  // endpoint can 400 fast on a malformed request before checking the token.
   const payload = {
     subscription,
-    role: SESSION.role,
-    salonId: SESSION.salonId,
-    workerId: SESSION.workerId
+    role: SESSION.role
   };
 
   try {
     const resp = await fetch('/api/subscribe', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify(payload)
     });
     if (resp.ok) {
@@ -2476,7 +2489,7 @@ async function doLogin(){
     // LIVELLO 1 — Amministratore
     const r = await tryLogin({ role: 'admin', username: usr, password: pwd });
     if (r && r.success) {
-      SESSION={role:'admin',salonId:null,workerId:null,name:'Amministratore'};
+      SESSION={role:'admin',salonId:null,workerId:null,name:'Amministratore',token:r.sessionToken||null};
       saveSession();
       onLoginSuccess();
       return;
@@ -2490,7 +2503,7 @@ async function doLogin(){
     const r = await tryLogin({ role: 'owner', salonId: loginSalonContext, username: usr, password: pwd });
     if (r && r.error === 'salon_inactive') return showErr('lErr', 'Questo salone è inattivo. Accesso negato.');
     if (r && r.success) {
-      SESSION = {role:'owner', salonId:r.salonId, workerId:null, name:'Proprietario · '+r.salonName};
+      SESSION = {role:'owner', salonId:r.salonId, workerId:null, name:'Proprietario · '+r.salonName, token:r.sessionToken||null};
       saveSession();
       onLoginSuccess();
       return;
@@ -2503,7 +2516,7 @@ async function doLogin(){
     const r = await tryLogin({ role: 'barber', salonId: loginSalonContext, username: usr, password: pwd });
     if (r && r.error === 'salon_inactive') return showErr('lErr', 'Questo salone è inattivo. Accesso negato.');
     if (r && r.success) {
-      SESSION = {role:'barber', salonId:r.salonId, workerId:r.workerId, name:r.name};
+      SESSION = {role:'barber', salonId:r.salonId, workerId:r.workerId, name:r.name, token:r.sessionToken||null};
       saveSession();
       onLoginSuccess();
       return;
@@ -3516,12 +3529,16 @@ function renderSaloni(){
     const s = STATE.salons.find(x => x.id === b.dataset.stoggle);
     if(s){
       const newInactive = !s.inactive;
-      // Call dedicated server-side toggle endpoint for atomic update
+      // Salon ids are predictable and public, so the server requires the
+      // admin's real password before it will touch this — same proof asked
+      // by "Elimina definitivamente" below and by Zona Pericolosa.
+      const adminPassword = prompt('Conferma la tua password di amministratore per procedere:');
+      if (adminPassword === null) return;
       try {
         const resp = await fetch('/api/toggle-salon', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ salonId: s.id, inactive: newInactive })
+          body: JSON.stringify({ salonId: s.id, inactive: newInactive, adminPassword })
         });
         const result = await resp.json();
         if (result.success) {
@@ -3540,11 +3557,9 @@ function renderSaloni(){
   $('saloniList').querySelectorAll('[data-sdel]').forEach(b=>b.addEventListener('click',async()=>{
     const s = STATE.salons.find(x => x.id === b.dataset.sdel);
     const sname = s ? s.name : '';
-    const securityCode = prompt(`ATTENZIONE: Stai per eliminare definitivamente il salone "${sname}" con tutti i dipendenti e le prenotazioni!\n\nPer confermare l'eliminazione, digita la password di sicurezza (CONFERMA):`);
-    if (securityCode !== 'CONFERMA') {
-      alert('Eliminazione annullata. Password di sicurezza non corretta.');
-      return;
-    }
+    if (!confirm(`ATTENZIONE: Stai per eliminare definitivamente il salone "${sname}" con tutti i dipendenti e le prenotazioni! Continuare?`)) return;
+    const adminPassword = prompt('Per confermare l\'eliminazione, inserisci la tua password di amministratore:');
+    if (adminPassword === null) return;
     // Deletion goes through a dedicated endpoint that acts on the current
     // server-side salon list directly, instead of saveState()'s generic
     // whole-array sync (which merges by id and never deletes based on a
@@ -3553,7 +3568,7 @@ function renderSaloni(){
       const resp = await fetch('/api/delete-salon', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ salonId: b.dataset.sdel })
+        body: JSON.stringify({ salonId: b.dataset.sdel, adminPassword })
       });
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));

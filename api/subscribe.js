@@ -1,9 +1,12 @@
+import { getVerifiedSession } from '../lib/auth.js';
+import { getAllBookings } from '../lib/kv.js';
+
 export default async function handler(req, res) {
   // CORS
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,POST');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
@@ -15,7 +18,7 @@ export default async function handler(req, res) {
 
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
-    const { subscription, role, salonId, workerId, bookingId } = body;
+    const { subscription, role, bookingId } = body;
 
     if (!subscription || !subscription.endpoint) {
       return res.status(400).json({ error: 'Missing subscription details' });
@@ -26,6 +29,33 @@ export default async function handler(req, res) {
 
     if (!kvUrl || !kvToken) {
       return res.status(500).json({ error: 'KV Database not configured' });
+    }
+
+    // What role/salonId/workerId this subscription is actually trusted to be
+    // registered as — NEVER taken from the client-declared fields directly,
+    // since anyone could claim role:'admin' or role:'owner'+someone else's
+    // salonId to receive live booking notifications meant for that salon.
+    let salonId = null;
+    let workerId = null;
+
+    if (role === 'admin' || role === 'owner' || role === 'barber') {
+      const session = getVerifiedSession(req);
+      if (!session || session.role !== role) {
+        return res.status(401).json({ error: 'invalid_session' });
+      }
+      salonId = session.salonId || null;
+      workerId = session.workerId || null;
+    } else if (role === 'customer') {
+      // Lower stakes (tied to one specific booking the customer already
+      // knows the id of), but still worth confirming the booking is real
+      // before persisting a subscription against it.
+      if (!bookingId) return res.status(400).json({ error: 'Missing bookingId' });
+      const bookingsMap = await getAllBookings(kvUrl, kvToken);
+      if (!bookingsMap.has(bookingId)) {
+        return res.status(404).json({ error: 'Booking not found' });
+      }
+    } else {
+      return res.status(400).json({ error: 'invalid_role' });
     }
 
     // 1. Get current subscriptions

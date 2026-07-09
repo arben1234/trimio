@@ -5,7 +5,26 @@ import {
   ensureMigratedV2, getAdminDb
 } from '../lib/kv.js';
 import { sendCustomerText } from '../lib/sms.js';
-import { handleLogin, handleChangePassword } from '../lib/auth.js';
+import { handleLogin, handleChangePassword, getVerifiedSession } from '../lib/auth.js';
+
+// Every booking carries the customer's name + phone. Sending that back
+// unscoped (as this endpoint used to) meant any anonymous visitor — or any
+// other salon's staff — could read every customer's contact info across the
+// whole platform. This is the one gate all of that goes through:
+//   - admin session -> everything, unchanged.
+//   - owner/barber session -> only their own salon's bookings, unchanged.
+//   - no/invalid session (anonymous, or a customer's own device) -> every
+//     booking is still needed for slot-availability rendering, but with
+//     name/phone stripped — the customer-facing UI never displays those for
+//     anyone (including its own "my bookings" list, which never re-shows the
+//     name/phone the customer themselves typed in).
+function scopeBookingsForSession(bookings, session) {
+  if (session && session.role === 'admin') return bookings;
+  if (session && (session.role === 'owner' || session.role === 'barber')) {
+    return bookings.filter(b => b.salonId === session.salonId);
+  }
+  return bookings.map(({ name, phone, ...rest }) => rest);
+}
 
 // VAPID public key is safe to keep in source — it's meant to be shipped to
 // browsers (same value already embedded in js/app.js for pushManager.subscribe).
@@ -103,8 +122,9 @@ export default async function handler(req, res) {
           ...rest,
           workers: (workers || []).map(({ password, ...w }) => w)
         }));
+        const session = getVerifiedSession(req);
         return res.status(200).json({
-          bookings: Array.from(bookingsMap.values()),
+          bookings: scopeBookingsForSession(Array.from(bookingsMap.values()), session),
           salons: sanitizedSalons,
           admin: { username: admin.username }
         });
@@ -260,7 +280,8 @@ export default async function handler(req, res) {
           }
         }
 
-        return res.status(200).json({ success: true, bookings: Array.from(bookingsMap.values()), conflicts });
+        const postSession = getVerifiedSession(req);
+        return res.status(200).json({ success: true, bookings: scopeBookingsForSession(Array.from(bookingsMap.values()), postSession), conflicts });
       }
     } catch (kvErr) {
       console.error('[SYNC] KV Database Error:', kvErr);
