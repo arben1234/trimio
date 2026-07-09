@@ -774,8 +774,9 @@ function initCloudSync() {
 
         // Admin username: adopt whatever the server has (so a username
         // change made from any device is picked up everywhere). The password
-        // is never shipped by the server at all anymore — /api/login and
-        // /api/change-password read/write it directly in KV.
+        // is never shipped by the server at all anymore — login and password
+        // changes go through /api/sync's action-based branches (lib/auth.js),
+        // which read/write it directly in KV.
         if (data.admin && typeof data.admin.username === 'string' && data.admin.username) {
           STATE.admin.username = data.admin.username;
         }
@@ -2443,14 +2444,15 @@ function onLoginSuccess() {
   }
 }
 
-// Server-side credential check (api/login.js) — the client never holds
-// plaintext passwords locally anymore, so login can't be verified in-browser.
+// Server-side credential check (routed through /api/sync — see lib/auth.js)
+// — the client never holds plaintext passwords locally anymore, so login
+// can't be verified in-browser.
 async function tryLogin(payload){
   try {
-    const resp = await fetch('/api/login', {
+    const resp = await fetch('/api/sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify({ action: 'login', ...payload })
     });
     return await resp.json();
   } catch (e) {
@@ -3758,10 +3760,10 @@ async function adminSetPassword({ targetType, salonId, workerId, newPassword }){
   const adminPassword = prompt('Conferma la tua password di amministratore per procedere:');
   if (adminPassword === null) return null;
   try {
-    const resp = await fetch('/api/change-password', {
+    const resp = await fetch('/api/sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'admin_set', adminPassword, targetType, salonId, workerId, newPassword })
+      body: JSON.stringify({ action: 'change_password', type: 'admin_set', adminPassword, targetType, salonId, workerId, newPassword })
     });
     const r = await resp.json().catch(() => ({}));
     if (!r.success) {
@@ -3787,11 +3789,12 @@ async function saveUserModal(){
   const salon=getSalon();if(!salon)return;
   if(SESSION.role!=='owner'&&SESSION.role!=='barber')return;
   try {
-    const resp = await fetch('/api/change-password', {
+    const resp = await fetch('/api/sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        action: 'self',
+        action: 'change_password',
+        type: 'self',
         role: SESSION.role,
         salonId: salon.id,
         workerId: SESSION.role === 'barber' ? SESSION.workerId : undefined,
@@ -4264,10 +4267,10 @@ async function boot(){
     if (!newPwd || newPwd.length < 4) return showErr('adminCredsErr', 'La nuova password deve avere almeno 4 caratteri.');
     if (newPwd !== newPwd2) return showErr('adminCredsErr', 'Le due password non coincidono.');
     try {
-      const resp = await fetch('/api/change-password', {
+      const resp = await fetch('/api/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'admin_self', currentPassword: curPwd, newUsername: newUser, newPassword: newPwd })
+        body: JSON.stringify({ action: 'change_password', type: 'admin_self', currentPassword: curPwd, newUsername: newUser, newPassword: newPwd })
       });
       const r = await resp.json().catch(() => ({}));
       if (!r.success) {

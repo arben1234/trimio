@@ -5,6 +5,7 @@ import {
   ensureMigratedV2, getAdminDb
 } from '../lib/kv.js';
 import { sendCustomerText } from '../lib/sms.js';
+import { handleLogin, handleChangePassword } from '../lib/auth.js';
 
 // VAPID public key is safe to keep in source — it's meant to be shipped to
 // browsers (same value already embedded in js/app.js for pushManager.subscribe).
@@ -95,9 +96,9 @@ export default async function handler(req, res) {
           getAdminDb(kvUrl, kvToken)
         ]);
         // Never ship plaintext credentials to the client — login and every
-        // password change now go through /api/login and /api/change-password,
-        // which read/write KV directly, so the client has no need to hold
-        // these locally at all.
+        // password change now go through the action-based branches of the
+        // POST handler below (backed by lib/auth.js), which read/write KV
+        // directly, so the client has no need to hold these locally at all.
         const sanitizedSalons = salons.map(({ ownerPassword, workers, ...rest }) => ({
           ...rest,
           workers: (workers || []).map(({ password, ...w }) => w)
@@ -112,6 +113,20 @@ export default async function handler(req, res) {
       if (req.method === 'POST') {
         const body = req.body;
         const newData = typeof body === 'string' ? JSON.parse(body) : body;
+
+        // Login / password-change requests are routed through this same
+        // endpoint (kept here rather than as their own serverless functions
+        // — Vercel's Hobby plan caps a deployment at 12 functions). They're
+        // fully separate from the booking/salon sync logic below.
+        if (newData && newData.action === 'login') {
+          const r = await handleLogin(newData, kvUrl, kvToken);
+          return res.status(r.status).json(r.json);
+        }
+        if (newData && newData.action === 'change_password') {
+          const r = await handleChangePassword(newData, kvUrl, kvToken);
+          return res.status(r.status).json(r.json);
+        }
+
         console.log('[SYNC] Saving database state to Vercel KV');
 
         const bookingsMap = await getAllBookings(kvUrl, kvToken);
