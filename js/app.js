@@ -2384,6 +2384,14 @@ function showView(view){
       else if (loginRoleContext === 'barber') loginTitle.textContent = 'Accesso Barbiere';
       else loginTitle.textContent = 'Accesso Staff';
     }
+    // The marketing content (hero/value cards/footer) only makes sense on
+    // the generic root entry point — a staff/owner login reached from a
+    // specific salon's page shows just the bare form, like before.
+    const showMarketing = !loginSalonContext;
+    const marketing = $('vLoginMarketing');
+    const footer = $('vLoginFooter');
+    if (marketing) marketing.style.display = showMarketing ? '' : 'none';
+    if (footer) footer.style.display = showMarketing ? '' : 'none';
   }
   // Always re-render the homepage with the current STATE.salons before showing
   // it — otherwise it can show stale content (e.g. a salon added by the admin

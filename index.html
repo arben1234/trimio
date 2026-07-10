@@ -410,16 +410,73 @@
 
     <!-- ===== LOGIN (Livelli 1-2-3) ===== -->
     <div class="view" id="vLogin">
-      <div class="title" style="margin-top:10px" id="loginTitle">Accesso Amministratore</div>
-      <div class="err" id="lErr"></div>
-      <div class="login">
-        <div class="field"><label>Username</label><input type="text" id="lusr" placeholder="username" autocomplete="username"></div>
-        <div class="field"><label>Password</label><input type="password" id="lpw" placeholder="••••••••"></div>
-        <button class="btn btn-main" id="loginBtn">Accedi</button>
-        <button class="link" id="toCustomer" style="text-align:center">← Torna alla prenotazione</button>
+      <!-- Shown only for the generic entry point (no salon context) — a
+           staff/owner login reached from a specific salon's page shows just
+           the form below, unchanged. Toggled in js/app.js's showView(). -->
+      <div id="vLoginMarketing">
+        <div class="hp-lead">
+          <img src="/logo.png" alt="TRIMIO Logo" style="width: 110px; height: 110px; margin-bottom: 14px; border-radius: 50%; border: none; box-shadow: 0 8px 32px rgba(0,0,0,0.6); background:transparent; object-fit: cover;">
+          <div class="hp-title" style="font-size:26px;">La piattaforma che fa crescere<br>il tuo business da barbiere</div>
+          <div class="hp-sub" style="margin-top:8px;">Prenotazioni online. Gestione semplice. Risultati reali.</div>
+          <div class="hp-stats-row">
+            <div class="hp-stat"><span class="hp-stat-n">1.000+</span><span class="hp-stat-l">Barbieri</span></div>
+            <div class="hp-stat"><span class="hp-stat-n">5.000+</span><span class="hp-stat-l">Clienti</span></div>
+          </div>
+        </div>
+
+        <div class="hp-sec-title" style="margin-top:32px;">Perché scegliere TRIMIO</div>
+        <div class="hp-value-grid">
+          <div class="hp-value-card">
+            <div class="hp-value-ic">📆</div>
+            <div class="hp-value-t">Calendario sempre sotto controllo</div>
+            <div class="hp-value-d">Ogni appuntamento organizzato, ogni cliente soddisfatto. Non perdere mai più una prenotazione.</div>
+          </div>
+          <div class="hp-value-card">
+            <div class="hp-value-ic">⏱️</div>
+            <div class="hp-value-t">Meno tempo al telefono, più tempo per i clienti</div>
+            <div class="hp-value-d">Gestione semplice, prenotazioni online: più efficienza in salone ogni giorno.</div>
+          </div>
+          <div class="hp-value-card">
+            <div class="hp-value-ic">📈</div>
+            <div class="hp-value-t">I clienti ti trovano, prenotano, tu li accogli</div>
+            <div class="hp-value-d">Diventa più visibile ai nuovi clienti con una piattaforma moderna e professionale.</div>
+          </div>
+          <div class="hp-value-card">
+            <div class="hp-value-ic">💰</div>
+            <div class="hp-value-t">Investimento minimo, benefici massimi</div>
+            <div class="hp-value-d">Qualità elevata a costo minimo: la soluzione ideale per far crescere il tuo salone.</div>
+          </div>
+        </div>
+
+        <div class="hp-cta-banner">
+          <div class="hp-cta-t">Porta il tuo salone a un livello superiore.</div>
+          <div class="hp-cta-d">Unisciti alla community di barbieri che già lavora con TRIMIO.</div>
+        </div>
       </div>
-      <!-- Build stamp: lets support confirm which version a device is running -->
-      <div style="text-align:center; font-size:10px; color:#52525b; margin-top:14px;">v. 2026-07-05.1</div>
+
+      <div class="login-form-wrap">
+        <div class="title" style="margin-top:10px" id="loginTitle">Accesso Amministratore</div>
+        <div class="err" id="lErr"></div>
+        <div class="login">
+          <div class="field"><label>Username</label><input type="text" id="lusr" placeholder="username" autocomplete="username"></div>
+          <div class="field"><label>Password</label><input type="password" id="lpw" placeholder="••••••••"></div>
+          <button class="btn btn-main" id="loginBtn">Accedi</button>
+          <button class="link" id="toCustomer" style="text-align:center">← Torna alla prenotazione</button>
+        </div>
+        <!-- Build stamp: lets support confirm which version a device is running -->
+        <div style="text-align:center; font-size:10px; color:#52525b; margin-top:14px;">v. 2026-07-05.1</div>
+      </div>
+
+      <div class="global-footer" id="vLoginFooter" style="text-align: center; margin-top: 40px; padding: 32px 16px 24px; border-top: 1px solid #333; background: #111; color: #888;">
+        <div style="font-family: 'Cinzel', serif; font-size: 15px; font-weight: 700; letter-spacing: 2px; color: #fff; margin-bottom: 8px;">
+          TRIMIO <span style="color: #e5c158;">THE ART OF THE CUT</span> - ITALY
+        </div>
+        <div class="hp-footer-contact">
+          <a href="mailto:support@trimio.org">✉ support@trimio.org</a>
+          <span class="hp-footer-sep">·</span>
+          <span>Hai un salone e vuoi entrare in TRIMIO? Scrivici.</span>
+        </div>
+      </div>
     </div>
 
     <!-- ===== DASHBOARD (Livelli 1-2-3) ===== -->
@@ -920,6 +977,6 @@
      own "Save as PDF" print target produces a clean report. -->
 <div id="printableStats"></div>
 
-<script src="/js/app.min.js?v=20260710_0004"></script>
+<script src="/js/app.min.js?v=20260710_0005"></script>
 </body>
 </html>

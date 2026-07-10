@@ -242,17 +242,31 @@ body{background:#f1f5f9;min-height:100vh;display:flex;align-items:center;justify
    compact header + dropdown already cover the same actions ── */
 .hp-navbar{display:none;}
 
-/* ── "Perché TRIMIO" value-proposition cards ── */
+/* ── "Perché TRIMIO" value-proposition cards ──
+   Each card gets its own accent (by position) instead of one flat gold
+   repeated 4 times — reads as distinct benefits, not a single grey slab
+   copy-pasted. Colors are only used at the icon-badge/top-edge level so
+   the black+gold brand identity still carries the page overall. */
 .hp-value-grid{display:grid;grid-template-columns:1fr;gap:14px;margin:0 16px 28px;}
 .hp-value-card{
+  --accent:#e5c158;
   background:rgba(255,255,255,.62);
   backdrop-filter:blur(18px) saturate(160%);
   -webkit-backdrop-filter:blur(18px) saturate(160%);
   border:1px solid rgba(255,255,255,.7);
+  border-top:3px solid var(--accent);
   border-radius:18px;padding:20px 18px;
   box-shadow:0 1px 2px rgba(20,16,8,.04),0 10px 28px rgba(20,16,8,.06),inset 0 1px 0 rgba(255,255,255,.5);
 }
-.hp-value-ic{font-size:26px;margin-bottom:8px;}
+.hp-value-grid .hp-value-card:nth-child(1){--accent:#6366f1;}
+.hp-value-grid .hp-value-card:nth-child(2){--accent:#f59e0b;}
+.hp-value-grid .hp-value-card:nth-child(3){--accent:#10b981;}
+.hp-value-grid .hp-value-card:nth-child(4){--accent:#ec4899;}
+.hp-value-ic{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:42px;height:42px;border-radius:12px;margin-bottom:10px;
+  font-size:20px;background:color-mix(in srgb, var(--accent) 20%, transparent);
+}
 .hp-value-t{font-size:15px;font-weight:800;color:#18181b;margin-bottom:6px;}
 .hp-value-d{font-size:12.5px;color:#666;line-height:1.55;}
 
@@ -1304,6 +1318,29 @@ body{
   box-shadow:0 12px 32px rgba(229,193,88,.4);
 }
 
+/* ---- Login screen as a marketing page (generic entry point only) ----
+   #vLoginMarketing/#vLoginFooter sit on the same dark gradient #vLogin
+   already provides, so they reuse .hp-title/.hp-sub/.hp-value-grid as-is
+   and only need a few dark-context tweaks + new stat/CTA components. */
+#vLogin .hp-sec-title{color:#c4c4c8;text-align:center;}
+.hp-lead{position:relative;z-index:1;text-align:center;display:flex;flex-direction:column;align-items:center;}
+.hp-stats-row{display:flex;gap:28px;justify-content:center;margin-top:20px;}
+.hp-stat{display:flex;flex-direction:column;align-items:center;}
+.hp-stat-n{font-size:22px;font-weight:900;letter-spacing:-.5px;}
+.hp-stat:nth-child(1) .hp-stat-n{color:#818cf8;}
+.hp-stat:nth-child(2) .hp-stat-n{color:#34d399;}
+.hp-stat-l{font-size:11px;color:#a1a1aa;text-transform:uppercase;letter-spacing:1px;margin-top:2px;}
+.hp-cta-banner{
+  text-align:center;margin:8px 16px 32px;padding:22px 20px;border-radius:18px;
+  background:linear-gradient(135deg,rgba(229,193,88,.16),rgba(229,193,88,.05));
+  border:1px solid rgba(229,193,88,.3);
+}
+.hp-cta-t{font-size:16px;font-weight:800;color:#fff;margin-bottom:4px;}
+.hp-cta-d{font-size:12.5px;color:#c4c4c8;}
+#vLogin .login-form-wrap{position:relative;z-index:1;padding-top:8px;border-top:1px solid rgba(255,255,255,.1);}
+#vLogin .login-form-wrap .title{margin-top:24px;}
+#vLoginFooter{margin-left:-24px;margin-right:-24px;border-radius:0 0 36px 36px;}
+
 /* ---- Stats table export/print button + printable PDF view ---- */
 .stats-export-btn{
   display:flex;align-items:center;justify-content:center;gap:8px;
@@ -1391,6 +1428,17 @@ body{
 
   #vHome .gallery-filter-container{padding:0 32px;margin-left:0;margin-right:0;}
   #vHome .gallery-grid{grid-template-columns:repeat(auto-fill,minmax(230px,1fr));padding:0 32px;}
+
+  /* Login screen as marketing page (generic entry point): same phone-card
+     problem as the other views, plus room to let the 4 value cards sit
+     2-across instead of stacked, and the actual form narrow down to a
+     normal login-card width instead of stretching edge to edge. */
+  .app:has(#vLogin.on){max-width:900px;width:92vw;}
+  #vLogin .hp-value-grid{grid-template-columns:repeat(2,1fr);margin-left:32px;margin-right:32px;gap:18px;}
+  #vLogin .hp-title{font-size:34px;}
+  #vLogin .login-form-wrap{max-width:380px;margin:24px auto 0;}
+  #vLogin .login-form-wrap .title{text-align:center;}
+  #vLogin .login-form-wrap .title::after{left:50%;transform:translateX(-50%);}
 
   /* Dashboard (owner/barber/admin): same phone-card problem as vHome — a
      720px-viewport UI centered inside a 480px card on a wide desktop
