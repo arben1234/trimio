@@ -7,6 +7,13 @@ const MON=['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Di
 const MF=['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 const $=id=>document.getElementById(id);
 const initials=n=>{n=(n||'?').trim();const p=n.split(/\s+/);return(((p[0]||'')[0]||'')+((p[1]||'')[0]||'')).toUpperCase()||'?';};
+// Every field a CUSTOMER or anonymous visitor controls (booking name/phone,
+// review author/comment) ends up interpolated into an .innerHTML template
+// somewhere in the owner/barber dashboard or another customer's page — this
+// is the one place that closes that off. Always wrap user-entered text with
+// this before putting it in an HTML template string; never rely on the
+// field having been "checked" elsewhere (length checks are not escaping).
+const escapeHtml=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const dayLabel=iso=>{const d=new Date(iso+'T00:00:00');return`${DOW[d.getDay()]} ${d.getDate()} ${MON[d.getMonth()]}`;};
 const isoOf=(y,m,d)=>`${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
 const todayISO=()=>{
@@ -955,7 +962,7 @@ function triggerNewBookingNotification(bk) {
   playNotificationSound();
   
   // 2. Show Toast banner
-  showToastNotification(`📅 Nuova Prenotazione!<br><b>${bk.name}</b> per ${bk.service}<br>il ${relDay(bk.dateISO)} alle ${bk.time}`);
+  showToastNotification(`📅 Nuova Prenotazione!<br><b>${escapeHtml(bk.name)}</b> per ${escapeHtml(bk.service)}<br>il ${relDay(bk.dateISO)} alle ${bk.time}`);
   
   // 3. System notification if allowed
   if (Notification.permission === 'granted') {
@@ -1487,6 +1494,15 @@ function serviceDurMin(salon,serviceName){
   const n=s?parseInt(s.dur,10):NaN;
   return Number.isFinite(n)&&n>0?n:30;
 }
+// Mirrors bookingDurMin in api/sync.js: a booking snapshots its own duration
+// at creation time now, so editing/renaming a service later can't silently
+// shrink the busy-interval shown for appointments already on the books.
+// Falls back to a live service-name lookup only for older bookings that
+// predate this field.
+function bookingDurMin(booking,salon){
+  const own=parseInt(booking.dur,10);
+  return Number.isFinite(own)&&own>0?own:serviceDurMin(salon,booking.service);
+}
 // End time of a booking given its salon/service/start — shown alongside the
 // start time so the client/barber/owner see at a glance when the service
 // actually finishes, not just when it starts.
@@ -1499,7 +1515,7 @@ function busyIntervalsFor(salonId,iso,workerId){
   const salon=getSalonById(salonId);
   const out=STATE.bookings
     .filter(b=>b.salonId===salonId&&b.dateISO===iso&&b.workerId===workerId&&b.status!=='cancelled')
-    .map(b=>{const s=timeToMin(b.time);return s===null?null:{start:s,end:s+serviceDurMin(salon,b.service)};})
+    .map(b=>{const s=timeToMin(b.time);return s===null?null:{start:s,end:s+bookingDurMin(b,salon)};})
     .filter(Boolean);
   // Pausa pranzo personale del barbiere: vale ogni giorno lavorativo e blocca
   // gli slot che la attraversano, come una prenotazione fissa. Separata dal
@@ -1820,8 +1836,8 @@ function renderMyBookingsModal(){
     <div class="acard ${b.status==='completed'?'completed':b.status==='cancelled'?'cancelled':''}">
       <div class="acard-main">
         <div class="acard-info">
-          <div class="acard-name">${b.workerName}</div>
-          <div class="acard-svc">${b.service}${b.status==='cancelled'?' · Annullata':b.status==='completed'?' · Completata':''}</div>
+          <div class="acard-name">${escapeHtml(b.workerName)}</div>
+          <div class="acard-svc">${escapeHtml(b.service)}${b.status==='cancelled'?' · Annullata':b.status==='completed'?' · Completata':''}</div>
         </div>
         <div class="acard-right">
           <div class="acard-time">${end?`${b.time}-${end}`:b.time}</div>
@@ -2052,7 +2068,7 @@ async function doSubmit(){
       id:'bk'+Date.now()+Math.random().toString(36).slice(2,6),
       salonId:custSalon.id,workerId:custData.barberId,workerName:custData.barberName,
       name:custData.name.trim(),phone:(custData.phone||'').trim(),dateISO:custData.dateISO,dateLabel:custData.dateLabel,
-      time:custData.time,service:custData.service,price:custData.price,
+      time:custData.time,service:custData.service,price:custData.price,dur:durMin,
       status:'confirmed',source:'online',createdAt:new Date().toISOString()
     };
     STATE.bookings.push(bk);
@@ -2665,7 +2681,7 @@ function checkNewBookingsOnOpen(){
   );
   if (newOnes.length > 0) {
     const label = newOnes.length === 1 ? 'nuova prenotazione' : 'nuove prenotazioni';
-    const list = newOnes.slice(0, 5).map(b => `${b.name} · ${dayLabel(b.dateISO)} ${b.time}`).join('<br>');
+    const list = newOnes.slice(0, 5).map(b => `${escapeHtml(b.name)} · ${dayLabel(b.dateISO)} ${b.time}`).join('<br>');
     const extra = newOnes.length > 5 ? `<br>+ altre ${newOnes.length - 5}` : '';
     showToastNotification(`📋 Hai ${newOnes.length} ${label}:<br>${list}${extra}`);
     playNotificationSound();
@@ -2789,17 +2805,17 @@ function renderDashboardReviews() {
   }
   
   html = allReviews.map(rev => {
-    const workerLabel = r === 'owner' ? `<span style="font-size:11px; color:#4f46e5; font-weight:700; margin-left:8px; background:#eef2ff; padding:2px 8px; border-radius:10px;">per ${rev.workerName}</span>` : '';
+    const workerLabel = r === 'owner' ? `<span style="font-size:11px; color:#4f46e5; font-weight:700; margin-left:8px; background:#eef2ff; padding:2px 8px; border-radius:10px;">per ${escapeHtml(rev.workerName)}</span>` : '';
     return `
       <div class="srv" style="padding:14px; margin-bottom:10px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
           <div>
-            <strong style="font-size:14px; color:#111;">${rev.author}</strong>
+            <strong style="font-size:14px; color:#111;">${escapeHtml(rev.author)}</strong>
             ${workerLabel}
           </div>
           <span style="color:#e5c158; font-weight:700; font-size:12px;">${'★'.repeat(rev.rating)}${'☆'.repeat(5-rev.rating)}</span>
         </div>
-        <div style="font-size:13px; color:#444; font-style:italic; line-height:1.4; margin-bottom:6px; padding-left:4px; border-left:2px solid #e5c158;">"${rev.comment}"</div>
+        <div style="font-size:13px; color:#444; font-style:italic; line-height:1.4; margin-bottom:6px; padding-left:4px; border-left:2px solid #e5c158;">"${escapeHtml(rev.comment)}"</div>
         <div style="font-size:10px; color:#999; text-align:right;">${rev.date || '—'}</div>
       </div>
     `;
@@ -2887,14 +2903,14 @@ function apptCard(b,showActs){
     ${canCancel?`<button class="act" data-act="cancel" data-id="${b.id}">Annulla</button>`:''}
     ${canNotify?`<button class="act" data-act="notify" data-id="${b.id}">🔔 Notifica</button>`:''}</div>`:'';
   const src=b.source==='online'?`<span class="tag-src">Online</span>`:'';
-  const barberRow=SESSION.role!=='barber'?`<div class="acard-barber">✂️ ${b.workerName||'—'}</div>`:'';
-  const phoneRow = b.phone ? `<div class="acard-phone" style="font-size:13px; font-weight:600; color:#18181b; margin-top:2px;">📞 ${b.phone}</div>` : (SESSION && SESSION.role==='barber' ? `<div class="acard-phone" style="font-size:12px; color:#bbb; margin-top:2px;">📞 Nessun numero</div>` : '');
+  const barberRow=SESSION.role!=='barber'?`<div class="acard-barber">✂️ ${escapeHtml(b.workerName)||'—'}</div>`:'';
+  const phoneRow = b.phone ? `<div class="acard-phone" style="font-size:13px; font-weight:600; color:#18181b; margin-top:2px;">📞 ${escapeHtml(b.phone)}</div>` : (SESSION && SESSION.role==='barber' ? `<div class="acard-phone" style="font-size:12px; color:#bbb; margin-top:2px;">📞 Nessun numero</div>` : '');
   return`<div class="acard ${b.status==='completed'?'completed':b.status==='cancelled'?'cancelled':''}">
     <div class="acard-main">
-      <div class="av">${initials(b.name)}</div>
+      <div class="av">${escapeHtml(initials(b.name))}</div>
       <div class="acard-info">
-        <div class="acard-name">${b.name||'Cliente'}${src}</div>
-        <div class="acard-svc">${b.service}</div>${phoneRow}${barberRow}
+        <div class="acard-name">${escapeHtml(b.name)||'Cliente'}${src}</div>
+        <div class="acard-svc">${escapeHtml(b.service)}</div>${phoneRow}${barberRow}
       </div>
       <div class="acard-right"><div class="acard-time">${endTime?`${b.time}-${endTime}`:b.time}</div><div class="acard-price">€${b.price}</div></div>
     </div>${acts}</div>`;
@@ -3042,8 +3058,8 @@ function renderClienti(){
   const totRev=list.reduce((s,c)=>s+(c.spent||0),0);
   let html=`<div class="cli-summary"><div><b>${list.length}</b>clienti totali</div><div><b>${fedeli}</b>fedeli in ${MON[cliMonth]}</div><div class="cli-sum-rev"><b>€${totRev}</b>incasso</div></div>`;
   html+=list.map(c=>{const f=freqTag(c.month);return`<div class="cli">
-    <div class="av">${initials(c.name)}</div>
-    <div class="cli-info"><div class="cli-name">${c.name} <span class="freq ${f.c}">${f.l}</span></div>
+    <div class="av">${escapeHtml(initials(c.name))}</div>
+    <div class="cli-info"><div class="cli-name">${escapeHtml(c.name)} <span class="freq ${f.c}">${f.l}</span></div>
     <div class="cli-sub">Ultima: ${relDay(c.last)} · ${MON[cliMonth]}: ${c.month} volte</div></div>
     <div class="cli-stat"><div class="cli-spent">${c.visits} volte</div><div class="cli-visits">€${c.spent}</div></div>
   </div>`;}).join('');
@@ -3917,7 +3933,7 @@ async function saveManualAppt(){
       id:'bk'+Date.now()+Math.random().toString(36).slice(2,6),
       salonId:salon.id,workerId:wid,workerName:worker?.name||'',
       name,dateISO:iso,dateLabel:dayLabel(iso),time,
-      service:srv?.name||'—',price:srv?.price||0,
+      service:srv?.name||'—',price:srv?.price||0,dur:parseInt(srv?.dur,10)||30,
       status:'confirmed',source:'manual',createdAt:new Date().toISOString()
     };
     STATE.bookings.push(bk);
@@ -4140,10 +4156,10 @@ function showBarberReviews(workerId) {
     listEl.innerHTML = sorted.map(r => `
       <div class="rev-item">
         <div class="rev-header">
-          <span class="rev-author">${r.author}</span>
+          <span class="rev-author">${escapeHtml(r.author)}</span>
           <span class="rev-stars">${'★'.repeat(r.rating)}${'☆'.repeat(5-r.rating)}</span>
         </div>
-        <div class="rev-comment">"${r.comment}"</div>
+        <div class="rev-comment">"${escapeHtml(r.comment)}"</div>
         <span class="rev-date">${r.date || '—'}</span>
       </div>
     `).join('');
@@ -4155,7 +4171,7 @@ function showBarberReviews(workerId) {
 async function submitBarberReview() {
   const author = $('revAuthor').value.trim();
   const comment = $('revComment').value.trim();
-  
+
   if (author.length < 2) {
     showErr('revErr', 'Inserisci il tuo nome (almeno 2 caratteri)');
     return;
@@ -4164,26 +4180,45 @@ async function submitBarberReview() {
     showErr('revErr', 'Inserisci un commento (almeno 5 caratteri)');
     return;
   }
-  
+
   const w = custSalon.workers.find(x => x.id === activeReviewWorkerId);
   if (!w) return;
-  
+
+  // Reviews are written server-side only now (action=submit_review) — never
+  // via the generic salons[] save, which any anonymous caller could
+  // otherwise use to write anything, and which would race with another
+  // customer's review submitted around the same time.
+  let resData;
+  try {
+    const resp = await fetch('/api/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'submit_review',
+        salonId: custSalon.id,
+        workerId: activeReviewWorkerId,
+        author, comment,
+        rating: activeReviewStarVal
+      })
+    });
+    resData = await resp.json().catch(() => ({}));
+  } catch (e) {
+    return showErr('revErr', 'Errore di connessione al server.');
+  }
+  if (!resData.success) {
+    return showErr('revErr', resData.error === 'rate_limited' ? 'Troppe recensioni inviate, riprova più tardi.' : 'Errore durante l\'invio della recensione.');
+  }
+
+  // Optimistic local update so the list/grid reflect it immediately instead
+  // of waiting for the next 6s poll.
   if (!w.reviews) w.reviews = [];
-  
-  w.reviews.push({
-    rating: activeReviewStarVal,
-    author: author,
-    comment: comment,
-    date: new Date().toISOString().split('T')[0]
-  });
-  
-  await saveState();
-  
+  w.reviews.push({ rating: activeReviewStarVal, author, comment, date: new Date().toISOString().split('T')[0] });
+
   // Clear and notify
   $('revAuthor').value = '';
   $('revComment').value = '';
   showBarberReviews(activeReviewWorkerId);
-  
+
   // Re-render the barber grid in the background
   renderBarberGrid();
 }

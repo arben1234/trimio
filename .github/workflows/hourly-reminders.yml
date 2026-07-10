@@ -15,5 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Trigger reminder check
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
-          curl -fsSL --max-time 60 "https://trimio.org/api/send-reminders"
+          curl -fsSL --max-time 60 -H "Authorization: Bearer $CRON_SECRET" "https://trimio.org/api/send-reminders"

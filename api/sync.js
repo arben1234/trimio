@@ -42,6 +42,44 @@ if (VAPID_PRIVATE_KEY) {
   webPush.setVapidDetails('mailto:support@trimio.org', VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
 }
 
+// Reviews used to ride along inside the generic salons[] bulk-save — which
+// meant ANY anonymous visitor could push an arbitrary review (no booking
+// link, no length limit, no rate limit) simply by POSTing a crafted salons
+// array, and it silently last-write-wins raced with any other concurrent
+// salon edit. This is now the only way a review is ever written.
+async function handleSubmitReview(body, kvUrl, kvToken, req) {
+  const { salonId, workerId, author, comment, rating } = body;
+  if (!salonId || !workerId) return { status: 400, json: { success: false, error: 'missing_fields' } };
+
+  const rl = await checkRateLimit(kvUrl, kvToken, `ratelimit:review:${getClientIp(req)}`, 5, 3600);
+  if (!rl.allowed) return { status: 429, json: { success: false, error: 'rate_limited' } };
+
+  const authorTrimmed = (typeof author === 'string' ? author : '').trim().slice(0, 60);
+  const commentTrimmed = (typeof comment === 'string' ? comment : '').trim().slice(0, 500);
+  const ratingNum = Math.round(Number(rating));
+  if (authorTrimmed.length < 2) return { status: 400, json: { success: false, error: 'invalid_author' } };
+  if (commentTrimmed.length < 5) return { status: 400, json: { success: false, error: 'invalid_comment' } };
+  if (!Number.isInteger(ratingNum) || ratingNum < 1 || ratingNum > 5) {
+    return { status: 400, json: { success: false, error: 'invalid_rating' } };
+  }
+
+  const salons = await getSalonsDb(kvUrl, kvToken);
+  const salon = salons.find(s => s.id === salonId);
+  if (!salon) return { status: 404, json: { success: false, error: 'salon_not_found' } };
+  const worker = (salon.workers || []).find(w => w.id === workerId);
+  if (!worker) return { status: 404, json: { success: false, error: 'worker_not_found' } };
+
+  if (!Array.isArray(worker.reviews)) worker.reviews = [];
+  worker.reviews.push({
+    rating: ratingNum,
+    author: authorTrimmed,
+    comment: commentTrimmed,
+    date: new Date().toISOString().split('T')[0]
+  });
+  await setSalonsDb(kvUrl, kvToken, salons);
+  return { status: 200, json: { success: true } };
+}
+
 function isValidBooking(b) {
   return !!b && typeof b === 'object'
     && typeof b.id === 'string' && b.id
@@ -54,6 +92,13 @@ function isValidSalonsArray(salons) {
   return Array.isArray(salons) && salons.length > 0
     && salons.every(s => s && typeof s === 'object' && typeof s.id === 'string' && s.id);
 }
+
+// Mirrors js/app.js's isOnVacation/isWeeklyOff — the UI already hides these
+// slots from the customer, but nothing stopped a request POSTed directly to
+// this endpoint (bypassing the UI entirely) from booking a worker during
+// their vacation or on their weekly day off.
+function isOnVacation(w, iso) { return !!(w.vacFrom && w.vacTo && iso >= w.vacFrom && iso <= w.vacTo); }
+function isWeeklyOff(w, iso) { return Array.isArray(w.offDays) && w.offDays.includes(new Date(iso + 'T00:00:00').getDay()); }
 
 // ---- Duration-aware overlap detection (mirrors js/app.js) ----
 // A booking occupies [start, start+service duration): a 40-min service at
@@ -68,16 +113,24 @@ function svcDurMin(salon, serviceName) {
   const n = s ? parseInt(s.dur, 10) : NaN;
   return Number.isFinite(n) && n > 0 ? n : 30;
 }
+// A booking now snapshots its own duration at creation time (booking.dur) so
+// shortening/renaming a service later can't retroactively shrink the
+// overlap window of appointments already on the books — falls back to a
+// live service-name lookup only for bookings created before this existed.
+function bookingDurMin(booking, salon) {
+  const own = parseInt(booking.dur, 10);
+  return Number.isFinite(own) && own > 0 ? own : svcDurMin(salon, booking.service);
+}
 function overlapsExisting(nb, bookingsMap, salon) {
   const start = timeToMin(nb.time);
   if (start === null) return false;
-  const end = start + svcDurMin(salon, nb.service);
+  const end = start + bookingDurMin(nb, salon);
   for (const b of bookingsMap.values()) {
     if (b.id === nb.id || b.salonId !== nb.salonId || b.workerId !== nb.workerId
         || b.dateISO !== nb.dateISO || b.status === 'cancelled') continue;
     const bs = timeToMin(b.time);
     if (bs === null) continue;
-    const be = bs + svcDurMin(salon, b.service);
+    const be = bs + bookingDurMin(b, salon);
     if (start < be && end > bs) return true;
   }
   return false;
@@ -148,15 +201,21 @@ export default async function handler(req, res) {
           return res.status(r.status).json(r.json);
         }
 
+        if (newData && newData.action === 'submit_review') {
+          const r = await handleSubmitReview(newData, kvUrl, kvToken, req);
+          return res.status(r.status).json(r.json);
+        }
+
         console.log('[SYNC] Saving database state to Vercel KV');
 
+        const session = getVerifiedSession(req);
         const newBks = Array.isArray(newData.bookings) ? newData.bookings : [];
         // Only anonymous callers (the public customer booking flow) are
         // capped — staff carry a verified session token and legitimately
         // batch-edit many bookings at once (status changes, etc.), which
         // this must never throttle. A real customer never needs more than a
         // handful of new bookings from one IP in ten minutes.
-        if (newBks.length && !getVerifiedSession(req)) {
+        if (newBks.length && !session) {
           const rl = await checkRateLimit(kvUrl, kvToken, `ratelimit:booking:${getClientIp(req)}`, 20, 600);
           if (!rl.allowed) {
             return res.status(429).json({ success: false, error: 'rate_limited', conflicts: [] });
@@ -185,6 +244,14 @@ export default async function handler(req, res) {
             }
 
             if (!existing) {
+              if (nb.status !== 'cancelled') {
+                const salonForVac = salonsForDur.find(s => s.id === nb.salonId);
+                const worker = salonForVac && (salonForVac.workers || []).find(w => w.id === nb.workerId);
+                if (worker && (isOnVacation(worker, nb.dateISO) || isWeeklyOff(worker, nb.dateISO))) {
+                  conflicts.push({ id: nb.id, salonId: nb.salonId, workerId: nb.workerId, dateISO: nb.dateISO, time: nb.time });
+                  continue;
+                }
+              }
               // Serialize the whole "check overlap, then claim the slot"
               // sequence per barber+day — otherwise two concurrent requests
               // can both read the same pre-write bookingsMap snapshot, both
@@ -228,8 +295,30 @@ export default async function handler(req, res) {
                 await releaseBarberDayLock(kvUrl, kvToken, nb.salonId, nb.workerId, nb.dateISO);
               }
             } else {
-              // Update to an existing booking (e.g. status change) — no lock needed.
-              const merged = { ...existing, ...nb };
+              // Update to an existing booking (e.g. status change) — no lock
+              // needed, but this must never let a caller touch a booking
+              // outside their own salon. Two legitimate callers reach this
+              // branch: staff (admin, or owner/barber scoped to THIS
+              // booking's salon) making any change, and a customer — who has
+              // no session at all — cancelling their OWN booking (the only
+              // self-service action customers have, identified purely by
+              // knowing the booking id). Anyone else's request is dropped as
+              // a conflict instead of silently no-op'ing, so the client
+              // knows the change didn't take.
+              const isStaffForThisBooking = session && (session.role === 'admin'
+                || ((session.role === 'owner' || session.role === 'barber') && session.salonId === existing.salonId));
+              let merged;
+              if (isStaffForThisBooking) {
+                merged = { ...existing, ...nb };
+              } else if (existing.status === 'confirmed' && nb.status === 'cancelled' && nb.cancelledBy !== 'staff') {
+                // Customer self-cancellation — only status/cancelledBy change,
+                // everything else on the booking (price, time, name...) is
+                // taken from the server's own record, never from the caller.
+                merged = { ...existing, status: 'cancelled', cancelledBy: 'customer' };
+              } else {
+                conflicts.push({ id: nb.id, error: 'forbidden' });
+                continue;
+              }
               await hsetBooking(kvUrl, kvToken, merged);
               bookingsMap.set(nb.id, merged);
               if (merged.status === 'cancelled') {
@@ -264,21 +353,38 @@ export default async function handler(req, res) {
             const currentSalons = await getSalonsDb(kvUrl, kvToken);
             const salonMap = new Map(currentSalons.map(s => [s.id, s]));
             for (const incoming of newData.salons) {
-              // Credentials for anything that already exists must never be
-              // overwritten through this generic bulk-save path — the client
-              // no longer even holds real passwords locally (GET strips them),
-              // so any password it sends back here is stale/blank. Password
-              // changes only happen through /api/change-password. Brand-new
-              // salons/workers (not yet in KV) are the one exception, since
-              // that's the normal admin "create" flow setting an initial value.
               const existing = salonMap.get(incoming.id);
+              // Only an admin (any salon) or that salon's own owner may
+              // create/edit it through this generic bulk path — a caller with
+              // no session, or a valid session for a DIFFERENT salon, used to
+              // have its payload accepted verbatim (protecting only the two
+              // password fields below). Salon ids aren't secret (the
+              // sanitized GET response includes every salon), so this was a
+              // real cross-tenant tampering hole, not just a theoretical one.
+              const isAuthorizedEditor = session && (session.role === 'admin'
+                || (session.role === 'owner' && session.salonId === incoming.id));
+              if (!isAuthorizedEditor) {
+                console.warn('[SYNC] Rejected unauthorized salon write for', incoming.id);
+                continue; // existing record (or absence of one) is left untouched
+              }
               if (existing) {
+                // Credentials for anything that already exists must never be
+                // overwritten through this generic bulk-save path — the client
+                // no longer even holds real passwords locally (GET strips them),
+                // so any password it sends back here is stale/blank. Password
+                // changes only happen through /api/change-password.
                 incoming.ownerPassword = existing.ownerPassword;
+                // Reviews only ever change through action=submit_review (see
+                // handleSubmitReview below) now — never through this bulk
+                // path, which sends the client's last-known LOCAL snapshot
+                // and would otherwise silently discard a review someone else
+                // submitted in the meantime (last-write-wins on the whole
+                // worker object).
+                const existingWorkersById = new Map((existing.workers || []).map(w => [w.id, w]));
                 if (Array.isArray(incoming.workers)) {
-                  const existingWorkersById = new Map((existing.workers || []).map(w => [w.id, w]));
                   incoming.workers = incoming.workers.map(w => {
                     const ew = existingWorkersById.get(w.id);
-                    return ew ? { ...w, password: ew.password } : w;
+                    return ew ? { ...w, password: ew.password, reviews: ew.reviews || [] } : w;
                   });
                 }
               }
@@ -323,8 +429,7 @@ export default async function handler(req, res) {
           }
         }
 
-        const postSession = getVerifiedSession(req);
-        return res.status(200).json({ success: true, bookings: scopeBookingsForSession(Array.from(bookingsMap.values()), postSession), conflicts });
+        return res.status(200).json({ success: true, bookings: scopeBookingsForSession(Array.from(bookingsMap.values()), session), conflicts });
       }
     } catch (kvErr) {
       console.error('[SYNC] KV Database Error:', kvErr);
