@@ -2428,6 +2428,24 @@ function showView(view){
     // it needs its own visibility switch here.
     const headTrigger = $('vLoginAdminTrigger');
     if (headTrigger) headTrigger.style.display = showMarketing ? '' : 'none';
+    // Muted autoplay is usually automatic, but some mobile browsers/in-app
+    // webviews (Instagram/WhatsApp/etc.) only honor it after setting `muted`
+    // as a JS property (the HTML attribute alone isn't always enough) and
+    // still occasionally block it outright — the touchstart/click fallback
+    // below retries playback on the first interaction anywhere on the page,
+    // so the video never sits frozen waiting for a tap on itself specifically.
+    if (showMarketing) {
+      const demoVideo = document.querySelector('.vlogin-demo-video');
+      if (demoVideo) {
+        demoVideo.muted = true;
+        const tryPlay = () => demoVideo.play().catch(() => {});
+        tryPlay();
+        if (demoVideo.paused) {
+          const retry = () => { tryPlay(); };
+          ['touchstart', 'click'].forEach(evt => document.addEventListener(evt, retry, { once: true, passive: true }));
+        }
+      }
+    }
   }
   // Always re-render the homepage with the current STATE.salons before showing
   // it — otherwise it can show stale content (e.g. a salon added by the admin
