@@ -1,4 +1,5 @@
-import { setSalonsDb, kvCmd, getAdminDb } from '../lib/kv.js';
+import { setSalonsDb, kvCmd } from '../lib/kv.js';
+import { verifyAdminPassword } from '../lib/auth.js';
 
 // Admin-only, destructive, one-shot "start fresh with real salons" action —
 // wipes every salon/worker/booking/push-subscription/slot-lock currently
@@ -18,8 +19,7 @@ export default async function handler(req, res) {
     if (!body || typeof body.password !== 'string' || !body.password) {
       return res.status(400).json({ error: 'Missing password' });
     }
-    const admin = await getAdminDb(kvUrl, kvToken);
-    if (body.password !== admin.password) {
+    if (!(await verifyAdminPassword(body.password, kvUrl, kvToken))) {
       return res.status(401).json({ error: 'Incorrect password' });
     }
 

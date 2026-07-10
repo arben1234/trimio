@@ -197,6 +197,16 @@ export default async function handler(req, res) {
                 continue;
               }
               try {
+                // bookingsMap was fetched BEFORE this lock was acquired — a
+                // concurrent request for this same barber+day may have
+                // committed its own booking while we were waiting for the
+                // lock, which our stale snapshot wouldn't see. Re-fetch now
+                // that we hold exclusive access, so the overlap check below
+                // sees the true current state (the lock alone only orders
+                // the writes; it doesn't refresh what we already read).
+                const freshBookings = await getAllBookings(kvUrl, kvToken);
+                for (const [id, b] of freshBookings) bookingsMap.set(id, b);
+
                 // Duration-aware overlap with any existing booking of the same
                 // barber+day (different start times can still collide).
                 if (nb.status !== 'cancelled'
@@ -292,16 +302,16 @@ export default async function handler(req, res) {
         // never completing at all).
         if (addedBks.length > 0) {
           console.log(`[SYNC] Found ${addedBks.length} new bookings. Sending push notifications...`);
-          try {
-            await sendPushNotifications(addedBks, salonsForDur, kvUrl, kvToken);
-          } catch (err) {
-            console.error('[SYNC] Push notifications job error:', err);
-          }
-          try {
-            await sendCustomerBookingConfirmations(addedBks);
-          } catch (err) {
-            console.error('[SYNC] Customer confirmation job error:', err);
-          }
+          // Independent jobs (staff push+SMS vs. customer SMS) — run concurrently
+          // instead of one after the other, but still both fully awaited before
+          // the response is sent (required per the CLAUDE.md note above: Vercel
+          // can freeze the function right after the response goes out).
+          const [pushResult, confirmResult] = await Promise.allSettled([
+            sendPushNotifications(addedBks, salonsForDur, kvUrl, kvToken),
+            sendCustomerBookingConfirmations(addedBks)
+          ]);
+          if (pushResult.status === 'rejected') console.error('[SYNC] Push notifications job error:', pushResult.reason);
+          if (confirmResult.status === 'rejected') console.error('[SYNC] Customer confirmation job error:', confirmResult.reason);
         }
         if (staffCancelledBks.length > 0) {
           console.log(`[SYNC] ${staffCancelledBks.length} booking(s) cancelled by staff. Notifying customers...`);
@@ -435,15 +445,17 @@ async function sendPushNotifications(newBookings, salons, kvUrl, kvToken) {
 // until the reminder or a cancellation. Phone number has been required at
 // booking time, so an immediate SMS receipt is always possible.
 async function sendCustomerBookingConfirmations(newBookings) {
-  for (const bk of newBookings) {
-    if (!bk.phone) continue;
+  // Each booking's confirmation is independent of the others — fire them
+  // concurrently instead of one Twilio round trip at a time.
+  await Promise.all(newBookings.map(async bk => {
+    if (!bk.phone) return;
     const body = `Prenotazione confermata: ${bk.service} con ${bk.workerName} il ${bk.dateLabel} alle ${bk.time}. Grazie per aver scelto TRIMIO!`;
     try {
       await sendCustomerText(bk.phone, body);
     } catch (err) {
       console.error('[CONFIRM] SMS confirmation failed:', err.message);
     }
-  }
+  }));
 }
 
 // Tells a customer immediately when the SALON cancels their booking (as

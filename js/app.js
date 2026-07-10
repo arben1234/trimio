@@ -79,7 +79,7 @@ async function uploadImageFile(file){
   const dataBase64=dataUrl.split(',')[1];
   const resp=await fetch('/api/upload-image',{
     method:'POST',
-    headers:{'Content-Type':'application/json'},
+    headers:{'Content-Type':'application/json', ...authHeaders()},
     body:JSON.stringify({filename,dataBase64,contentType})
   });
   const data=await resp.json().catch(()=>({}));

@@ -1,4 +1,5 @@
 import { put } from '@vercel/blob';
+import { getVerifiedSession } from '../lib/auth.js';
 
 // Accepts { filename, dataBase64, contentType } and stores the decoded image
 // in Vercel Blob storage, returning its public URL. The client reads the
@@ -29,13 +30,21 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,POST');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  // Only reachable from the admin salon/worker photo pickers client-side
+  // (owner/barber never get that UI), but nothing enforced that server-side —
+  // anyone could hit this endpoint directly and run up Blob/KV storage costs.
+  const session = getVerifiedSession(req);
+  if (!session || session.role !== 'admin') {
+    return res.status(401).json({ error: 'invalid_session' });
   }
 
   try {
