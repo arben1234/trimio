@@ -811,6 +811,7 @@ function initCloudSync() {
         // Refresh UI
         if (typeof renderDash === 'function' && curSec) renderDash();
         if (typeof renderHomepage === 'function' && !custSalon) renderHomepage();
+        if (typeof renderVLoginSalonShowcase === 'function') renderVLoginSalonShowcase();
         // Kick out customer if salon became inactive
         if (custSalon) {
           const refreshed = STATE.salons.find(s => s.id === custSalon.id);
@@ -2259,6 +2260,17 @@ function updateNavMenu() {
   const onCustomerPage = document.querySelector('.view.on')?.id === 'vCustomer';
   const SESSION_FOR_MENU = onCustomerPage ? null : SESSION;
 
+  // The marketing entry point must show no trace of an admin session —
+  // no menu, no shortcut into the dashboard — the whole point is that it
+  // reads identically to every visitor and the only way in is the actual
+  // login modal. Checked before the admin-role branch below so a
+  // persisted admin session on this exact page doesn't leak through it.
+  const onGenericLogin = document.querySelector('.view.on')?.id === 'vLogin' && !loginSalonContext;
+  if (onGenericLogin) {
+    menu.style.display = 'none';
+    menu.innerHTML = '';
+    return;
+  }
   // Admin has exactly ONE navigation: the dashboard sidebar. This header
   // dropdown must never duplicate its sections — while on the public
   // Homepage it only offers the single way INTO the dashboard (plus logout),
@@ -2392,13 +2404,17 @@ function showView(view){
     const footer = $('vLoginFooter');
     if (marketing) marketing.style.display = showMarketing ? '' : 'none';
     if (footer) footer.style.display = showMarketing ? '' : 'none';
-    // A returning admin already holds a valid session (this is exactly why
-    // trimio.org's bare root always lands here now instead of silently
-    // restoring vHome) — skip asking them to retype a password and offer a
-    // one-click way into the dashboard instead of the bare form.
-    const alreadyAdmin = showMarketing && SESSION && SESSION.role === 'admin';
-    $('vLoginAlreadyIn').style.display = alreadyAdmin ? 'block' : 'none';
-    $('vLoginFormFields').style.display = alreadyAdmin ? 'none' : 'flex';
+    // On the marketing entry point the login form is a modal (opened only
+    // via .vlogin-admin-trigger, top-left) — no session-based shortcut, no
+    // menu, nobody reaches the salon/dashboard views without an explicit
+    // login. A staff/owner login reached from a specific salon's own page
+    // keeps rendering the exact same form inline instead, unchanged.
+    const overlay = $('vLoginFormOverlay');
+    if (overlay) {
+      overlay.classList.toggle('as-modal', showMarketing);
+      overlay.classList.remove('show');
+    }
+    if (showMarketing && typeof renderVLoginSalonShowcase === 'function') renderVLoginSalonShowcase();
   }
   // Always re-render the homepage with the current STATE.salons before showing
   // it — otherwise it can show stale content (e.g. a salon added by the admin
@@ -4114,6 +4130,22 @@ function renderHomepage(){
   }));
 }
 
+// Pure social-proof photo grid on the marketing entry point (vLogin) — the
+// same cover photo an admin already sets per salon via Gestione Saloni, but
+// with no name/slug/booking link surfaced, since nobody but a logged-in
+// admin is meant to reach the real salon pages from this page.
+function renderVLoginSalonShowcase(){
+  const grid = $('vLoginSalonPhotos');
+  if (!grid) return;
+  const salons = STATE.salons.filter(s => !s.inactive && s.bgImage);
+  if (!salons.length) { grid.innerHTML = ''; return; }
+  grid.innerHTML = salons.map(s => `
+    <div class="vlp-card">
+      <img src="${escapeHtml(s.bgImage)}" alt="${escapeHtml(s.name)}" loading="lazy">
+    </div>
+  `).join('');
+}
+
 function showSalonQRCode(slug) {
   const s = STATE.salons.find(x => x.slug === slug);
   if (!s) return;
@@ -4303,10 +4335,12 @@ async function boot(){
   $('hpNavSaloni')?.addEventListener('click', () => $('hpSalonList')?.scrollIntoView({behavior:'smooth', block:'start'}));
   $('hpNavContact')?.addEventListener('click', () => $('hpContact')?.scrollIntoView({behavior:'smooth', block:'start'}));
   $('hpNavAdmin')?.addEventListener('click', goToAdminEntry);
-  // Shown on vLogin instead of the form when a valid admin session already
-  // exists — see the display toggle in showView().
-  $('vLoginEnterDash')?.addEventListener('click', () => showView('vHome'));
-  $('vLoginNotYou')?.addEventListener('click', doLogout);
+  // Admin login modal on the marketing entry point — see the .as-modal
+  // toggle in showView(). Opens on the top-left trigger, closes on the
+  // backdrop or the ✕ button; nothing here bypasses the actual form.
+  $('vLoginAdminTrigger')?.addEventListener('click', () => $('vLoginFormOverlay')?.classList.add('show'));
+  $('vLoginFormOv')?.addEventListener('click', () => $('vLoginFormOverlay')?.classList.remove('show'));
+  $('loginModalClose')?.addEventListener('click', () => $('vLoginFormOverlay')?.classList.remove('show'));
   $('gear').addEventListener('click',()=>{ loginSalonContext = custSalon ? custSalon.id : null; loginRoleContext = null; showView('vLogin'); });
   $('toStaff').addEventListener('click',()=>{ loginSalonContext = custSalon ? custSalon.id : null; loginRoleContext = null; showView('vLogin'); });
   $('toCustomer').addEventListener('click',()=>{
