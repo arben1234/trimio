@@ -72,6 +72,10 @@
     <!-- Right: Slug & Menu -->
     <div style="display:flex; align-items:center; gap:8px;">
       <div class="salon-slug" id="hSlug" style="font-size:10px; color:#a1a1aa; background:#27272a; padding:3px 6px; border-radius:4px; font-weight:700; display:none; letter-spacing:0.5px;"></div>
+      <!-- Admin login trigger for the marketing page (vLogin) — sits on the
+           same line as the TRIMIO logo/brand at the left. Hidden everywhere
+           else; see the isLogin branch in js/app.js's showView(). -->
+      <button type="button" id="vLoginAdminTrigger" class="head-admin-trigger" style="display:none;">🔒 Accesso Admin</button>
       <select id="navMenu" class="nav-select" style="margin-bottom:0; max-width:210px; min-width:130px;"></select>
     </div>
   </div>
@@ -416,13 +420,31 @@
            the form below, unchanged. Toggled in js/app.js's showView(). -->
       <div id="vLoginMarketing">
         <div class="hp-lead">
-          <button type="button" id="vLoginAdminTrigger" class="vlogin-admin-trigger">🔒 Accesso Admin</button>
           <img src="/logo.png" alt="TRIMIO Logo" style="width: 110px; height: 110px; margin-bottom: 14px; border-radius: 50%; border: none; box-shadow: 0 8px 32px rgba(0,0,0,0.6); background:transparent; object-fit: cover;">
           <div class="hp-title" style="font-size:26px;">La piattaforma che fa crescere<br>il tuo business da barbiere</div>
           <div class="hp-sub" style="margin-top:8px;">Prenotazioni online. Gestione semplice. Risultati reali.</div>
           <div class="hp-stats-row">
             <div class="hp-stat"><span class="hp-stat-n">1.000+</span><span class="hp-stat-l">Barbieri</span></div>
             <div class="hp-stat"><span class="hp-stat-n">5.000+</span><span class="hp-stat-l">Clienti</span></div>
+          </div>
+        </div>
+
+        <div class="hp-sec-title" id="vLoginHowItWorks" style="margin-top:32px;">Come funziona</div>
+        <div class="hp-value-grid">
+          <div class="hp-value-card">
+            <div class="hp-value-ic">📝</div>
+            <div class="hp-value-t">Crei il tuo profilo in pochi minuti</div>
+            <div class="hp-value-d">Registri il tuo salone, aggiungi servizi, orari e il tuo staff. Nessuna app da scaricare.</div>
+          </div>
+          <div class="hp-value-card">
+            <div class="hp-value-ic">📲</div>
+            <div class="hp-value-t">I clienti prenotano da soli, 24 ore su 24</div>
+            <div class="hp-value-d">Niente più telefonate: ogni cliente sceglie barbiere, servizio e orario in totale autonomia.</div>
+          </div>
+          <div class="hp-value-card">
+            <div class="hp-value-ic">📊</div>
+            <div class="hp-value-t">Tu gestisci tutto da un'unica dashboard</div>
+            <div class="hp-value-d">Calendario, statistiche, recensioni e promemoria automatici, sempre sotto controllo.</div>
           </div>
         </div>
 
@@ -651,9 +673,10 @@
             <!-- FOTO PAGINA INIZIALE / TRIMIO.ORG (SOLO ADMIN) -->
             <div class="sub-sec-h" style="margin-top:28px;">Foto Pagina Iniziale (trimio.org)</div>
             <div class="srv" style="margin-top:10px;">
-              <div style="font-size:12px; color:#71717a; margin-bottom:10px;">Queste foto sono visibili a chiunque visiti trimio.org, prima del login.</div>
+              <div style="font-size:12px; color:#71717a; margin-bottom:10px;">Queste foto sono visibili a chiunque visiti trimio.org, prima del login. Clicca una foto per sostituirla, oppure sulla ✕ per rimuoverla.</div>
               <div id="hpPhotosList" style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:12px;"></div>
               <input type="file" id="hpPhotosFile" accept="image/*" multiple>
+              <input type="file" id="hpPhotoReplaceInput" accept="image/*" style="display:none;">
               <div style="font-size:11px; color:#71717a; margin-top:6px;" id="hpPhotosStatus"></div>
             </div>
 
@@ -1014,6 +1037,6 @@
      own "Save as PDF" print target produces a clean report. -->
 <div id="printableStats"></div>
 
-<script src="/js/app.min.js?v=20260710_0010"></script>
+<script src="/js/app.min.js?v=20260710_0011"></script>
 </body>
 </html>

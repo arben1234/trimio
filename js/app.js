@@ -2412,9 +2412,9 @@ function showView(view){
     if (marketing) marketing.style.display = showMarketing ? '' : 'none';
     if (footer) footer.style.display = showMarketing ? '' : 'none';
     // On the marketing entry point the login form is a modal (opened only
-    // via .vlogin-admin-trigger, top-left) — no session-based shortcut, no
-    // menu, nobody reaches the salon/dashboard views without an explicit
-    // login. A staff/owner login reached from a specific salon's own page
+    // via #vLoginAdminTrigger, in the shared header) — no session-based
+    // shortcut, no menu, nobody reaches the salon/dashboard views without an
+    // explicit login. A staff/owner login reached from a specific salon's own page
     // keeps rendering the exact same form inline instead, unchanged.
     const overlay = $('vLoginFormOverlay');
     if (overlay) {
@@ -2423,6 +2423,11 @@ function showView(view){
     }
     if (showMarketing && typeof renderVLoginSalonShowcase === 'function') renderVLoginSalonShowcase();
     if (showMarketing && typeof renderVLoginPhotoGallery === 'function') renderVLoginPhotoGallery();
+    // Lives in the shared header (not inside #vLoginMarketing) so it sits on
+    // the same row as the TRIMIO logo — that bar isn't toggled per-view, so
+    // it needs its own visibility switch here.
+    const headTrigger = $('vLoginAdminTrigger');
+    if (headTrigger) headTrigger.style.display = showMarketing ? '' : 'none';
   }
   // Always re-render the homepage with the current STATE.salons before showing
   // it — otherwise it can show stale content (e.g. a salon added by the admin
@@ -2433,10 +2438,20 @@ function showView(view){
   // Hide top-left logo inside header on homepage to avoid duplicate logos
   const logoWrap = $('hBrandLogoWrapper');
   if (logoWrap) logoWrap.style.display = isHome ? 'none' : 'flex';
+  // The admin trigger button only ever gets shown by the isLogin branch
+  // above — force it hidden for every other view so it can't linger from a
+  // previous vLogin visit onto vHome/vDash/vCustomer.
+  if (!isLogin) { const t = $('vLoginAdminTrigger'); if (t) t.style.display = 'none'; }
 
 
   $('mainBody').classList.toggle('flush',isDash);
-  document.querySelector('.head').style.display=isDash?'none':'';
+  // 'flex' (not '') — .head has no display rule of its own in the
+  // stylesheet, only the inline style on the element sets it; clearing it
+  // to '' fell back to the browser default (block), stacking the brand and
+  // the right-side controls into two rows instead of one. Went unnoticed
+  // while that row only ever held hidden elements — not anymore now that
+  // #vLoginAdminTrigger renders there.
+  document.querySelector('.head').style.display=isDash?'none':'flex';
   if(!isDash){closeSide();['modal','workerModal','breakModal','salonModal','userModal'].forEach(closeModal);}
   $('gear').style.display='none';
   updateNavMenu();
@@ -4178,14 +4193,19 @@ function renderVLoginPhotoGallery(){
   `).join('');
 }
 
+let hpReplaceIndex = null;
+
 // Admin-only management list in Gestione Saloni ("Foto Pagina Iniziale").
+// Clicking the thumbnail image replaces that photo in place (same slot);
+// the ✕ button removes it — photos periodically need swapping out, not just
+// adding/removing at the end.
 function renderHpPhotosList(){
   const wrap = $('hpPhotosList');
   if (!wrap) return;
   const photos = (STATE.admin && STATE.admin.homepagePhotos) || [];
   wrap.innerHTML = photos.map((u, i) => `
     <div class="hp-photo-thumb">
-      <img src="${escapeHtml(u)}" alt="">
+      <img src="${escapeHtml(u)}" alt="" class="hp-photo-replace" data-i="${i}" title="Clicca per sostituire">
       <button type="button" class="hp-photo-rm" data-i="${i}" title="Rimuovi">✕</button>
     </div>
   `).join('');
@@ -4431,11 +4451,36 @@ async function boot(){
     }
   });
   $('hpPhotosList')?.addEventListener('click', async e => {
-    const btn = e.target.closest('.hp-photo-rm');
-    if (!btn) return;
-    STATE.admin.homepagePhotos.splice(+btn.dataset.i, 1);
-    renderHpPhotosList();
-    await saveHomepagePhotos();
+    const rm = e.target.closest('.hp-photo-rm');
+    if (rm) {
+      STATE.admin.homepagePhotos.splice(+rm.dataset.i, 1);
+      renderHpPhotosList();
+      await saveHomepagePhotos();
+      return;
+    }
+    const thumb = e.target.closest('.hp-photo-replace');
+    if (thumb) {
+      hpReplaceIndex = +thumb.dataset.i;
+      $('hpPhotoReplaceInput').click();
+    }
+  });
+  $('hpPhotoReplaceInput')?.addEventListener('change', async e => {
+    const file = e.target.files && e.target.files[0];
+    if (!file || hpReplaceIndex === null) return;
+    const st = $('hpPhotosStatus');
+    try {
+      if (st) st.textContent = 'Caricamento...';
+      const url = await uploadImageFile(file);
+      STATE.admin.homepagePhotos[hpReplaceIndex] = url;
+      renderHpPhotosList();
+      await saveHomepagePhotos();
+      if (st) st.textContent = '✓ Foto sostituita';
+    } catch (err) {
+      if (st) st.textContent = 'Errore: ' + err.message;
+    } finally {
+      hpReplaceIndex = null;
+      e.target.value = '';
+    }
   });
 
   // Wire Homepage Ad Editor save button
