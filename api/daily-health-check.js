@@ -1,5 +1,6 @@
 import webPush from 'web-push';
-import { getAllBookings, getSalonsDb, getBlob, setBlob } from '../lib/kv.js';
+import { put, list, del } from '@vercel/blob';
+import { getAllBookings, getSalonsDb, getAdminDb, getBlob, setBlob } from '../lib/kv.js';
 import { twilioConfigured } from '../lib/sms.js';
 
 const VAPID_PUBLIC_KEY = 'BLLKr1SroPRHybfSN2OunQUzy6yd5hggq2fmAmT90LL32Pgyaa_VkoESjUq3DGk0bgD2a5tb17bSZHc2heLJXGo';
@@ -134,6 +135,58 @@ export default async function handler(req, res) {
     }
   } catch (e) {
     problems.push(`Manifest dinamico non raggiungibile: ${e.message}`);
+  }
+
+  // 5. Daily off-Upstash backup. Every salon/worker/booking/review lives in
+  // exactly one Upstash Redis instance with no independent copy anywhere —
+  // if that instance were ever accidentally wiped, hit a plan limit, or lost
+  // data in an Upstash-side incident, there would be no way back. This
+  // writes one JSON snapshot per day to Vercel Blob storage (a completely
+  // separate service/account boundary from Upstash) as the recovery path.
+  // Credentials are deliberately never included: a real restore already
+  // needs the admin to reset owner/barber passwords by hand (the existing
+  // 🔑 reset-to-default flow), which is a far smaller cost than a plaintext
+  // password dump sitting in a backup file.
+  try {
+    const blobToken = process.env.BLOB_READ_WRITE_TOKEN;
+    if (!blobToken) {
+      problems.push('Backup non eseguito: BLOB_READ_WRITE_TOKEN non configurato');
+    } else {
+      const backupSalons = salons.map(({ ownerPassword, workers, ...rest }) => ({
+        ...rest,
+        workers: (workers || []).map(({ password, ...w }) => w)
+      }));
+      const backupBookings = Array.from((await getAllBookings(kvUrl, kvToken)).values());
+      const admin = await getAdminDb(kvUrl, kvToken);
+      const snapshot = {
+        exportedAt: new Date().toISOString(),
+        adminUsername: admin.username,
+        salons: backupSalons,
+        bookings: backupBookings
+      };
+      const todayISO = romeTodayISO();
+      await put(`backups/trimio-${todayISO}.json`, JSON.stringify(snapshot), {
+        access: 'public',
+        contentType: 'application/json',
+        token: blobToken
+      });
+      report.backupSalons = backupSalons.length;
+      report.backupBookings = backupBookings.length;
+
+      // Retention: keep the last ~35 days, delete anything older so this
+      // doesn't grow forever — a month of daily snapshots is plenty to
+      // recover from any realistic incident without unbounded storage cost.
+      try {
+        const { blobs } = await list({ prefix: 'backups/trimio-', token: blobToken });
+        const cutoff = Date.now() - 35 * 24 * 60 * 60 * 1000;
+        const stale = blobs.filter(b => new Date(b.uploadedAt).getTime() < cutoff);
+        if (stale.length) await del(stale.map(b => b.url), { token: blobToken });
+      } catch (e) {
+        console.error('[HEALTH] Backup retention cleanup failed:', e.message);
+      }
+    }
+  } catch (e) {
+    problems.push(`Backup giornaliero fallito: ${e.message}`);
   }
 
   // Notify every admin device — only when something is wrong, and only ONCE
