@@ -1636,7 +1636,12 @@ function openDays(salon){
   while(added<bd&&off<90){
     const d=new Date(today);d.setDate(today.getDate()+off);off++;
     if(cd.includes(d.getDay()))continue;
-    const iso=d.toISOString().split('T')[0];
+    // toISOString() converts to UTC, which lands on the PREVIOUS calendar
+    // day for roughly the first couple of hours after local midnight in any
+    // UTC+ timezone (Italy included) — isoOf() reads the local Y/M/D
+    // directly, matching todayISO() and every other date computation in the
+    // app instead of silently disagreeing with them right after midnight.
+    const iso=isoOf(d.getFullYear(),d.getMonth(),d.getDate());
     out.push({iso,label:`${DOW[d.getDay()]} ${d.getDate()} ${MON[d.getMonth()]}`,isToday:added===0});
     added++;
   }
@@ -2435,8 +2440,7 @@ function showView(view){
     // below retries playback on the first interaction anywhere on the page,
     // so the video never sits frozen waiting for a tap on itself specifically.
     if (showMarketing) {
-      const demoVideo = document.querySelector('.vlogin-demo-video');
-      if (demoVideo) {
+      document.querySelectorAll('.vlogin-demo-video').forEach(demoVideo => {
         demoVideo.muted = true;
         const tryPlay = () => demoVideo.play().catch(() => {});
         tryPlay();
@@ -2444,7 +2448,7 @@ function showView(view){
           const retry = () => { tryPlay(); };
           ['touchstart', 'click'].forEach(evt => document.addEventListener(evt, retry, { once: true, passive: true }));
         }
-      }
+      });
     }
   }
   // Always re-render the homepage with the current STATE.salons before showing
