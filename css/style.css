@@ -1298,3 +1298,45 @@ body{
   #printableStats th{color:#555 !important;}
   #printableStats th,#printableStats td{border-bottom-color:#ccc !important;}
 }
+
+/* ================================================================
+   HOMEPAGE — WIDE VIEWPORT LAYOUT
+   Every other view (dashboard, booking flow, login) is deliberately a
+   fixed ~480px mobile column — those are short interactive forms/steps
+   that gain nothing from stretching wide. The public homepage is the
+   one screen meant to be BROWSED like a real website (customers arrive
+   from search, social, a saved link), so on a desktop-size viewport it
+   should read as one instead of floating as a phone-shaped island on a
+   sea of black. :has() falls back gracefully on the rare browser
+   without it — the mobile layout simply stays as-is, nothing breaks.
+================================================================ */
+@media (min-width:860px){
+  .app:has(#vHome.on){max-width:1180px;width:94vw;}
+  #vHome .head{padding-left:32px;padding-right:32px;}
+
+  /* Hero: taller and more editorial, with real side padding instead of
+     the mobile version's tight centered block. */
+  #vHome .hp-hero{min-height:480px;padding:64px 64px 56px;border-radius:0 0 56px 56px;}
+  #vHome .hp-title{font-size:50px;letter-spacing:-1.5px;}
+  #vHome .hp-sub{font-size:15px;}
+
+  #vHome .hp-sec-title{margin-left:32px;margin-right:32px;font-size:12px;}
+  #vHome #mapContainer{margin-left:32px !important;margin-right:32px !important;}
+  #vHome #mapContainer #map{height:380px !important;}
+  #vHome .hp-admin-btn{max-width:340px;margin-left:32px;}
+
+  /* Salon list: a responsive grid instead of one stacked column. */
+  #hpSalonList{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:20px;padding:0 32px;}
+  #hpSalonList .hp-salon-card{margin:0;}
+
+  #vHome .gallery-filter-container{padding:0 32px;margin-left:0;margin-right:0;}
+  #vHome .gallery-grid{grid-template-columns:repeat(auto-fill,minmax(230px,1fr));padding:0 32px;}
+
+  /* Dashboard (owner/barber/admin): same phone-card problem as vHome — a
+     720px-viewport UI centered inside a 480px card on a wide desktop
+     screen. Widen the shell and center a readable content column instead
+     of stretching every stacked list/card edge-to-edge. */
+  .app:has(#vDash.on){max-width:900px;width:92vw;}
+  #vDash .d-top{padding-left:28px;padding-right:28px;}
+  #vDash .d-pad{padding-left:28px;padding-right:28px;}
+}
