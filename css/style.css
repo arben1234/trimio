@@ -6,7 +6,19 @@
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
 body, .app, input, select, button, textarea {font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;}
 body{background:#f1f5f9;min-height:100vh;display:flex;align-items:center;justify-content:center;}
-.app{width:100%;max-width:480px;min-height:100vh;background:#fff;display:flex;flex-direction:column;position:relative;}
+.app{
+  width:100%;max-width:480px;min-height:100vh;display:flex;flex-direction:column;position:relative;
+  /* Soft, mostly-neutral wash with a faint gold cast — flat white would make
+     the frosted glass cards above invisible (glass on a same-color flat
+     background has nothing to diffuse). Fixed attachment so the wash reads
+     as one continuous backdrop behind scrolling content, not a tile. */
+  background:
+    radial-gradient(circle at 12% 0%, rgba(229,193,88,.07) 0%, transparent 42%),
+    radial-gradient(circle at 100% 18%, rgba(229,193,88,.05) 0%, transparent 38%),
+    radial-gradient(circle at 50% 100%, rgba(120,130,160,.05) 0%, transparent 45%),
+    #f7f7f5;
+  background-attachment:fixed;
+}
 @media(min-width:500px){body{padding:20px}.app{min-height:auto;height:92vh;border-radius:20px;box-shadow:0 20px 60px rgba(0,0,0,.4);overflow-y:auto;}}
 /* HEAD */
 .head{background:linear-gradient(135deg,#ffffff,#f4f4f5);color:#18181b;padding:22px 24px 18px;text-align:center;flex-shrink:0;position:relative;border-bottom:1px solid #e4e4e7;}
@@ -113,15 +125,18 @@ body{background:#f1f5f9;min-height:100vh;display:flex;align-items:center;justify
 
 /* ── Salon card ── */
 .hp-salon-card{
-  background:#fff;border-radius:20px;
+  background:rgba(255,255,255,.62);
+  backdrop-filter:blur(18px) saturate(160%);
+  -webkit-backdrop-filter:blur(18px) saturate(160%);
+  border-radius:20px;
   margin:0 16px 14px;
-  box-shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.06);
+  box-shadow:0 1px 3px rgba(20,16,8,.08),0 8px 24px rgba(20,16,8,.06),inset 0 1px 0 rgba(255,255,255,.5);
   overflow:hidden;cursor:pointer;
-  transition:transform .15s,box-shadow .15s;
-  border:1.5px solid #f0f0f0;
+  transition:transform .15s,box-shadow .15s,background .15s;
+  border:1.5px solid rgba(255,255,255,.7);
 }
 .hp-salon-card:active{transform:scale(.985);box-shadow:0 1px 3px rgba(0,0,0,.05);}
-@media(hover:hover){.hp-salon-card:hover{box-shadow:0 4px 20px rgba(0,0,0,.12);border-color:#e0e0e0;}}
+@media(hover:hover){.hp-salon-card:hover{background:rgba(255,255,255,.78);box-shadow:0 4px 20px rgba(20,16,8,.12);border-color:rgba(229,193,88,.35);}}
 
 /* card top strip */
 .hsc-strip{
@@ -496,6 +511,19 @@ body{background:#f1f5f9;min-height:100vh;display:flex;align-items:center;justify
 .bar-fill.green{background:#16a34a;}
 .bar-fill.blue{background:#2563eb;}
 .bar-fill.amber{background:#d97706;}
+/* stats table — sits inside a .chart-wrap, which already gets the frosted
+   glass treatment; this just gives the table itself borders/tones that read
+   well against a translucent backdrop instead of the flat-white originals. */
+.gtable{width:100%;border-collapse:collapse;font-size:12.5px;}
+.gtable th{
+  padding:8px 6px;font-weight:800;color:#8a7a55;text-align:left;
+  border-bottom:2px solid rgba(229,193,88,.3);
+  text-transform:uppercase;font-size:10.5px;letter-spacing:.4px;
+}
+.gtable td{padding:9px 6px;border-bottom:1px solid rgba(20,16,8,.07);}
+.gtable-muted{color:#8a8a8a;}
+.gtable tr:last-child td{border-bottom:none;}
+.gtable-total td{border-top:2px solid rgba(229,193,88,.3);font-weight:800;padding-top:10px;}
 /* calendar */
 .cal-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
 .cal-nav{width:38px;height:38px;border:none;background:#f0f0f0;border-radius:11px;font-size:18px;cursor:pointer;font-weight:700;}
@@ -1103,13 +1131,26 @@ body{
 .role-owner{background:rgba(99,102,241,.18);color:#a5b4fc;}
 .role-barber{background:rgba(34,197,94,.16);color:#4ade80;}
 
-/* ---- KPI + list cards: subtle depth, gold accent on the headline metric ---- */
+/* ---- KPI + list cards: frosted glass, gold accent on the headline metric ----
+   The dashboard sits on a flat white page, so a real glass panel needs both
+   halves: a textured backdrop (added to .app below) AND a translucent,
+   blurred card on top of it — glass on flat white of the same color is
+   invisible. Every card in this list already shared one selector for its
+   shadow; that's also the one place to swap the flat #fff background for
+   frosted glass without touching each class's own declaration. */
 .kpi-big,.kpi,.acard,.cli,.cli-summary,.srv,.worker-card,.salon-item,.chart-wrap{
-  transition:transform .2s var(--ease),box-shadow .2s var(--ease);
-  box-shadow:0 1px 2px rgba(0,0,0,.04),0 10px 24px rgba(0,0,0,.05);
+  transition:transform .2s var(--ease),box-shadow .2s var(--ease),background .2s var(--ease);
+  background:rgba(255,255,255,.62) !important;
+  backdrop-filter:blur(18px) saturate(160%);
+  -webkit-backdrop-filter:blur(18px) saturate(160%);
+  border:1px solid rgba(255,255,255,.7);
+  box-shadow:0 1px 2px rgba(20,16,8,.04),0 10px 28px rgba(20,16,8,.06),inset 0 1px 0 rgba(255,255,255,.5);
 }
 .kpi-big{border-left:3px solid var(--gold);}
-.acard:hover,.cli:hover,.srv:hover,.worker-card:hover,.salon-item:hover{box-shadow:0 4px 10px rgba(0,0,0,.05),0 16px 34px rgba(0,0,0,.08);}
+.acard:hover,.cli:hover,.srv:hover,.worker-card:hover,.salon-item:hover{
+  background:rgba(255,255,255,.78) !important;
+  box-shadow:0 4px 10px rgba(20,16,8,.05),0 16px 34px rgba(20,16,8,.09),inset 0 1px 0 rgba(255,255,255,.6);
+}
 .act.done{background:linear-gradient(135deg,#0a0a0c,#232326);}
 .add-srv:hover{border-color:var(--gold);color:var(--gold-dark);}
 .iconbtn:hover{border-color:var(--gold);}

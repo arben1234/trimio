@@ -3479,25 +3479,25 @@ function statsTableHtml(colLabel, rows, servedCount, servedRev){
   return `
     <button type="button" class="stats-export-btn" id="statsExportBtn">📄 Esporta PDF / Stampa</button>
     <div style="overflow-x:auto;">
-    <table style="width:100%;border-collapse:collapse;font-size:12.5px;">
-      <thead><tr style="border-bottom:2px solid #e4e4e7;text-align:left;">
-        <th style="padding:8px 6px;font-weight:800;color:#71717a;">Periodo</th>
-        <th style="padding:8px 6px;font-weight:800;color:#71717a;">${colLabel}</th>
-        <th style="padding:8px 6px;font-weight:800;color:#71717a;text-align:right;">Clienti serviti</th>
-        <th style="padding:8px 6px;font-weight:800;color:#71717a;text-align:right;">Incasso (€)</th>
+    <table class="gtable">
+      <thead><tr>
+        <th>Periodo</th>
+        <th>${colLabel}</th>
+        <th style="text-align:right;">Clienti serviti</th>
+        <th style="text-align:right;">Incasso (€)</th>
       </tr></thead>
       <tbody>
-        ${rows.map(row=>`<tr style="border-bottom:1px solid #f0f0f0;">
-          <td style="padding:8px 6px;color:#71717a;">${periodLabel()}</td>
-          <td style="padding:8px 6px;font-weight:700;">${row.name}</td>
-          <td style="padding:8px 6px;text-align:right;">${row.count}</td>
-          <td style="padding:8px 6px;text-align:right;font-weight:700;color:#16a34a;">€${row.rev}</td>
+        ${rows.map(row=>`<tr>
+          <td class="gtable-muted">${periodLabel()}</td>
+          <td style="font-weight:700;">${escapeHtml(row.name)}</td>
+          <td style="text-align:right;">${row.count}</td>
+          <td style="text-align:right;font-weight:700;color:#16a34a;">€${row.rev}</td>
         </tr>`).join('')}
-        <tr style="border-top:2px solid #e4e4e7;font-weight:800;">
-          <td style="padding:8px 6px;"></td>
-          <td style="padding:8px 6px;">Totale</td>
-          <td style="padding:8px 6px;text-align:right;">${servedCount}</td>
-          <td style="padding:8px 6px;text-align:right;color:#16a34a;">€${servedRev}</td>
+        <tr class="gtable-total">
+          <td></td>
+          <td>Totale</td>
+          <td style="text-align:right;">${servedCount}</td>
+          <td style="text-align:right;color:#16a34a;">€${servedRev}</td>
         </tr>
       </tbody>
     </table>
