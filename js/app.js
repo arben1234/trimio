@@ -2392,6 +2392,13 @@ function showView(view){
     const footer = $('vLoginFooter');
     if (marketing) marketing.style.display = showMarketing ? '' : 'none';
     if (footer) footer.style.display = showMarketing ? '' : 'none';
+    // A returning admin already holds a valid session (this is exactly why
+    // trimio.org's bare root always lands here now instead of silently
+    // restoring vHome) — skip asking them to retype a password and offer a
+    // one-click way into the dashboard instead of the bare form.
+    const alreadyAdmin = showMarketing && SESSION && SESSION.role === 'admin';
+    $('vLoginAlreadyIn').style.display = alreadyAdmin ? 'block' : 'none';
+    $('vLoginFormFields').style.display = alreadyAdmin ? 'none' : 'flex';
   }
   // Always re-render the homepage with the current STATE.salons before showing
   // it — otherwise it can show stale content (e.g. a salon added by the admin
@@ -4296,6 +4303,10 @@ async function boot(){
   $('hpNavSaloni')?.addEventListener('click', () => $('hpSalonList')?.scrollIntoView({behavior:'smooth', block:'start'}));
   $('hpNavContact')?.addEventListener('click', () => $('hpContact')?.scrollIntoView({behavior:'smooth', block:'start'}));
   $('hpNavAdmin')?.addEventListener('click', goToAdminEntry);
+  // Shown on vLogin instead of the form when a valid admin session already
+  // exists — see the display toggle in showView().
+  $('vLoginEnterDash')?.addEventListener('click', () => showView('vHome'));
+  $('vLoginNotYou')?.addEventListener('click', doLogout);
   $('gear').addEventListener('click',()=>{ loginSalonContext = custSalon ? custSalon.id : null; loginRoleContext = null; showView('vLogin'); });
   $('toStaff').addEventListener('click',()=>{ loginSalonContext = custSalon ? custSalon.id : null; loginRoleContext = null; showView('vLogin'); });
   $('toCustomer').addEventListener('click',()=>{
@@ -4805,11 +4816,16 @@ async function boot(){
           return;
         }
       } else {
-        // Admin session - route to homepage!
-        showView('vHome');
-        if (typeof initPushNotifications === 'function') {
-          initPushNotifications();
-        }
+        // Admin session exists, but a bare root visit must always land on
+        // the informative/marketing entry point first — never silently
+        // restore straight to the salon-management homepage just because a
+        // token is still valid. showView('vLogin') detects the still-valid
+        // admin session itself and swaps the login form for a one-click
+        // "already signed in" shortcut, so this doesn't force a real
+        // re-login, just an explicit confirmation step.
+        loginSalonContext = null;
+        loginRoleContext = null;
+        showView('vLogin');
         return;
       }
     }

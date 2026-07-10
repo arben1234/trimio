@@ -457,7 +457,18 @@
       <div class="login-form-wrap">
         <div class="title" style="margin-top:10px" id="loginTitle">Accesso Amministratore</div>
         <div class="err" id="lErr"></div>
-        <div class="login">
+
+        <!-- Shown instead of the form when a valid admin session already
+             exists (e.g. reopening trimio.org) — the informative page above
+             still shows first, but a returning admin isn't asked to
+             re-type a password the browser has already proven. -->
+        <div class="login" id="vLoginAlreadyIn" style="display:none;text-align:center;">
+          <div style="color:#c4c4c8;font-size:13.5px;margin-bottom:4px;">Bentornato, hai già effettuato l'accesso.</div>
+          <button class="btn btn-main" id="vLoginEnterDash">Vai alla Dashboard →</button>
+          <button class="link" id="vLoginNotYou" style="text-align:center">Non sei tu? Esci</button>
+        </div>
+
+        <div class="login" id="vLoginFormFields">
           <div class="field"><label>Username</label><input type="text" id="lusr" placeholder="username" autocomplete="username"></div>
           <div class="field"><label>Password</label><input type="password" id="lpw" placeholder="••••••••"></div>
           <button class="btn btn-main" id="loginBtn">Accedi</button>
@@ -977,6 +988,6 @@
      own "Save as PDF" print target produces a clean report. -->
 <div id="printableStats"></div>
 
-<script src="/js/app.min.js?v=20260710_0006"></script>
+<script src="/js/app.min.js?v=20260710_0007"></script>
 </body>
 </html>
