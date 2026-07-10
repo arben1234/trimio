@@ -238,6 +238,33 @@ body{background:#f1f5f9;min-height:100vh;display:flex;align-items:center;justify
 }
 .hp-admin-btn:active{background:#f5f5f5;}
 
+/* ── Desktop nav bar (overlaid on the hero) — hidden on mobile, where the
+   compact header + dropdown already cover the same actions ── */
+.hp-navbar{display:none;}
+
+/* ── "Perché TRIMIO" value-proposition cards ── */
+.hp-value-grid{display:grid;grid-template-columns:1fr;gap:14px;margin:0 16px 28px;}
+.hp-value-card{
+  background:rgba(255,255,255,.62);
+  backdrop-filter:blur(18px) saturate(160%);
+  -webkit-backdrop-filter:blur(18px) saturate(160%);
+  border:1px solid rgba(255,255,255,.7);
+  border-radius:18px;padding:20px 18px;
+  box-shadow:0 1px 2px rgba(20,16,8,.04),0 10px 28px rgba(20,16,8,.06),inset 0 1px 0 rgba(255,255,255,.5);
+}
+.hp-value-ic{font-size:26px;margin-bottom:8px;}
+.hp-value-t{font-size:15px;font-weight:800;color:#18181b;margin-bottom:6px;}
+.hp-value-d{font-size:12.5px;color:#666;line-height:1.55;}
+
+/* ── Footer contact line ── */
+.hp-footer-contact{
+  display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:8px;
+  font-size:12px;color:#999;margin:10px 0 14px;
+}
+.hp-footer-contact a{color:var(--gold, #e5c158);font-weight:700;text-decoration:none;}
+.hp-footer-contact a:hover{text-decoration:underline;}
+.hp-footer-sep{opacity:.5;}
+
 /* ── Gallery (in fondo) ── */
 .hp-gallery-section{padding:0 16px;}
 .hp-gallery{
@@ -1035,16 +1062,20 @@ body{background:#f1f5f9;min-height:100vh;display:flex;align-items:center;justify
   --ease:cubic-bezier(.4,0,.2,1);
 }
 
-/* ---- Global stage ---- */
+/* ---- Global stage ----
+   Was a near-black gradient — on desktop, where .app doesn't fill the
+   viewport, that read as a harsh dark void around the app rather than a
+   webpage. A warm, light neutral (matching .app's own wash) plus a soft
+   tinted shadow keeps the same premium feel without the void. */
 body{
   background:
     radial-gradient(circle at 15% 0%, rgba(229,193,88,.10) 0%, transparent 45%),
-    radial-gradient(circle at 100% 100%, rgba(229,193,88,.06) 0%, transparent 40%),
-    linear-gradient(160deg,#0a0a0c 0%,#1c1c20 55%,#0a0a0c 100%);
+    radial-gradient(circle at 100% 100%, rgba(229,193,88,.07) 0%, transparent 40%),
+    #efeae0;
 }
 @media(min-width:500px){
   .app{
-    box-shadow:0 30px 90px rgba(0,0,0,.55), 0 0 0 1px rgba(229,193,88,.12);
+    box-shadow:0 24px 70px rgba(30,24,10,.16), 0 0 0 1px rgba(229,193,88,.18);
     border-radius:26px;
   }
 }
@@ -1312,13 +1343,42 @@ body{
 ================================================================ */
 @media (min-width:860px){
   .app:has(#vHome.on){max-width:1180px;width:94vw;}
-  #vHome .head{padding-left:32px;padding-right:32px;}
+  /* The shared compact header (logo + "☰ Menu" dropdown) is now fully
+     redundant with the real nav bar overlaid on the hero below — showing
+     both read as two stacked navigations. (.head is a sibling of #vHome,
+     not a descendant, hence :has() here rather than a plain descendant
+     selector.) */
+  .app:has(#vHome.on) .head{display:none;}
 
   /* Hero: taller and more editorial, with real side padding instead of
      the mobile version's tight centered block. */
   #vHome .hp-hero{min-height:480px;padding:64px 64px 56px;border-radius:0 0 56px 56px;}
   #vHome .hp-title{font-size:50px;letter-spacing:-1.5px;}
   #vHome .hp-sub{font-size:15px;}
+
+  /* Real top nav overlaid on the hero — replaces the mobile header's lone
+     dropdown with actual site navigation (this is the one screen meant to
+     be browsed like a website, per the mobile-column rationale above). */
+  #vHome .hp-navbar{
+    display:flex;align-items:center;justify-content:space-between;
+    position:absolute;top:0;left:0;right:0;z-index:3;padding:22px 40px;
+  }
+  #vHome .hp-navbar-brand{display:flex;align-items:center;gap:10px;cursor:pointer;}
+  #vHome .hp-navbar-brand img{width:36px;height:36px;border-radius:50%;border:2px solid var(--gold);object-fit:cover;}
+  #vHome .hp-navbar-brand span{font-family:'Cinzel',serif;font-weight:800;font-size:16px;letter-spacing:1.5px;color:#fff;}
+  #vHome .hp-navbar-links{display:flex;gap:30px;}
+  #vHome .hp-navbar-links button{background:none;border:none;color:#d4d4d8;font-size:13px;font-weight:700;letter-spacing:.3px;cursor:pointer;font-family:inherit;padding:4px 2px;transition:color .15s;}
+  #vHome .hp-navbar-links button:hover{color:var(--gold);}
+  #vHome .hp-navbar-cta{
+    background:linear-gradient(135deg,var(--gold),var(--gold-dark));
+    color:#0a0a0c;border:none;border-radius:10px;padding:9px 18px;
+    font-size:12px;font-weight:800;letter-spacing:.4px;cursor:pointer;
+    box-shadow:0 8px 20px rgba(229,193,88,.3);transition:box-shadow .15s;
+  }
+  #vHome .hp-navbar-cta:hover{box-shadow:0 8px 24px rgba(229,193,88,.45);}
+
+  /* Value-proposition cards: 3 across instead of stacked. */
+  #vHome .hp-value-grid{grid-template-columns:repeat(3,1fr);margin-left:32px;margin-right:32px;gap:20px;}
 
   #vHome .hp-sec-title{margin-left:32px;margin-right:32px;font-size:12px;}
   #vHome #mapContainer{margin-left:32px !important;margin-right:32px !important;}

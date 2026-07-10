@@ -4272,6 +4272,13 @@ async function boot(){
     e.target.value=f;custData.phone=f;
   });
   $('hpAdminBtn')?.addEventListener('click',()=>{ loginSalonContext = null; loginRoleContext = null; showView('vLogin'); });
+  // Desktop homepage nav bar (hidden on mobile — see css) — jumps to the
+  // matching section already on the page rather than duplicating them.
+  $('hpNavBrand')?.addEventListener('click', () => window.scrollTo({top:0, behavior:'smooth'}));
+  $('hpNavHow')?.addEventListener('click', () => $('hpHowItWorks')?.scrollIntoView({behavior:'smooth', block:'start'}));
+  $('hpNavSaloni')?.addEventListener('click', () => $('hpSalonList')?.scrollIntoView({behavior:'smooth', block:'start'}));
+  $('hpNavContact')?.addEventListener('click', () => $('hpContact')?.scrollIntoView({behavior:'smooth', block:'start'}));
+  $('hpNavAdmin')?.addEventListener('click', () => { loginSalonContext = null; loginRoleContext = null; showView('vLogin'); });
   $('gear').addEventListener('click',()=>{ loginSalonContext = custSalon ? custSalon.id : null; loginRoleContext = null; showView('vLogin'); });
   $('toStaff').addEventListener('click',()=>{ loginSalonContext = custSalon ? custSalon.id : null; loginRoleContext = null; showView('vLogin'); });
   $('toCustomer').addEventListener('click',()=>{

@@ -83,10 +83,44 @@
 
         <!-- HERO con sfondo foto reale -->
         <div class="hp-hero">
+          <!-- Barra di navigazione (solo desktop — su mobile l'header
+               compatto in alto copre le stesse azioni) -->
+          <nav class="hp-navbar" id="hpNavbar">
+            <div class="hp-navbar-brand" id="hpNavBrand">
+              <img src="/logo.png" alt="TRIMIO">
+              <span>TRIMIO</span>
+            </div>
+            <div class="hp-navbar-links">
+              <button type="button" id="hpNavHow">Come funziona</button>
+              <button type="button" id="hpNavSaloni">Saloni</button>
+              <button type="button" id="hpNavContact">Contatti</button>
+            </div>
+            <button type="button" class="hp-navbar-cta" id="hpNavAdmin">Accesso Admin</button>
+          </nav>
           <div class="hp-hero-bg"></div>
           <div class="hp-hero-content">
             <img src="/logo.png" alt="TRIMIO Logo" style="width: 220px; height: 220px; margin-bottom: 12px; border-radius: 50%; border: none; box-shadow: 0 8px 32px rgba(0,0,0,0.8); background:transparent; object-fit: cover;">
             <div class="hp-count" id="hpCount" style="margin-top: 8px;">— saloni</div>
+          </div>
+        </div>
+
+        <!-- PERCHÉ TRIMIO — proposta di valore -->
+        <div class="hp-sec-title" id="hpHowItWorks">Perché TRIMIO</div>
+        <div class="hp-value-grid">
+          <div class="hp-value-card">
+            <div class="hp-value-ic">🔎</div>
+            <div class="hp-value-t">Tutti i saloni in un click</div>
+            <div class="hp-value-d">Un unico posto per trovare e confrontare i barbieri partner della tua zona, senza scaricare nessuna app.</div>
+          </div>
+          <div class="hp-value-card">
+            <div class="hp-value-ic">📅</div>
+            <div class="hp-value-t">Prenota in pochi secondi</div>
+            <div class="hp-value-d">Scegli barbiere, servizio e orario: la conferma è immediata, senza telefonate né attese.</div>
+          </div>
+          <div class="hp-value-card">
+            <div class="hp-value-ic">🔔</div>
+            <div class="hp-value-t">Promemoria automatici</div>
+            <div class="hp-value-d">Ricevi una notifica prima dell'appuntamento, così non dimentichi mai una prenotazione.</div>
           </div>
         </div>
 
@@ -250,9 +284,14 @@
         </div>
 
         <!-- FOOTER DI TRIMIO -->
-        <div class="global-footer" style="text-align: center; margin-top: 40px; padding: 32px 16px 24px; border-top: 1px solid #333; background: #111; color: #888;">
+        <div class="global-footer" id="hpContact" style="text-align: center; margin-top: 40px; padding: 32px 16px 24px; border-top: 1px solid #333; background: #111; color: #888;">
           <div style="font-family: 'Cinzel', serif; font-size: 15px; font-weight: 700; letter-spacing: 2px; color: #fff; margin-bottom: 8px;">
             TRIMIO <span style="color: #e5c158;">THE ART OF THE CUT</span> - ITALY
+          </div>
+          <div class="hp-footer-contact">
+            <a href="mailto:support@trimio.org">✉ support@trimio.org</a>
+            <span class="hp-footer-sep">·</span>
+            <span>Hai un salone e vuoi entrare in TRIMIO? Scrivici.</span>
           </div>
           <div style="font-size: 11px; color: #666; line-height: 1.5; max-width: 380px; margin: 0 auto; letter-spacing: 0.2px;">
             © 2008-2026 Questo programma software è riservato e protetto da copyright. Non è consentita la sua ridistribuzione, riproduzione o copia non autorizzata.
@@ -881,6 +920,6 @@
      own "Save as PDF" print target produces a clean report. -->
 <div id="printableStats"></div>
 
-<script src="/js/app.min.js?v=20260710_0003"></script>
+<script src="/js/app.min.js?v=20260710_0004"></script>
 </body>
 </html>
