@@ -143,7 +143,7 @@ const DEFAULT_SERVICES=[
 
 /* ======== STATE ======== */
 let STATE={
-  admin:{username:'admin',password:'admin123'},
+  admin:{username:'admin',password:'admin123',homepagePhotos:[]},
   homepageAd: {
     title: 'Trimio Pro Care',
     description: 'Usa il codice TRIMIO15 sul nostro store per ricevere il 15% di sconto su cera, lozioni e balsamo per capelli e barba!',
@@ -790,6 +790,9 @@ function initCloudSync() {
         if (data.admin && typeof data.admin.username === 'string' && data.admin.username) {
           STATE.admin.username = data.admin.username;
         }
+        if (data.admin && Array.isArray(data.admin.homepagePhotos)) {
+          STATE.admin.homepagePhotos = data.admin.homepagePhotos;
+        }
 
         if (data.bookings) {
           const fbBookings = Array.isArray(data.bookings) ? data.bookings : Object.values(data.bookings);
@@ -812,6 +815,7 @@ function initCloudSync() {
         if (typeof renderDash === 'function' && curSec) renderDash();
         if (typeof renderHomepage === 'function' && !custSalon) renderHomepage();
         if (typeof renderVLoginSalonShowcase === 'function') renderVLoginSalonShowcase();
+        if (typeof renderVLoginPhotoGallery === 'function') renderVLoginPhotoGallery();
         // Kick out customer if salon became inactive
         if (custSalon) {
           const refreshed = STATE.salons.find(s => s.id === custSalon.id);
@@ -895,6 +899,9 @@ function initCloudSync() {
 
           if (data.admin && typeof data.admin.username === 'string' && data.admin.username) {
             STATE.admin.username = data.admin.username;
+          }
+          if (data.admin && Array.isArray(data.admin.homepagePhotos)) {
+            STATE.admin.homepagePhotos = data.admin.homepagePhotos;
           }
 
           localStorage.setItem(SK, JSON.stringify({ ...STATE, bookings: fbBookings }));
@@ -2415,6 +2422,7 @@ function showView(view){
       overlay.classList.remove('show');
     }
     if (showMarketing && typeof renderVLoginSalonShowcase === 'function') renderVLoginSalonShowcase();
+    if (showMarketing && typeof renderVLoginPhotoGallery === 'function') renderVLoginPhotoGallery();
   }
   // Always re-render the homepage with the current STATE.salons before showing
   // it — otherwise it can show stale content (e.g. a salon added by the admin
@@ -2686,6 +2694,7 @@ function initDash(){
     $('adBtnInput').value = ad.btnText || '';
     $('adCodeInput').value = ad.code || '';
     if ($('adminNewUser')) $('adminNewUser').value = STATE.admin.username;
+    renderHpPhotosList();
   }
 
   const firstSec=navItems()[0].sec;
@@ -4023,6 +4032,13 @@ function renderHomepage(){
   // Hidden while an admin session is already active — clicking it would just
   // dump the logged-in admin onto a blank login form instead of doing anything useful.
   if($('hpAdminBtn')) $('hpAdminBtn').style.display=(SESSION&&SESSION.role==='admin')?'none':'block';
+  // The desktop nav bar's "Accesso Admin" CTA doubles as the dashboard
+  // shortcut once already logged in — but that alone left an admin with no
+  // way to log out without first entering the dashboard, since the shared
+  // header (and its "Esci" option) is hidden on vHome at desktop widths.
+  const isAdminSession = SESSION && SESSION.role === 'admin';
+  if($('hpNavAdmin')) $('hpNavAdmin').textContent = isAdminSession ? 'Pannello Admin' : 'Accesso Admin';
+  if($('hpNavLogout')) $('hpNavLogout').style.display = isAdminSession ? '' : 'none';
   if(!salons.length){
     $('hpSalonList').innerHTML=`<div class="empty"><div class="empty-ic">🏪</div><div class="empty-t">Nessun salone ancora.<br>Accedi come Admin per crearne uno.</div></div>`;
     $('hpAdBannerContainer').innerHTML = '';
@@ -4144,6 +4160,43 @@ function renderVLoginSalonShowcase(){
       <img src="${escapeHtml(s.bgImage)}" alt="${escapeHtml(s.name)}" loading="lazy">
     </div>
   `).join('');
+}
+
+// Curated photos an admin uploads specifically for the marketing page (see
+// "Foto Pagina Iniziale" in Gestione Saloni) — distinct from
+// renderVLoginSalonShowcase()'s automatic per-salon bgImage grid above.
+function renderVLoginPhotoGallery(){
+  const wrap = $('vLoginPhotoGallery');
+  const section = $('vLoginPhotoGallerySec');
+  if (!wrap) return;
+  const photos = (STATE.admin && STATE.admin.homepagePhotos) || [];
+  if (section) section.style.display = photos.length ? '' : 'none';
+  wrap.innerHTML = photos.map(u => `
+    <div class="vlp-card">
+      <img src="${escapeHtml(u)}" alt="TRIMIO" loading="lazy">
+    </div>
+  `).join('');
+}
+
+// Admin-only management list in Gestione Saloni ("Foto Pagina Iniziale").
+function renderHpPhotosList(){
+  const wrap = $('hpPhotosList');
+  if (!wrap) return;
+  const photos = (STATE.admin && STATE.admin.homepagePhotos) || [];
+  wrap.innerHTML = photos.map((u, i) => `
+    <div class="hp-photo-thumb">
+      <img src="${escapeHtml(u)}" alt="">
+      <button type="button" class="hp-photo-rm" data-i="${i}" title="Rimuovi">✕</button>
+    </div>
+  `).join('');
+}
+
+async function saveHomepagePhotos(){
+  await fetch('/api/sync', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ action: 'update_homepage_photos', photos: STATE.admin.homepagePhotos || [] })
+  });
 }
 
 function showSalonQRCode(slug) {
@@ -4335,6 +4388,7 @@ async function boot(){
   $('hpNavSaloni')?.addEventListener('click', () => $('hpSalonList')?.scrollIntoView({behavior:'smooth', block:'start'}));
   $('hpNavContact')?.addEventListener('click', () => $('hpContact')?.scrollIntoView({behavior:'smooth', block:'start'}));
   $('hpNavAdmin')?.addEventListener('click', goToAdminEntry);
+  $('hpNavLogout')?.addEventListener('click', doLogout);
   // Admin login modal on the marketing entry point — see the .as-modal
   // toggle in showView(). Opens on the top-left trigger, closes on the
   // backdrop or the ✕ button; nothing here bypasses the actual form.
@@ -4353,6 +4407,37 @@ async function boot(){
   $('custMyBookingBanner')?.addEventListener('click',renderMyBookingsModal);
   $('submitReviewBtn').addEventListener('click', submitBarberReview);
   
+  // Wire Homepage photo gallery manager (Gestione Saloni -> "Foto Pagina
+  // Iniziale") — each upload/removal saves immediately since there's no
+  // modal-close moment here to hang a single "Save" action off of.
+  $('hpPhotosFile')?.addEventListener('change', async e => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    const st = $('hpPhotosStatus');
+    if (!Array.isArray(STATE.admin.homepagePhotos)) STATE.admin.homepagePhotos = [];
+    try {
+      for (let i = 0; i < files.length; i++) {
+        if (st) st.textContent = `Caricamento ${i + 1}/${files.length}...`;
+        const url = await uploadImageFile(files[i]);
+        STATE.admin.homepagePhotos.push(url);
+        renderHpPhotosList();
+      }
+      await saveHomepagePhotos();
+      if (st) st.textContent = '✓ Foto salvate';
+    } catch (err) {
+      if (st) st.textContent = 'Errore: ' + err.message;
+    } finally {
+      e.target.value = '';
+    }
+  });
+  $('hpPhotosList')?.addEventListener('click', async e => {
+    const btn = e.target.closest('.hp-photo-rm');
+    if (!btn) return;
+    STATE.admin.homepagePhotos.splice(+btn.dataset.i, 1);
+    renderHpPhotosList();
+    await saveHomepagePhotos();
+  });
+
   // Wire Homepage Ad Editor save button
   $('saveAdBtn')?.addEventListener('click', async () => {
     if (!STATE.homepageAd) STATE.homepageAd = {};

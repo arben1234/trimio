@@ -3,7 +3,7 @@ import {
   getSalonsDb, setSalonsDb, getAllBookings,
   tryAcquireSlotLock, promoteLock, releaseSlotLock, hsetBooking,
   acquireBarberDayLock, releaseBarberDayLock, checkRateLimit,
-  ensureMigratedV2, getAdminDb
+  ensureMigratedV2, getAdminDb, setAdminDb
 } from '../lib/kv.js';
 import { sendCustomerText } from '../lib/sms.js';
 import { handleLogin, handleChangePassword, getVerifiedSession, getClientIp } from '../lib/auth.js';
@@ -78,6 +78,25 @@ async function handleSubmitReview(body, kvUrl, kvToken, req) {
   });
   await setSalonsDb(kvUrl, kvToken, salons);
   return { status: 200, json: { success: true } };
+}
+
+// The curated photo strip on the public marketing page (trimio.org, vLogin)
+// is admin-controlled and global (not tied to any one salon) — stored on the
+// same admin_db blob as the admin's own credentials, gated to admin sessions
+// only. Capped in count/length since these render on the one page every
+// anonymous visitor sees, unauthenticated.
+async function handleUpdateHomepagePhotos(body, kvUrl, kvToken, req) {
+  const session = getVerifiedSession(req);
+  if (!session || session.role !== 'admin') {
+    return { status: 403, json: { success: false, error: 'forbidden' } };
+  }
+  const photos = Array.isArray(body.photos) ? body.photos : [];
+  const cleaned = photos
+    .filter(u => typeof u === 'string' && u.length > 0 && u.length <= 300)
+    .slice(0, 20);
+  const admin = await getAdminDb(kvUrl, kvToken);
+  await setAdminDb(kvUrl, kvToken, { ...admin, homepagePhotos: cleaned });
+  return { status: 200, json: { success: true, homepagePhotos: cleaned } };
 }
 
 function isValidBooking(b) {
@@ -180,7 +199,7 @@ export default async function handler(req, res) {
         return res.status(200).json({
           bookings: scopeBookingsForSession(Array.from(bookingsMap.values()), session),
           salons: sanitizedSalons,
-          admin: { username: admin.username }
+          admin: { username: admin.username, homepagePhotos: admin.homepagePhotos || [] }
         });
       }
 
@@ -203,6 +222,10 @@ export default async function handler(req, res) {
 
         if (newData && newData.action === 'submit_review') {
           const r = await handleSubmitReview(newData, kvUrl, kvToken, req);
+          return res.status(r.status).json(r.json);
+        }
+        if (newData && newData.action === 'update_homepage_photos') {
+          const r = await handleUpdateHomepagePhotos(newData, kvUrl, kvToken, req);
           return res.status(r.status).json(r.json);
         }
 
