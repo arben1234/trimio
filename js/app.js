@@ -4279,14 +4279,23 @@ async function boot(){
     const f=formatItalianPhone(e.target.value);
     e.target.value=f;custData.phone=f;
   });
-  $('hpAdminBtn')?.addEventListener('click',()=>{ loginSalonContext = null; loginRoleContext = null; showView('vLogin'); });
+  // An already-authenticated admin (the only session that ever sees
+  // vHome in the first place) clicking "Accesso Admin" must go straight
+  // to their dashboard — showing them the vLogin marketing pitch for a
+  // product they already run, with their own credentials autofilled
+  // below it, reads as broken rather than as a login screen.
+  const goToAdminEntry = () => {
+    if (SESSION && SESSION.role === 'admin') { showView('vDash'); initDash(); }
+    else { loginSalonContext = null; loginRoleContext = null; showView('vLogin'); }
+  };
+  $('hpAdminBtn')?.addEventListener('click', goToAdminEntry);
   // Desktop homepage nav bar (hidden on mobile — see css) — jumps to the
   // matching section already on the page rather than duplicating them.
   $('hpNavBrand')?.addEventListener('click', () => window.scrollTo({top:0, behavior:'smooth'}));
   $('hpNavHow')?.addEventListener('click', () => $('hpHowItWorks')?.scrollIntoView({behavior:'smooth', block:'start'}));
   $('hpNavSaloni')?.addEventListener('click', () => $('hpSalonList')?.scrollIntoView({behavior:'smooth', block:'start'}));
   $('hpNavContact')?.addEventListener('click', () => $('hpContact')?.scrollIntoView({behavior:'smooth', block:'start'}));
-  $('hpNavAdmin')?.addEventListener('click', () => { loginSalonContext = null; loginRoleContext = null; showView('vLogin'); });
+  $('hpNavAdmin')?.addEventListener('click', goToAdminEntry);
   $('gear').addEventListener('click',()=>{ loginSalonContext = custSalon ? custSalon.id : null; loginRoleContext = null; showView('vLogin'); });
   $('toStaff').addEventListener('click',()=>{ loginSalonContext = custSalon ? custSalon.id : null; loginRoleContext = null; showView('vLogin'); });
   $('toCustomer').addEventListener('click',()=>{
