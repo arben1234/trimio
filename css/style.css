@@ -1339,4 +1339,14 @@ body{
   .app:has(#vDash.on){max-width:900px;width:92vw;}
   #vDash .d-top{padding-left:28px;padding-right:28px;}
   #vDash .d-pad{padding-left:28px;padding-right:28px;}
+
+  /* Customer booking flow: still the same phone-card-in-a-void problem,
+     but unlike the homepage/dashboard this is a linear wizard, not
+     something meant to be browsed wide — a moderate centered widget
+     reads better than stretching a single-column form edge to edge.
+     The one thing genuinely worth the extra width is letting the
+     barber selection breathe as a small grid instead of one stacked
+     column. */
+  .app:has(#vCustomer.on){max-width:640px;width:90vw;}
+  #vCustomer .barber-grid{grid-template-columns:repeat(auto-fit,minmax(240px,1fr));}
 }
