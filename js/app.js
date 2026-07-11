@@ -2026,7 +2026,11 @@ function renderCustStep(){
   }
 }
 
-function custNext(){if(!validateCust())return;if(custStep===3){doSubmit();return;}custStep++;renderCustStep();}
+// clearErr() here, not just inside renderCustStep(): the final step calls
+// doSubmit() instead of renderCustStep() on success, so a stale error from
+// an earlier failed attempt on the SAME step (e.g. "numero non valido")
+// was never hidden once the customer fixed it and the booking went through.
+function custNext(){if(!validateCust())return;clearErr('cErr');if(custStep===3){doSubmit();return;}custStep++;renderCustStep();}
 function custBack(){if(custStep>0){custStep--;renderCustStep();}}
 
 function validateCust(){
