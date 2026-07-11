@@ -3511,7 +3511,13 @@ function renderStats(){
 
 function renderAdminStats(){
   // Admin: panoramica di tutti i saloni, per il periodo selezionato
-  const allBks=STATE.bookings.filter(b=>b.status!=='cancelled');
+  // Bookings whose salonId no longer matches any existing salon (leftover
+  // from an old/incomplete deletion) must never count here — they used to
+  // inflate the top KPI totals while staying invisible in "Riepilogo per
+  // salone" below (which only ever iterates STATE.salons), so the listed
+  // rows silently didn't add up to the stated total.
+  const salonIds=new Set(STATE.salons.map(s=>s.id));
+  const allBks=STATE.bookings.filter(b=>b.status!=='cancelled'&&salonIds.has(b.salonId));
   const filtered=filterByPeriod(allBks);                     // prenotati (tutti i saloni)
   const served=filtered.filter(b=>b.status==='completed');   // serviti — solo confermati "Fatto"
   const servedRev=served.reduce((s,b)=>s+(b.price||0),0);    // incasso reale, solo chi ha ricevuto il servizio
