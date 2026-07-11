@@ -1556,7 +1556,12 @@ function mergeIntervals(busy){
 // orario (a step di minuti liberi) può essere proposto/validato.
 function freeRangesFor(salon,workerId,iso,durMin){
   const worker=(salon.workers||[]).find(x=>x.id===workerId);
-  if(worker&&isWeeklyOff(worker,iso))return[];
+  // isOnVacation was checked for the barber-card badge and the "find another
+  // barber" fallback, but never here — the actual date/time grid only ever
+  // looked at the weekly rest day, so a vacation range showed every day in
+  // it as fully bookable except whichever ones happened to also land on the
+  // weekly day off (pure coincidence, not the vacation dates doing anything).
+  if(worker&&(isWeeklyOff(worker,iso)||isOnVacation(worker,iso)))return[];
   const mins=((salon&&salon.timeSlots)||DEFAULT_SLOTS).map(timeToMin).filter(v=>v!==null);
   const openMin=Math.min(...mins),lastStart=Math.max(...mins);
   const merged=mergeIntervals(busyIntervalsFor(salon.id,iso,workerId));
