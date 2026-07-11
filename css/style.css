@@ -639,6 +639,12 @@ body{background:#f1f5f9;min-height:100vh;display:flex;align-items:center;justify
 .period-row{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;}
 .period-btn{padding:8px 14px;border:2px solid #e8e8e8;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;background:#fff;font-family:inherit;}
 .period-btn.active{background:#000;color:#fff;border-color:#000;}
+/* Flex items default to min-width:auto, not 0 — a native <input type="date">'s
+   intrinsic content width can exceed what's actually available next to its
+   sibling + the "Applica" button on a narrow phone, pushing the whole row
+   (and the page) into horizontal overflow instead of shrinking. */
+#customPeriod input[type="date"]{min-width:0;flex:1;}
+#customPeriod #applyCustom{flex-shrink:0;}
 /* subsection label */
 .sub-sec-h{font-size:13px;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:.5px;margin:20px 0 10px;padding-top:10px;border-top:1px solid #eee;}
 .sub-sec-h:first-child{border-top:none;margin-top:0;padding-top:0;}
