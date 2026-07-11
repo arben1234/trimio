@@ -118,6 +118,18 @@ function isValidSalonsArray(salons) {
 // their vacation or on their weekly day off.
 function isOnVacation(w, iso) { return !!(w.vacFrom && w.vacTo && iso >= w.vacFrom && iso <= w.vacTo); }
 function isWeeklyOff(w, iso) { return Array.isArray(w.offDays) && w.offDays.includes(new Date(iso + 'T00:00:00').getDay()); }
+// Same gap as vacation/weekly-off above, but for the worker's daily lunch
+// break (breakFrom/breakTo) — the UI hides these slots from the customer,
+// but a request posted directly to this endpoint could still claim one.
+function overlapsBreak(w, nb, salon) {
+  if (!w || !w.breakFrom || !w.breakTo) return false;
+  const bs = timeToMin(w.breakFrom), be = timeToMin(w.breakTo);
+  if (bs === null || be === null || be <= bs) return false;
+  const start = timeToMin(nb.time);
+  if (start === null) return false;
+  const end = start + bookingDurMin(nb, salon);
+  return start < be && end > bs;
+}
 
 // ---- Duration-aware overlap detection (mirrors js/app.js) ----
 // A booking occupies [start, start+service duration): a 40-min service at
@@ -270,7 +282,7 @@ export default async function handler(req, res) {
               if (nb.status !== 'cancelled') {
                 const salonForVac = salonsForDur.find(s => s.id === nb.salonId);
                 const worker = salonForVac && (salonForVac.workers || []).find(w => w.id === nb.workerId);
-                if (worker && (isOnVacation(worker, nb.dateISO) || isWeeklyOff(worker, nb.dateISO))) {
+                if (worker && (isOnVacation(worker, nb.dateISO) || isWeeklyOff(worker, nb.dateISO) || overlapsBreak(worker, nb, salonForVac))) {
                   conflicts.push({ id: nb.id, salonId: nb.salonId, workerId: nb.workerId, dateISO: nb.dateISO, time: nb.time });
                   continue;
                 }
@@ -386,6 +398,35 @@ export default async function handler(req, res) {
               // real cross-tenant tampering hole, not just a theoretical one.
               const isAuthorizedEditor = session && (session.role === 'admin'
                 || (session.role === 'owner' && session.salonId === incoming.id));
+              // A barber sets their own lunch break / weekly rest days /
+              // vacation dates from "Le mie Pause" (saveBreak() in js/app.js)
+              // through this same bulk endpoint, but was never in the
+              // allowlist above — every save silently hit the `continue`
+              // below, so breakFrom/breakTo/offDays never actually reached
+              // the database and the break-time booking guard above always
+              // saw an unset break. Scoped narrowly to just those fields on
+              // their OWN worker record, never the rest of the salon.
+              const isBarberSelfEditor = !isAuthorizedEditor && existing && session
+                && session.role === 'barber' && session.salonId === incoming.id;
+              if (isBarberSelfEditor) {
+                const existingWorker = (existing.workers || []).find(w => w.id === session.workerId);
+                const incomingWorker = (incoming.workers || []).find(w => w.id === session.workerId);
+                if (existingWorker && incomingWorker) {
+                  const mergedWorker = {
+                    ...existingWorker,
+                    breakFrom: incomingWorker.breakFrom,
+                    breakTo: incomingWorker.breakTo,
+                    offDays: incomingWorker.offDays,
+                    vacFrom: incomingWorker.vacFrom,
+                    vacTo: incomingWorker.vacTo,
+                  };
+                  salonMap.set(incoming.id, {
+                    ...existing,
+                    workers: existing.workers.map(w => w.id === session.workerId ? mergedWorker : w),
+                  });
+                }
+                continue;
+              }
               if (!isAuthorizedEditor) {
                 console.warn('[SYNC] Rejected unauthorized salon write for', incoming.id);
                 continue; // existing record (or absence of one) is left untouched
