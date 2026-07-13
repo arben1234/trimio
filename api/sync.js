@@ -5,8 +5,23 @@ import {
   acquireBarberDayLock, releaseBarberDayLock, checkRateLimit,
   ensureMigratedV2, getAdminDb, setAdminDb
 } from '../lib/kv.js';
-import { sendCustomerText } from '../lib/sms.js';
+import { sendCustomerText, toE164 } from '../lib/sms.js';
 import { handleLogin, handleChangePassword, getVerifiedSession, getClientIp } from '../lib/auth.js';
+
+// Mirrors js/app.js's DEFAULT_SERVICES — a brand-new self-signed-up salon
+// needs a starter service list server-side too, same as an admin-created one.
+const DEFAULT_SERVICES = [
+  { id: 'sv0', name: 'Taglio', dur: '30 min', price: 15 },
+  { id: 'sv1', name: 'Barba', dur: '20 min', price: 12 },
+  { id: 'sv2', name: 'Taglio + Barba', dur: '45 min', price: 25 },
+  { id: 'sv3', name: 'Shampoo + Taglio', dur: '40 min', price: 20 }
+];
+
+function romeYearMonth() {
+  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Rome', year: 'numeric', month: '2-digit' }).formatToParts(new Date());
+  const get = t => parts.find(p => p.type === t).value;
+  return `${get('year')}-${get('month')}`;
+}
 
 // Every booking carries the customer's name + phone. Sending that back
 // unscoped (as this endpoint used to) meant any anonymous visitor — or any
@@ -97,6 +112,90 @@ async function handleUpdateHomepagePhotos(body, kvUrl, kvToken, req) {
   const admin = await getAdminDb(kvUrl, kvToken);
   await setAdminDb(kvUrl, kvToken, { ...admin, homepagePhotos: cleaned });
   return { status: 200, json: { success: true, homepagePhotos: cleaned } };
+}
+
+// Self-service salon signup ("Registra il tuo salone" on the public
+// homepage) — the ONLY path where a genuinely new salon can be created
+// without an admin session (the generic bulk salons[] save further below
+// rejects unauthenticated writes for ids that don't already exist yet, by
+// design — see isAuthorizedEditor). New signups are created inactive and
+// pending admin review; the existing Attiva button (api/toggle-salon.js) is
+// what brings them live, same trust boundary as an admin-created salon, just
+// with the initial data entry self-served instead of typed by admin.
+async function handleSignupSalon(body, kvUrl, kvToken, req) {
+  const ownerName = typeof body.ownerName === 'string' ? body.ownerName.trim() : '';
+  const password = typeof body.password === 'string' ? body.password : '';
+  const salonName = typeof body.salonName === 'string' ? body.salonName.trim() : '';
+  const contractSignedName = typeof body.contractSignedName === 'string' ? body.contractSignedName.trim() : '';
+
+  if (ownerName.length < 2) return { status: 400, json: { success: false, error: 'invalid_owner_name' } };
+  if (password.length < 4) return { status: 400, json: { success: false, error: 'invalid_password' } };
+  if (salonName.length < 2) return { status: 400, json: { success: false, error: 'invalid_salon_name' } };
+  if (!body.contractAccepted || contractSignedName.length < 2) {
+    return { status: 400, json: { success: false, error: 'contract_not_accepted' } };
+  }
+
+  const ownerUsername = toE164(body.ownerPhone);
+  if (!ownerUsername) return { status: 400, json: { success: false, error: 'invalid_phone' } };
+
+  const rl = await checkRateLimit(kvUrl, kvToken, `ratelimit:signup:${getClientIp(req)}`, 5, 3600);
+  if (!rl.allowed) return { status: 429, json: { success: false, error: 'rate_limited' } };
+
+  const salons = await getSalonsDb(kvUrl, kvToken);
+  if (salons.some(s => s.ownerUsername === ownerUsername)) {
+    return { status: 409, json: { success: false, error: 'phone_already_registered' } };
+  }
+
+  const baseSlug = salonName.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'SALONE';
+  let slug = baseSlug, n = 2;
+  while (salons.some(s => s.slug === slug)) slug = `${baseSlug}_${n++}`;
+
+  const declaredWorkerCount = Math.max(1, Math.min(200, Math.round(Number(body.declaredWorkerCount)) || 1));
+
+  salons.push({
+    id: 'salon' + Date.now(),
+    name: salonName, slug,
+    city: '', address: String(body.address || '').trim(), phone: String(body.phone || '').trim(), promo: '',
+    bgImage: '', gallery: [], themeColor: '#e5c158',
+    closedDays: [], bookingDays: 30,
+    services: DEFAULT_SERVICES.map(s => ({ ...s })),
+    workers: [],
+    ownerUsername, ownerPassword: password,
+    ownerName, ownerPhone: ownerUsername, email: String(body.email || '').trim(),
+    inactive: true,
+    billing: {
+      declaredWorkerCount,
+      paidThroughMonth: romeYearMonth(), // first partial month is free
+      pendingApproval: true,
+      contractSignedAt: new Date().toISOString(),
+      contractSignedName
+    }
+  });
+  await setSalonsDb(kvUrl, kvToken, salons);
+  return { status: 200, json: { success: true } };
+}
+
+// Admin-only: confirms this month's fee was received (payment is manual for
+// now — no bank/card processor wired up yet). Also reactivates a salon that
+// had been auto-suspended by the daily billing check (api/daily-health-check.js),
+// but never touches an `inactive` flip the admin made for an unrelated reason.
+async function handleMarkSalonPaid(body, kvUrl, kvToken, req) {
+  const session = getVerifiedSession(req);
+  if (!session || session.role !== 'admin') return { status: 403, json: { success: false, error: 'forbidden' } };
+  if (!body.salonId) return { status: 400, json: { success: false, error: 'missing_fields' } };
+
+  const salons = await getSalonsDb(kvUrl, kvToken);
+  const salon = salons.find(s => s.id === body.salonId);
+  if (!salon) return { status: 404, json: { success: false, error: 'salon_not_found' } };
+
+  salon.billing = salon.billing || {};
+  salon.billing.paidThroughMonth = romeYearMonth();
+  if (salon.billing.suspendedByBilling) {
+    salon.billing.suspendedByBilling = false;
+    salon.inactive = false;
+  }
+  await setSalonsDb(kvUrl, kvToken, salons);
+  return { status: 200, json: { success: true, paidThroughMonth: salon.billing.paidThroughMonth } };
 }
 
 function isValidBooking(b) {
@@ -238,6 +337,14 @@ export default async function handler(req, res) {
         }
         if (newData && newData.action === 'update_homepage_photos') {
           const r = await handleUpdateHomepagePhotos(newData, kvUrl, kvToken, req);
+          return res.status(r.status).json(r.json);
+        }
+        if (newData && newData.action === 'signup_salon') {
+          const r = await handleSignupSalon(newData, kvUrl, kvToken, req);
+          return res.status(r.status).json(r.json);
+        }
+        if (newData && newData.action === 'mark_salon_paid') {
+          const r = await handleMarkSalonPaid(newData, kvUrl, kvToken, req);
           return res.status(r.status).json(r.json);
         }
 

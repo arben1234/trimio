@@ -49,6 +49,15 @@ export default async function handler(req, res) {
       return res.status(404).json({ error: 'Salon not found', salonId });
     }
     salon.inactive = !!setInactive;
+    // Reactivating (this is also the "approve a pending self-signup" action)
+    // clears any billing-driven pending/suspended flags too — Attiva is the
+    // one place admin approval/reactivation happens, whatever the reason the
+    // salon was inactive. Deactivating for an unrelated reason leaves billing
+    // fields untouched.
+    if (!salon.inactive && salon.billing) {
+      salon.billing.pendingApproval = false;
+      salon.billing.suspendedByBilling = false;
+    }
     console.log(`[TOGGLE] Found salon "${salon.name}", set inactive=${salon.inactive}`);
 
     await setSalonsDb(kvUrl, kvToken, salons);

@@ -132,7 +132,7 @@ new vm.Script(`
     isOnVacation, freqTag, urlBase64ToUint8Array, isValidItalianPhone,
     validateCust, custData, doSubmit, custNext,
     doLogin, getSession: function(){ return SESSION; },
-    filterByPeriod
+    filterByPeriod, feeForWorkerCount
   };
   var __uiCallCounts = { showView:0, initDash:0, initPush:0 };
   showView = function(){ __uiCallCounts.showView++; };
@@ -189,6 +189,18 @@ ok(X.isValidItalianPhone('02-1234567'), 'isValidItalianPhone() accepts dashes as
 ok(!X.isValidItalianPhone(''), 'isValidItalianPhone() rejects an empty string');
 ok(!X.isValidItalianPhone('abc'), 'isValidItalianPhone() rejects non-numeric input');
 ok(!X.isValidItalianPhone('123'), 'isValidItalianPhone() rejects an implausibly short number');
+
+/* ================================================================
+   MONTHLY BILLING FEE TIERS (self-signup salons)
+================================================================ */
+eq(X.feeForWorkerCount(1), 50, 'feeForWorkerCount(1) is €50 (1-5 tier)');
+eq(X.feeForWorkerCount(5), 50, 'feeForWorkerCount(5) is €50 (1-5 tier)');
+eq(X.feeForWorkerCount(6), 100, 'feeForWorkerCount(6) is €100 (6-10 tier)');
+eq(X.feeForWorkerCount(10), 100, 'feeForWorkerCount(10) is €100 (6-10 tier)');
+eq(X.feeForWorkerCount(11), 150, 'feeForWorkerCount(11) is €150 (11-15 tier)');
+eq(X.feeForWorkerCount(15), 150, 'feeForWorkerCount(15) is €150 (11-15 tier)');
+eq(X.feeForWorkerCount(16), 200, 'feeForWorkerCount(16) extrapolates to €200 (16-20 tier)');
+eq(X.feeForWorkerCount(0), 50, 'feeForWorkerCount(0) floors to the 1-5 tier');
 
 /* ================================================================
    5. BOOKING HELPERS

@@ -141,6 +141,11 @@ const DEFAULT_SERVICES=[
   {id:'sv3',name:'Shampoo + Taglio',dur:'40 min',price:20}
 ];
 
+// Self-signup salons pay a monthly fee tiered by barber count: €50 (1-5),
+// €100 (6-10), €150 (11-15), same +€50-per-5-barber band extrapolated
+// beyond that. Mirrored server-side in api/daily-health-check.js.
+function feeForWorkerCount(n){return Math.ceil(Math.max(Number(n)||1,1)/5)*50;}
+
 /* ======== STATE ======== */
 let STATE={
   admin:{username:'admin',password:'admin123',homepagePhotos:[]},
@@ -3658,16 +3663,33 @@ function printStatsExport(){
 /* ---- SALONI (solo Livello 1 admin) ---- */
 function renderSaloni(){
   let html='';
-  STATE.salons.forEach(s=>{
+  const sorted=STATE.salons.slice().sort((a,b)=>{
+    const aPending=(a.billing&&a.billing.pendingApproval)?1:0;
+    const bPending=(b.billing&&b.billing.pendingApproval)?1:0;
+    return bPending-aPending;
+  });
+  sorted.forEach(s=>{
     const tot=STATE.bookings.filter(b=>b.salonId===s.id&&b.status!=='cancelled').length;
     const locationString = s.address ? `#${s.slug} · ${s.city||'—'} (${s.address})` : `#${s.slug} · ${s.city||'—'}`;
     const statusBtn = `
       <button class="status-toggle-btn" data-stoggle="${s.id}" style="padding:6px 12px; border-radius:10px; border:none; font-size:11px; font-weight:800; cursor:pointer; background:${s.inactive ? '#ef4444' : '#10b981'}; color:#fff; transition:all .15s;">
         ${s.inactive ? 'Inattivo' : 'Attivo'}
       </button>`;
+    let pendingBadge='',billingPill='';
+    if(s.billing){
+      if(s.billing.pendingApproval){
+        pendingBadge=`<span style="padding:3px 8px;border-radius:8px;font-size:10px;font-weight:800;background:#f59e0b;color:#fff;margin-left:6px;">IN ATTESA</span>`;
+      }else{
+        const nowMonth=new Date().toISOString().slice(0,7);
+        const paid=s.billing.paidThroughMonth>=nowMonth;
+        const label=paid?'PAGATO':(s.billing.suspendedByBilling?'SOSPESO':'IN SCADENZA');
+        const color=paid?'#10b981':(s.billing.suspendedByBilling?'#ef4444':'#f59e0b');
+        billingPill=`<span style="padding:3px 8px;border-radius:8px;font-size:10px;font-weight:800;background:${color};color:#fff;">${label}</span>${!paid?`<button class="iconbtn" data-markpaid="${s.id}" title="Segna come pagato">💶</button>`:''}`;
+      }
+    }
     html+=`<div class="salon-item">
       <div style="width:40px;height:40px;border-radius:12px;background:#000;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px;flex-shrink:0">${initials(s.name)}</div>
-      <div class="si-info"><div class="si-name">${s.name}</div><div class="si-slug">${locationString}</div><div class="si-stats">${s.workers.length} barbieri · ${tot} prenotazioni</div></div>
+      <div class="si-info"><div class="si-name">${s.name}${pendingBadge}</div><div class="si-slug">${locationString}</div><div class="si-stats">${s.workers.length} barbieri · ${tot} prenotazioni ${billingPill}</div></div>
       <div class="si-btns" style="display:flex; align-items:center; gap:8px;">
         ${statusBtn}
         <button class="iconbtn" data-sedit="${s.id}">✏️</button>
@@ -3676,6 +3698,23 @@ function renderSaloni(){
     </div>`;
   });
   $('saloniList').innerHTML=html||`<div class="empty"><div class="empty-t">Nessun salone</div></div>`;
+  $('saloniList').querySelectorAll('[data-markpaid]').forEach(b=>b.addEventListener('click',async()=>{
+    const s=STATE.salons.find(x=>x.id===b.dataset.markpaid);if(!s)return;
+    try{
+      const resp=await fetch('/api/sync',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify({action:'mark_salon_paid',salonId:s.id})});
+      const r=await resp.json().catch(()=>({}));
+      if(r.success){
+        s.billing=s.billing||{};
+        s.billing.paidThroughMonth=r.paidThroughMonth;
+        s.billing.suspendedByBilling=false;
+        s.inactive=false;
+        try{localStorage.setItem(SK,JSON.stringify(STATE));}catch(e){}
+        renderSaloni();
+      }else{
+        alert('Errore: '+(r.error||'sconosciuto'));
+      }
+    }catch(e){alert('Errore di connessione: '+e.message);}
+  }));
   $('saloniList').querySelectorAll('[data-sedit]').forEach(b=>b.addEventListener('click',()=>openSalonModal(b.dataset.sedit)));
   $('saloniList').querySelectorAll('[data-stoggle]').forEach(b=>b.addEventListener('click',async()=>{
     const s = STATE.salons.find(x => x.id === b.dataset.stoggle);
@@ -3695,6 +3734,7 @@ function renderSaloni(){
         const result = await resp.json();
         if (result.success) {
           s.inactive = newInactive;
+          if (!newInactive && s.billing) { s.billing.pendingApproval = false; s.billing.suspendedByBilling = false; }
           // Also save to localStorage
           try { localStorage.setItem(SK, JSON.stringify(STATE)); } catch(e){}
           renderSaloni();
@@ -3736,6 +3776,80 @@ function renderSaloni(){
     renderSaloni();
   }));
 }
+/* ---- REGISTRAZIONE SALONE (self-signup dalla vLogin pubblica) ---- */
+let suStep=0;
+const SU_CONTRACT_HTML = `
+  <b>CONTRATTO DI COLLABORAZIONE — TRIMIO</b><br>
+  <i>(Modello standard — non sostituisce una consulenza legale.)</i><br><br>
+  <b>1. Oggetto.</b> TRIMIO fornisce al Salone l'accesso alla piattaforma software di gestione prenotazioni online, inclusa assistenza tecnica e manutenzione della piattaforma 24 ore su 24, 7 giorni su 7.<br><br>
+  <b>2. Canone mensile.</b> Il Salone corrisponde un canone mensile calcolato in base al numero di barbieri registrati: €50 (1-5 barbieri), €100 (6-10), €150 (11-15), con incrementi proporzionali oltre questa soglia.<br><br>
+  <b>3. Termini di pagamento.</b> Il canone è dovuto il giorno 1 di ogni mese. Il primo mese di utilizzo, dalla data di registrazione alla fine dello stesso mese solare, è gratuito.<br><br>
+  <b>4. Mancato pagamento.</b> Se il pagamento non risulta registrato entro il giorno 5 del mese, il servizio viene sospeso; il Salone riceve un promemoria via email ogni giorno dal giorno 2 fino alla sospensione o al pagamento.<br><br>
+  <b>5. Riattivazione.</b> Il servizio viene riattivato non appena TRIMIO conferma la ricezione del pagamento.<br><br>
+  <b>6. Durata e recesso.</b> Il contratto si rinnova mensilmente; il Salone può recedere in qualsiasi momento con effetto dalla fine del mese in corso.<br><br>
+  <b>7. Trattamento dati.</b> Il Salone è responsabile dell'esattezza dei dati inseriti; TRIMIO tratta i dati dei clienti finali nel rispetto della normativa applicabile.
+`;
+function renderSuStep(){
+  clearErr('suErr');
+  ['suStep0','suStep1','suStep2'].forEach((id,i)=>{const el=$(id);if(el)el.style.display=(i===suStep?'block':'none');});
+}
+function suUpdateFeePreview(){
+  const n=parseInt($('suWorkerCount').value)||1;
+  $('suFeePreview').textContent='€'+feeForWorkerCount(n);
+}
+function suGoto(step){
+  if(step>suStep){
+    if(suStep===0){
+      const name=$('suOwnerName').value.trim(),pwd=$('suPassword').value;
+      if(name.length<2)return showErr('suErr','Inserisci il tuo nome e cognome');
+      const formatted=formatItalianPhone($('suOwnerPhone').value.trim());
+      if(!isValidItalianPhone(formatted))return showErr('suErr','Numero di telefono non valido. Es. +39 345 678 9012');
+      $('suOwnerPhone').value=formatted;
+      if(pwd.length<4)return showErr('suErr','La password deve avere almeno 4 caratteri');
+    }
+    if(suStep===1){
+      if($('suSalonName').value.trim().length<2)return showErr('suErr','Inserisci il nome del salone');
+    }
+  }
+  suStep=step;renderSuStep();
+}
+async function suSubmit(){
+  if(!$('suAccept').checked)return showErr('suErr','Devi accettare le condizioni del contratto');
+  const ownerName=$('suOwnerName').value.trim();
+  const signName=$('suSignName').value.trim();
+  if(signName.length<2||signName.toLowerCase()!==ownerName.toLowerCase())return showErr('suErr','Il nome della firma deve corrispondere al nome inserito al passo 1');
+
+  const payload={
+    action:'signup_salon',
+    ownerName,
+    ownerPhone:$('suOwnerPhone').value.trim(),
+    password:$('suPassword').value,
+    salonName:$('suSalonName').value.trim(),
+    email:$('suEmail').value.trim(),
+    address:$('suAddress').value.trim(),
+    phone:$('suPhone').value.trim(),
+    declaredWorkerCount:parseInt($('suWorkerCount').value)||1,
+    contractSignedName:signName,
+    contractAccepted:true
+  };
+  $('suSubmit').disabled=true;
+  try{
+    const resp=await fetch('/api/sync',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const r=await resp.json().catch(()=>({}));
+    if(resp.ok&&r.success){
+      ['suStep0','suStep1','suStep2'].forEach(id=>$(id).style.display='none');
+      $('suStepDone').style.display='block';
+    }else{
+      const msgs={phone_already_registered:'Questo numero di telefono è già registrato.',invalid_phone:'Numero di telefono non valido.',rate_limited:'Troppi tentativi, riprova più tardi.'};
+      showErr('suErr',msgs[r.error]||'Errore durante l\'invio. Riprova.');
+    }
+  }catch(e){
+    showErr('suErr','Errore di connessione. Riprova.');
+  }finally{
+    $('suSubmit').disabled=false;
+  }
+}
+
 let salonEditId=null;
 // Galleria del salone in modifica: copia di lavoro finché non si salva.
 let smGalleryTemp=[];
@@ -4479,6 +4593,23 @@ async function boot(){
   $('vLoginAdminTrigger')?.addEventListener('click', () => $('vLoginFormOverlay')?.classList.add('show'));
   $('vLoginFormOv')?.addEventListener('click', () => $('vLoginFormOverlay')?.classList.remove('show'));
   $('loginModalClose')?.addEventListener('click', () => $('vLoginFormOverlay')?.classList.remove('show'));
+
+  $('vLoginSignupTrigger')?.addEventListener('click', () => {
+    suStep=0;renderSuStep();
+    if($('suContractText'))$('suContractText').innerHTML=SU_CONTRACT_HTML;
+    if($('suAccept'))$('suAccept').checked=false;
+    ['suStep0','suStep1','suStep2'].forEach((id,i)=>{const el=$(id);if(el)el.style.display=(i===0?'block':'none');});
+    if($('suStepDone'))$('suStepDone').style.display='none';
+    $('vLoginSignupOverlay')?.classList.add('show');
+  });
+  $('vLoginSignupOv')?.addEventListener('click', () => $('vLoginSignupOverlay')?.classList.remove('show'));
+  $('signupModalClose')?.addEventListener('click', () => $('vLoginSignupOverlay')?.classList.remove('show'));
+  $('suNext0')?.addEventListener('click', () => suGoto(1));
+  $('suBack1')?.addEventListener('click', () => suGoto(0));
+  $('suNext1')?.addEventListener('click', () => suGoto(2));
+  $('suBack2')?.addEventListener('click', () => suGoto(1));
+  $('suWorkerCount')?.addEventListener('input', suUpdateFeePreview);
+  $('suSubmit')?.addEventListener('click', suSubmit);
   $('gear').addEventListener('click',()=>{ loginSalonContext = custSalon ? custSalon.id : null; loginRoleContext = null; showView('vLogin'); });
   $('toStaff').addEventListener('click',()=>{ loginSalonContext = custSalon ? custSalon.id : null; loginRoleContext = null; showView('vLogin'); });
   $('toCustomer').addEventListener('click',()=>{

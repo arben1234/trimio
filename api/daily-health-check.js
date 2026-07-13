@@ -1,7 +1,13 @@
 import webPush from 'web-push';
 import { put, list, del } from '@vercel/blob';
-import { getAllBookings, getSalonsDb, getAdminDb, getBlob, setBlob } from '../lib/kv.js';
+import { getAllBookings, getSalonsDb, setSalonsDb, getAdminDb, getBlob, setBlob } from '../lib/kv.js';
 import { twilioConfigured } from '../lib/sms.js';
+import { sendEmail } from '../lib/email.js';
+
+// Mirrors js/app.js's feeForWorkerCount — self-signup salons pick a fee tier
+// by declared/actual barber count: €50 (1-5), €100 (6-10), €150 (11-15), and
+// the same +€50-per-5-barber band extrapolated beyond that.
+function feeForWorkerCount(n) { return Math.ceil(Math.max(Number(n) || 1, 1) / 5) * 50; }
 
 const VAPID_PUBLIC_KEY = 'BLLKr1SroPRHybfSN2OunQUzy6yd5hggq2fmAmT90LL32Pgyaa_VkoESjUq3DGk0bgD2a5tb17bSZHc2heLJXGo';
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY?.trim();
@@ -187,6 +193,47 @@ export default async function handler(req, res) {
     }
   } catch (e) {
     problems.push(`Backup giornaliero fallito: ${e.message}`);
+  }
+
+  // 6. Monthly billing for self-signed-up salons. Every salon with a
+  // `billing` object (only self-service signups have one — admin-created
+  // salons are untouched by this) that isn't still pending admin approval
+  // gets a daily warning email from the 2nd of the month if that month's fee
+  // isn't marked paid, and is auto-suspended (same `inactive` flag the admin
+  // toggle uses) if still unpaid from the 6th onward. `lastWarningEmailSentDate`
+  // gates this to once/day per salon even if this endpoint runs more than
+  // once the same day (manual retrigger, etc.) — same idempotency shape as
+  // health_check_notified_date below.
+  try {
+    const todayISO = romeTodayISO();
+    const currentMonth = todayISO.slice(0, 7);
+    const dayOfMonth = Number(todayISO.slice(8, 10));
+    let billingChanged = false;
+    for (const salon of salons) {
+      if (!salon.billing || salon.billing.pendingApproval) continue;
+      if (salon.billing.paidThroughMonth >= currentMonth) continue; // paid up
+
+      if (dayOfMonth >= 2 && dayOfMonth <= 5) {
+        if (salon.billing.lastWarningEmailSentDate === todayISO) continue;
+        const fee = feeForWorkerCount(Math.max((salon.workers || []).length, salon.billing.declaredWorkerCount || 0));
+        await sendEmail(salon.email, 'TRIMIO — Pagamento canone mensile in sospeso',
+          `<p>Ciao,</p><p>Il canone mensile di €${fee} per <b>${salon.name}</b> risulta non ancora saldato per ${currentMonth}. ` +
+          `Il servizio verrà sospeso se il pagamento non risulta entro il giorno 5 del mese.</p>`);
+        salon.billing.lastWarningEmailSentDate = todayISO;
+        billingChanged = true;
+      } else if (dayOfMonth >= 6 && !salon.inactive) {
+        salon.inactive = true;
+        salon.billing.suspendedByBilling = true;
+        await sendEmail(salon.email, 'TRIMIO — Servizio sospeso per mancato pagamento',
+          `<p>Ciao,</p><p>Il servizio TRIMIO per <b>${salon.name}</b> è stato sospeso per mancato pagamento del canone di ${currentMonth}. ` +
+          `Contattaci non appena effettuato il pagamento per riattivarlo.</p>`);
+        billingChanged = true;
+      }
+    }
+    report.billingChecked = salons.filter(s => s.billing && !s.billing.pendingApproval).length;
+    if (billingChanged) await setSalonsDb(kvUrl, kvToken, salons);
+  } catch (e) {
+    problems.push(`Controllo fatturazione fallito: ${e.message}`);
   }
 
   // Notify every admin device — only when something is wrong, and only ONCE

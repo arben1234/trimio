@@ -537,6 +537,62 @@
         </div>
       </div>
 
+      <!-- Self-service salon signup — "Registra il tuo salone" in the footer
+           below opens this. New salons are created inactive/pending; an
+           admin approves them via the existing Attiva button in Saloni. -->
+      <div class="login-form-overlay as-modal" id="vLoginSignupOverlay">
+        <div class="login-modal-ov" id="vLoginSignupOv"></div>
+        <div class="login-form-wrap" style="max-width:420px;">
+          <button type="button" class="login-modal-close" id="signupModalClose" aria-label="Chiudi">✕</button>
+          <div class="title" style="margin-top:10px">Registra il tuo salone</div>
+          <div class="err" id="suErr"></div>
+
+          <div id="suStep0">
+            <div class="login">
+              <div class="field"><label>Il tuo nome e cognome</label><input type="text" id="suOwnerName" placeholder="Mario Rossi"></div>
+              <div class="field"><label>Il tuo numero di telefono</label><input type="text" id="suOwnerPhone" placeholder="+39 345 678 9012"></div>
+              <div class="field"><label>Password</label><input type="password" id="suPassword" placeholder="Scegli una password"></div>
+              <button class="btn btn-main" id="suNext0">Avanti →</button>
+            </div>
+          </div>
+
+          <div id="suStep1" style="display:none">
+            <div class="login">
+              <div class="field"><label>Nome del salone</label><input type="text" id="suSalonName" placeholder="Barber Art"></div>
+              <div class="field"><label>Email del salone</label><input type="email" id="suEmail" placeholder="info@ilmiosalone.it"></div>
+              <div class="field"><label>Indirizzo</label><input type="text" id="suAddress" placeholder="Via Roma 1, Milano"></div>
+              <div class="field"><label>Telefono del salone</label><input type="text" id="suPhone" placeholder="+39 02 1234567"></div>
+              <div class="field"><label>Numero di barbieri</label><input type="number" id="suWorkerCount" min="1" value="1"></div>
+              <div style="font-size:13px; color:#a1a1aa; margin:-6px 0 4px;">Canone mensile stimato: <b id="suFeePreview" style="color:#e5c158;">€50</b>/mese</div>
+              <div style="display:flex; gap:10px;">
+                <button class="btn btn-ghost" id="suBack1" style="flex:1">← Indietro</button>
+                <button class="btn btn-main" id="suNext1" style="flex:1">Avanti →</button>
+              </div>
+            </div>
+          </div>
+
+          <div id="suStep2" style="display:none">
+            <div id="suContractText" style="max-height:220px; overflow-y:auto; font-size:12px; line-height:1.6; color:#d4d4d8; background:rgba(255,255,255,.06); border-radius:10px; padding:14px; margin-bottom:14px; text-align:left;"></div>
+            <div class="login">
+              <label style="display:flex; align-items:flex-start; gap:8px; font-size:12px; margin-bottom:10px; text-align:left; color:#d4d4d8;">
+                <input type="checkbox" id="suAccept" style="margin-top:3px;"> Ho letto e accetto le condizioni sopra riportate.
+              </label>
+              <div class="field"><label>Conferma nome e cognome (firma)</label><input type="text" id="suSignName" placeholder="Mario Rossi"></div>
+              <div style="display:flex; gap:10px;">
+                <button class="btn btn-ghost" id="suBack2" style="flex:1">← Indietro</button>
+                <button class="btn btn-main" id="suSubmit" style="flex:1">Invia richiesta</button>
+              </div>
+            </div>
+          </div>
+
+          <div id="suStepDone" style="display:none; text-align:center; padding:20px 0;">
+            <div style="font-size:40px; margin-bottom:12px;">✅</div>
+            <div style="font-weight:700; margin-bottom:8px; color:#fff;">Richiesta inviata!</div>
+            <div style="font-size:13px; color:#a1a1aa;">Il team TRIMIO esaminerà la tua richiesta a breve e ti contatterà per attivare il servizio.</div>
+          </div>
+        </div>
+      </div>
+
       <div class="global-footer" id="vLoginFooter" style="text-align: center; margin-top: 40px; padding: 32px 16px 24px; border-top: 1px solid #333; background: #111; color: #888;">
         <div style="font-family: 'Cinzel', serif; font-size: 15px; font-weight: 700; letter-spacing: 2px; color: #fff; margin-bottom: 8px;">
           TRIMIO <span style="color: #e5c158;">THE ART OF THE CUT</span> - ITALY
@@ -544,7 +600,7 @@
         <div class="hp-footer-contact">
           <a href="mailto:support@trimio.org">✉ support@trimio.org</a>
           <span class="hp-footer-sep">·</span>
-          <span>Hai un salone e vuoi entrare in TRIMIO? Scrivici.</span>
+          <button type="button" id="vLoginSignupTrigger" style="background:none;border:none;color:#e5c158;text-decoration:underline;cursor:pointer;font:inherit;padding:0;">Registra il tuo salone</button>
         </div>
         <div style="font-size: 11px; color: #666; line-height: 1.5; max-width: 380px; margin: 10px auto 0; letter-spacing: 0.2px;">
           © 2008-2026 Questo programma software è riservato e protetto da copyright. Non è consentita la sua ridistribuzione, riproduzione o copia non autorizzata.
@@ -1060,6 +1116,6 @@
      own "Save as PDF" print target produces a clean report. -->
 <div id="printableStats"></div>
 
-<script src="/js/app.min.js?v=20260713_0002"></script>
+<script src="/js/app.min.js?v=20260713_0003"></script>
 </body>
 </html>
