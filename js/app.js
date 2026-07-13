@@ -2812,7 +2812,9 @@ function navItems(){
   let items = [];
   // LIVELLO 1 — Admin
   if(r==='admin') {
+    const pendingCount = (STATE.salons||[]).filter(s=>s.billing&&s.billing.pendingApproval).length;
     items = [
+      {sec:'pending',   ic:'🆕',label:'Nuove Richieste'+(pendingCount?` (${pendingCount})`:'')},
       {sec:'saloni',    ic:'🏪',label:'Saloni'},
       {sec:'newSalon',  ic:'➕',label:'Nuovo Salone'},
       {sec:'home',      ic:'🏠',label:'Homepage'},
@@ -2878,12 +2880,12 @@ function buildNav(){
 
 function showSec(sec){
   curSec=sec;
-  ['secOggi','secCalendario','secProssimi','secClienti','secServizi','secDipendenti','secStats','secSaloni','secUtenti','secRecensioni']
+  ['secOggi','secCalendario','secProssimi','secClienti','secServizi','secDipendenti','secStats','secSaloni','secUtenti','secRecensioni','secPending']
     .forEach(id=>$(id).classList.remove('on'));
   const map={oggi:'secOggi',calendario:'secCalendario',prossimi:'secProssimi',clienti:'secClienti',
-    servizi:'secServizi',dipendenti:'secDipendenti',stats:'secStats',saloni:'secSaloni',utenti:'secUtenti',recensioni:'secRecensioni'};
+    servizi:'secServizi',dipendenti:'secDipendenti',stats:'secStats',saloni:'secSaloni',utenti:'secUtenti',recensioni:'secRecensioni',pending:'secPending'};
   const titles={oggi:'Oggi',calendario:'Calendario',prossimi:'Prossimi',clienti:'Clienti',
-    servizi:'Servizi & prezzi',dipendenti:'Dipendenti',stats:'Statistiche',saloni:'Saloni',utenti:'Utenti',recensioni:'Recensioni Ricevute'};
+    servizi:'Servizi & prezzi',dipendenti:'Dipendenti',stats:'Statistiche',saloni:'Saloni',utenti:'Utenti',recensioni:'Recensioni Ricevute',pending:'Nuove Richieste'};
   if(map[sec])$(map[sec]).classList.add('on');
   $('sideNav').querySelectorAll('.side-item').forEach(b=>b.classList.toggle('active',b.dataset.sec===sec));
   $('dTitle').textContent=titles[sec]||sec;
@@ -2954,6 +2956,7 @@ function renderDash(){
   else if(curSec==='stats')renderStats();
   else if(curSec==='saloni')renderSaloni();
   else if(curSec==='utenti')renderUtenti();
+  else if(curSec==='pending')renderPendingSaloni();
 }
 
 /* ---- OGGI ---- */
@@ -3658,6 +3661,55 @@ function printStatsExport(){
       </tbody>
     </table>`;
   window.print();
+}
+
+/* ---- NUOVE RICHIESTE (solo Livello 1 admin) ----
+   Coda dedicata per i saloni auto-registrati in attesa di approvazione —
+   separata dal generico toggle Attiva/Inattivo in "Saloni", che serve anche
+   a riattivare un salone sospeso per mancato pagamento e non farebbe
+   distinzione tra i due casi. Solo "Approva" da qui invia al proprietario
+   l'email con credenziali, link e QR code. */
+function renderPendingSaloni(){
+  const pending = STATE.salons.filter(s=>s.billing&&s.billing.pendingApproval);
+  if(!pending.length){
+    $('pendingSaloniList').innerHTML = `<div class="empty"><div class="empty-ic">✅</div><div class="empty-t">Nessuna nuova richiesta in attesa</div></div>`;
+    return;
+  }
+  $('pendingSaloniList').innerHTML = pending.map(s=>`
+    <div class="salon-item" style="flex-direction:column; align-items:stretch; gap:10px;">
+      <div class="si-info">
+        <div class="si-name">${escapeHtml(s.name)}</div>
+        <div class="si-slug">Proprietario: ${escapeHtml(s.ownerName||'—')} · ${escapeHtml(s.ownerUsername||'—')}</div>
+        <div class="si-stats">
+          Email: ${escapeHtml(s.email||'—')}<br>
+          Indirizzo: ${escapeHtml(s.address||'—')} · Tel: ${escapeHtml(s.phone||'—')}<br>
+          Barbieri dichiarati: ${s.billing.declaredWorkerCount||1} · Canone stimato: €${feeForWorkerCount(s.billing.declaredWorkerCount||1)}/mese<br>
+          Contratto firmato da: ${escapeHtml(s.billing.contractSignedName||'—')} il ${s.billing.contractSignedAt?new Date(s.billing.contractSignedAt).toLocaleString('it-IT'):'—'}
+        </div>
+      </div>
+      <button class="btn btn-main" data-approve="${s.id}">✅ Approva e invia credenziali</button>
+    </div>
+  `).join('');
+  $('pendingSaloniList').querySelectorAll('[data-approve]').forEach(b=>b.addEventListener('click', async()=>{
+    const s = STATE.salons.find(x=>x.id===b.dataset.approve); if(!s) return;
+    b.disabled = true; b.textContent = 'Approvazione in corso…';
+    try{
+      const resp = await fetch('/api/sync',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify({action:'approve_salon',salonId:s.id})});
+      const r = await resp.json().catch(()=>({}));
+      if(r.success){
+        s.inactive=false; s.billing.pendingApproval=false;
+        try{localStorage.setItem(SK,JSON.stringify(STATE));}catch(e){}
+        renderPendingSaloni(); buildNav();
+        alert(`"${s.name}" è stato approvato. Le credenziali sono state inviate via email al proprietario.`);
+      }else{
+        alert('Errore: '+(r.error||'sconosciuto'));
+        b.disabled=false; b.textContent='✅ Approva e invia credenziali';
+      }
+    }catch(e){
+      alert('Errore di connessione: '+e.message);
+      b.disabled=false; b.textContent='✅ Approva e invia credenziali';
+    }
+  }));
 }
 
 /* ---- SALONI (solo Livello 1 admin) ---- */

@@ -6,7 +6,13 @@ import {
   ensureMigratedV2, getAdminDb, setAdminDb
 } from '../lib/kv.js';
 import { sendCustomerText, toE164 } from '../lib/sms.js';
+import { sendEmail } from '../lib/email.js';
 import { handleLogin, handleChangePassword, getVerifiedSession, getClientIp } from '../lib/auth.js';
+
+// Fixed operational inbox (forwards to the real team, see CLAUDE.md) —
+// used for admin-facing notifications that aren't tied to a specific admin
+// push subscription, since admin_db has no email field of its own.
+const ADMIN_NOTIFY_EMAIL = 'support@trimio.org';
 
 // Mirrors js/app.js's DEFAULT_SERVICES — a brand-new self-signed-up salon
 // needs a starter service list server-side too, same as an admin-created one.
@@ -193,6 +199,16 @@ async function handleSignupSalon(body, kvUrl, kvToken, req) {
   // right after the response is sent, same reason booking pushes are
   // awaited above.
   await notifyAdminsOfNewSignup(salonName, kvUrl, kvToken);
+  await sendEmail(ADMIN_NOTIFY_EMAIL, '🆕 TRIMIO — Nuovo salone in attesa di approvazione',
+    `<p>Un nuovo salone si è registrato e attende la tua conferma:</p>
+     <ul>
+       <li><b>Salone:</b> ${salonName}</li>
+       <li><b>Proprietario:</b> ${ownerName} (${ownerUsername})</li>
+       <li><b>Email:</b> ${email}</li>
+       <li><b>Indirizzo:</b> ${address}</li>
+       <li><b>Barbieri dichiarati:</b> ${declaredWorkerCount}</li>
+     </ul>
+     <p>Vai su TRIMIO → <b>Nuove Richieste</b> per esaminare e approvare la richiesta.</p>`);
   return { status: 200, json: { success: true } };
 }
 
@@ -249,6 +265,43 @@ async function handleMarkSalonPaid(body, kvUrl, kvToken, req) {
   }
   await setSalonsDb(kvUrl, kvToken, salons);
   return { status: 200, json: { success: true, paidThroughMonth: salon.billing.paidThroughMonth } };
+}
+
+// Admin-only: the dedicated "Nuove Richieste" approval action — deliberately
+// separate from the generic Attiva/Inattivo toggle (api/toggle-salon.js),
+// which is also used to reactivate a billing-suspended salon and doesn't
+// distinguish why a salon was inactive. Only ever acts on a genuinely
+// pending self-signup, and is the one place that emails the new owner their
+// login credentials + booking link + QR code.
+async function handleApproveSalon(body, kvUrl, kvToken, req) {
+  const session = getVerifiedSession(req);
+  if (!session || session.role !== 'admin') return { status: 403, json: { success: false, error: 'forbidden' } };
+  if (!body.salonId) return { status: 400, json: { success: false, error: 'missing_fields' } };
+
+  const salons = await getSalonsDb(kvUrl, kvToken);
+  const salon = salons.find(s => s.id === body.salonId);
+  if (!salon) return { status: 404, json: { success: false, error: 'salon_not_found' } };
+  if (!salon.billing || !salon.billing.pendingApproval) {
+    return { status: 409, json: { success: false, error: 'not_pending' } };
+  }
+
+  salon.inactive = false;
+  salon.billing.pendingApproval = false;
+  await setSalonsDb(kvUrl, kvToken, salons);
+
+  const link = `https://trimio.org/s/${encodeURIComponent(salon.slug)}`;
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(link)}`;
+  await sendEmail(salon.email, '🎉 TRIMIO — Il tuo salone è stato approvato!',
+    `<p>Ciao ${salon.ownerName || ''},</p>
+     <p>Il tuo salone <b>${salon.name}</b> è stato approvato ed è ora attivo su TRIMIO!</p>
+     <p><b>Le tue credenziali di accesso proprietario:</b><br>
+     Username: ${salon.ownerUsername}<br>
+     Password: ${salon.ownerPassword}</p>
+     <p><b>Link di prenotazione del tuo salone:</b><br><a href="${link}">${link}</a></p>
+     <p>I tuoi clienti possono anche scansionare questo QR code per prenotare direttamente:</p>
+     <img src="${qrUrl}" alt="QR Code" width="200" height="200">`);
+
+  return { status: 200, json: { success: true } };
 }
 
 function isValidBooking(b) {
@@ -398,6 +451,10 @@ export default async function handler(req, res) {
         }
         if (newData && newData.action === 'mark_salon_paid') {
           const r = await handleMarkSalonPaid(newData, kvUrl, kvToken, req);
+          return res.status(r.status).json(r.json);
+        }
+        if (newData && newData.action === 'approve_salon') {
+          const r = await handleApproveSalon(newData, kvUrl, kvToken, req);
           return res.status(r.status).json(r.json);
         }
 
