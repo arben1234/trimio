@@ -959,13 +959,32 @@ function initCloudSync() {
 
 /* ======== SINC ALERTS & NOTIFICHE APPLICAZIONE ======== */
 
+// Bookings can legitimately get re-detected as "new" more than once (e.g.
+// the 6s poll's stale-baseline race, or a re-sync) — without a dedup guard
+// this stacked repeated toasts/sounds/system notifications for the exact
+// same booking, which looked like the alert "coming back" after dismissal.
+const NOTIFIED_BOOKINGS_KEY = 'trimio_notified_booking_ids';
+function getNotifiedBookingIds() {
+  try { return new Set(JSON.parse(localStorage.getItem(NOTIFIED_BOOKINGS_KEY) || '[]')); }
+  catch (e) { return new Set(); }
+}
+function markBookingNotified(id) {
+  try {
+    const ids = getNotifiedBookingIds();
+    ids.add(id);
+    localStorage.setItem(NOTIFIED_BOOKINGS_KEY, JSON.stringify(Array.from(ids).slice(-500)));
+  } catch (e) {}
+}
+
 function triggerNewBookingNotification(bk) {
   // Only notify if logged in as Owner of this salon, or Barber who is booked
   const isOwnerNotify = SESSION.role === 'owner' && SESSION.salonId === bk.salonId;
   const isBarberNotify = SESSION.role === 'barber' && SESSION.workerId === bk.workerId;
-  
+
   if (!isOwnerNotify && !isBarberNotify) return;
-  
+  if (getNotifiedBookingIds().has(bk.id)) return; // already alerted for this booking on this device
+  markBookingNotified(bk.id);
+
   // 1. Play premium audio chime tone
   playNotificationSound();
   
@@ -976,7 +995,8 @@ function triggerNewBookingNotification(bk) {
   if (Notification.permission === 'granted') {
     new Notification("Nuova Prenotazione TRIMIO", {
       body: `${bk.name} - ${bk.service} alle ${bk.time} (${relDay(bk.dateISO)})`,
-      icon: "./logo.png"
+      icon: "./logo.png",
+      tag: `booking-${bk.id}`
     });
   }
 
