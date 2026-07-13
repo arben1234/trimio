@@ -131,7 +131,7 @@ async function handleUpdateHomepagePhotos(body, kvUrl, kvToken, req) {
 
 // Sends a 6-digit SMS code the signup wizard's step 2 must echo back before
 // continuing — real proof the phone is reachable by whoever is registering,
-// not just typed in (see the twilioConfigured() gate in handleSignupSalon).
+// not just typed in (see the signup_otp_sent gate in handleSignupSalon).
 // A no-op if Twilio isn't configured, same "safe when unconfigured"
 // convention as every other Twilio-backed feature in this codebase.
 async function handleRequestSignupOtp(body, kvUrl, kvToken, req) {
@@ -148,6 +148,13 @@ async function handleRequestSignupOtp(body, kvUrl, kvToken, req) {
   await kvCmd(kvUrl, kvToken, ['SET', `signup_otp:${phone}`, code, 'EX', '600']);
   const sent = await sendCustomerText(phone, `Il tuo codice di verifica TRIMIO è: ${code}`);
   if (!sent) return { status: 200, json: { success: false, error: 'sms_unavailable' } };
+  // Only now — an actual send succeeded for THIS phone — does
+  // handleSignupSalon's gate require verification. twilioConfigured() alone
+  // isn't enough: the account can be configured yet still fail to deliver to
+  // a given number (e.g. a Twilio trial account's "verified numbers only"
+  // restriction), which would otherwise permanently lock every real signup
+  // out with phone_not_verified despite no code ever having reached anyone.
+  await kvCmd(kvUrl, kvToken, ['SET', `signup_otp_sent:${phone}`, '1', 'EX', '700']);
   return { status: 200, json: { success: true } };
 }
 
@@ -230,12 +237,15 @@ async function handleSignupSalon(body, kvUrl, kvToken, req) {
   const rl = await checkRateLimit(kvUrl, kvToken, `ratelimit:signup:${getClientIp(req)}`, 5, 3600);
   if (!rl.allowed) return { status: 429, json: { success: false, error: 'rate_limited' } };
 
-  // Real anti-fraud gate: if SMS is configured, the phone must have already
-  // passed OTP verification (see request_signup_otp/verify_signup_otp below)
-  // within the last 30 minutes — proves a real, reachable phone, not just a
-  // typed-in string. Degrades gracefully (no gate) if Twilio isn't
-  // configured, so signup never breaks outright over this.
-  if (twilioConfigured()) {
+  // Real anti-fraud gate: verification is only ever REQUIRED if an OTP was
+  // actually, successfully dispatched to this exact phone (signup_otp_sent,
+  // set by request_signup_otp only after sendCustomerText returns true) —
+  // not merely "is Twilio configured". A configured-but-non-delivering
+  // account (e.g. a Twilio trial account's verified-numbers-only
+  // restriction) would otherwise permanently lock out every real signup
+  // with phone_not_verified despite no code ever having reached anyone.
+  const otpWasSent = await kvCmd(kvUrl, kvToken, ['GET', `signup_otp_sent:${ownerPhone}`]);
+  if (otpWasSent) {
     const verified = await kvCmd(kvUrl, kvToken, ['GET', `signup_otp_verified:${ownerPhone}`]);
     if (!verified) return { status: 403, json: { success: false, error: 'phone_not_verified' } };
   }
@@ -273,9 +283,10 @@ async function handleSignupSalon(body, kvUrl, kvToken, req) {
     }
   });
   await setSalonsDb(kvUrl, kvToken, salons);
-  if (twilioConfigured()) {
-    try { await kvCmd(kvUrl, kvToken, ['DEL', `signup_otp_verified:${ownerPhone}`]); } catch { /* best-effort cleanup */ }
-  }
+  try {
+    await kvCmd(kvUrl, kvToken, ['DEL', `signup_otp_verified:${ownerPhone}`]);
+    await kvCmd(kvUrl, kvToken, ['DEL', `signup_otp_sent:${ownerPhone}`]);
+  } catch { /* best-effort cleanup */ }
   // Must be awaited (not fire-and-forget) — Vercel can freeze the function
   // right after the response is sent, same reason booking pushes are
   // awaited above.
