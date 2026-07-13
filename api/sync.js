@@ -1,11 +1,11 @@
 import webPush from 'web-push';
 import {
-  getSalonsDb, setSalonsDb, getAllBookings,
+  getSalonsDb, setSalonsDb, getAllBookings, kvCmd,
   tryAcquireSlotLock, promoteLock, releaseSlotLock, hsetBooking,
   acquireBarberDayLock, releaseBarberDayLock, checkRateLimit,
   ensureMigratedV2, getAdminDb, setAdminDb
 } from '../lib/kv.js';
-import { sendCustomerText, toE164 } from '../lib/sms.js';
+import { sendCustomerText, toE164, twilioConfigured } from '../lib/sms.js';
 import { sendEmail } from '../lib/email.js';
 import { handleLogin, handleChangePassword, getVerifiedSession, getClientIp } from '../lib/auth.js';
 
@@ -13,6 +13,15 @@ import { handleLogin, handleChangePassword, getVerifiedSession, getClientIp } fr
 // used for admin-facing notifications that aren't tied to a specific admin
 // push subscription, since admin_db has no email field of its own.
 const ADMIN_NOTIFY_EMAIL = 'support@trimio.org';
+
+// A minimal denylist of throwaway/disposable email providers — catches the
+// most casual fake-salon attempts (real fraud would use a real-looking
+// address anyway, but admin still reviews every signup by hand regardless).
+const DISPOSABLE_EMAIL_DOMAINS = new Set([
+  'mailinator.com', 'guerrillamail.com', 'guerrillamail.info', '10minutemail.com',
+  'tempmail.com', 'temp-mail.org', 'yopmail.com', 'throwawaymail.com',
+  'trashmail.com', 'getnada.com', 'dispostable.com', 'sharklasers.com', 'fakeinbox.com'
+]);
 
 // Mirrors js/app.js's DEFAULT_SERVICES — a brand-new self-signed-up salon
 // needs a starter service list server-side too, same as an admin-created one.
@@ -120,6 +129,43 @@ async function handleUpdateHomepagePhotos(body, kvUrl, kvToken, req) {
   return { status: 200, json: { success: true, homepagePhotos: cleaned } };
 }
 
+// Sends a 6-digit SMS code the signup wizard's step 2 must echo back before
+// continuing — real proof the phone is reachable by whoever is registering,
+// not just typed in (see the twilioConfigured() gate in handleSignupSalon).
+// A no-op if Twilio isn't configured, same "safe when unconfigured"
+// convention as every other Twilio-backed feature in this codebase.
+async function handleRequestSignupOtp(body, kvUrl, kvToken, req) {
+  if (!twilioConfigured()) return { status: 200, json: { success: false, error: 'sms_unavailable' } };
+  const phone = toE164(body.phone);
+  if (!phone) return { status: 400, json: { success: false, error: 'invalid_phone' } };
+
+  const rlIp = await checkRateLimit(kvUrl, kvToken, `ratelimit:otp_ip:${getClientIp(req)}`, 8, 3600);
+  if (!rlIp.allowed) return { status: 429, json: { success: false, error: 'rate_limited' } };
+  const rlPhone = await checkRateLimit(kvUrl, kvToken, `ratelimit:otp_phone:${phone}`, 4, 3600);
+  if (!rlPhone.allowed) return { status: 429, json: { success: false, error: 'rate_limited' } };
+
+  const code = String(Math.floor(100000 + Math.random() * 900000));
+  await kvCmd(kvUrl, kvToken, ['SET', `signup_otp:${phone}`, code, 'EX', '600']);
+  const sent = await sendCustomerText(phone, `Il tuo codice di verifica TRIMIO è: ${code}`);
+  if (!sent) return { status: 200, json: { success: false, error: 'sms_unavailable' } };
+  return { status: 200, json: { success: true } };
+}
+
+async function handleVerifySignupOtp(body, kvUrl, kvToken) {
+  const phone = toE164(body.phone);
+  const code = typeof body.code === 'string' ? body.code.trim() : '';
+  if (!phone || !/^\d{4,6}$/.test(code)) return { status: 400, json: { success: false, error: 'missing_fields' } };
+
+  const stored = await kvCmd(kvUrl, kvToken, ['GET', `signup_otp:${phone}`]);
+  if (!stored || stored !== code) return { status: 401, json: { success: false, error: 'invalid_code' } };
+
+  await kvCmd(kvUrl, kvToken, ['DEL', `signup_otp:${phone}`]);
+  // Short-lived proof-of-verification flag, consumed (and deleted) by
+  // handleSignupSalon once the salon is actually created.
+  await kvCmd(kvUrl, kvToken, ['SET', `signup_otp_verified:${phone}`, '1', 'EX', '1800']);
+  return { status: 200, json: { success: true } };
+}
+
 // Self-service salon signup ("Registra il tuo salone" on the public
 // homepage) — the ONLY path where a genuinely new salon can be created
 // without an admin session (the generic bulk salons[] save further below
@@ -129,29 +175,47 @@ async function handleUpdateHomepagePhotos(body, kvUrl, kvToken, req) {
 // what brings them live, same trust boundary as an admin-created salon, just
 // with the initial data entry self-served instead of typed by admin.
 async function handleSignupSalon(body, kvUrl, kvToken, req) {
+  // Honeypot: a hidden field no real visitor ever fills in (see index.html's
+  // #suWebsite). A bot that blindly fills every input trips this — reply
+  // with a fake success so it doesn't learn the trap exists, but never
+  // actually create anything or send any email/push.
+  if (typeof body.website === 'string' && body.website.trim()) {
+    return { status: 200, json: { success: true } };
+  }
+
   const ownerName = typeof body.ownerName === 'string' ? body.ownerName.trim() : '';
+  const username = typeof body.username === 'string' ? body.username.trim() : '';
   const password = typeof body.password === 'string' ? body.password : '';
   const salonName = typeof body.salonName === 'string' ? body.salonName.trim() : '';
   const email = typeof body.email === 'string' ? body.email.trim() : '';
   const city = typeof body.city === 'string' ? body.city.trim() : '';
   const address = typeof body.address === 'string' ? body.address.trim() : '';
+  const iban = typeof body.iban === 'string' ? body.iban.trim().toUpperCase().replace(/\s+/g, '') : '';
+  const taxId = typeof body.taxId === 'string' ? body.taxId.trim().toUpperCase() : '';
+  const paymentMethod = typeof body.paymentMethod === 'string' && body.paymentMethod ? body.paymentMethod : 'bonifico_bancario';
   const contractSignedName = typeof body.contractSignedName === 'string' ? body.contractSignedName.trim() : '';
 
   // Every field below is mandatory in the signup wizard — reject a bare
   // API call that skips the client-side checks the same way, rather than
   // silently defaulting missing data to empty/1.
   if (ownerName.length < 2) return { status: 400, json: { success: false, error: 'invalid_owner_name' } };
-  if (password.length < 4) return { status: 400, json: { success: false, error: 'invalid_password' } };
+  if (!/^[a-zA-Z0-9._-]{3,30}$/.test(username)) return { status: 400, json: { success: false, error: 'invalid_username' } };
+  if (password.length < 6) return { status: 400, json: { success: false, error: 'invalid_password' } };
   if (salonName.length < 2) return { status: 400, json: { success: false, error: 'invalid_salon_name' } };
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { status: 400, json: { success: false, error: 'invalid_email' } };
+  if (DISPOSABLE_EMAIL_DOMAINS.has(email.split('@')[1]?.toLowerCase())) {
+    return { status: 400, json: { success: false, error: 'disposable_email' } };
+  }
   if (city.length < 2) return { status: 400, json: { success: false, error: 'invalid_city' } };
   if (address.length < 3) return { status: 400, json: { success: false, error: 'invalid_address' } };
+  if (!/^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/.test(iban)) return { status: 400, json: { success: false, error: 'invalid_iban' } };
+  if (taxId.length < 6) return { status: 400, json: { success: false, error: 'invalid_tax_id' } };
   if (!body.contractAccepted || contractSignedName.length < 2) {
     return { status: 400, json: { success: false, error: 'contract_not_accepted' } };
   }
 
-  const ownerUsername = toE164(body.ownerPhone);
-  if (!ownerUsername) return { status: 400, json: { success: false, error: 'invalid_phone' } };
+  const ownerPhone = toE164(body.ownerPhone);
+  if (!ownerPhone) return { status: 400, json: { success: false, error: 'invalid_phone' } };
   // Kept as the human-formatted string the client sent (matches how
   // admin-created salons store their public contact phone), just required
   // to at least look like a real number — toE164 only used to validate.
@@ -166,9 +230,19 @@ async function handleSignupSalon(body, kvUrl, kvToken, req) {
   const rl = await checkRateLimit(kvUrl, kvToken, `ratelimit:signup:${getClientIp(req)}`, 5, 3600);
   if (!rl.allowed) return { status: 429, json: { success: false, error: 'rate_limited' } };
 
+  // Real anti-fraud gate: if SMS is configured, the phone must have already
+  // passed OTP verification (see request_signup_otp/verify_signup_otp below)
+  // within the last 30 minutes — proves a real, reachable phone, not just a
+  // typed-in string. Degrades gracefully (no gate) if Twilio isn't
+  // configured, so signup never breaks outright over this.
+  if (twilioConfigured()) {
+    const verified = await kvCmd(kvUrl, kvToken, ['GET', `signup_otp_verified:${ownerPhone}`]);
+    if (!verified) return { status: 403, json: { success: false, error: 'phone_not_verified' } };
+  }
+
   const salons = await getSalonsDb(kvUrl, kvToken);
-  if (salons.some(s => s.ownerUsername === ownerUsername)) {
-    return { status: 409, json: { success: false, error: 'phone_already_registered' } };
+  if (salons.some(s => s.ownerUsername === username)) {
+    return { status: 409, json: { success: false, error: 'username_taken' } };
   }
 
   const baseSlug = salonName.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'SALONE';
@@ -185,18 +259,23 @@ async function handleSignupSalon(body, kvUrl, kvToken, req) {
     closedDays: [], bookingDays: 30,
     services: DEFAULT_SERVICES.map(s => ({ ...s })),
     workers: [],
-    ownerUsername, ownerPassword: password,
-    ownerName, ownerPhone: ownerUsername, email,
+    ownerUsername: username, ownerPassword: password,
+    ownerName, ownerPhone, email,
     inactive: true,
     billing: {
       declaredWorkerCount,
       paidThroughMonth: romeYearMonth(), // first partial month is free
       pendingApproval: true,
+      paymentMethod, iban, taxId,
       contractSignedAt: new Date().toISOString(),
-      contractSignedName
+      contractSignedName,
+      signupIp: getClientIp(req) // fraud-review signal for admin, not enforcement
     }
   });
   await setSalonsDb(kvUrl, kvToken, salons);
+  if (twilioConfigured()) {
+    try { await kvCmd(kvUrl, kvToken, ['DEL', `signup_otp_verified:${ownerPhone}`]); } catch { /* best-effort cleanup */ }
+  }
   // Must be awaited (not fire-and-forget) — Vercel can freeze the function
   // right after the response is sent, same reason booking pushes are
   // awaited above.
@@ -205,7 +284,7 @@ async function handleSignupSalon(body, kvUrl, kvToken, req) {
     `<p>Un nuovo salone si è registrato e attende la tua conferma:</p>
      <ul>
        <li><b>Salone:</b> ${salonName}</li>
-       <li><b>Proprietario:</b> ${ownerName} (${ownerUsername})</li>
+       <li><b>Proprietario:</b> ${ownerName} (${username}, ${ownerPhone})</li>
        <li><b>Email:</b> ${email}</li>
        <li><b>Indirizzo:</b> ${address}, ${city}</li>
        <li><b>Barbieri dichiarati:</b> ${declaredWorkerCount}</li>
@@ -445,6 +524,14 @@ export default async function handler(req, res) {
         }
         if (newData && newData.action === 'update_homepage_photos') {
           const r = await handleUpdateHomepagePhotos(newData, kvUrl, kvToken, req);
+          return res.status(r.status).json(r.json);
+        }
+        if (newData && newData.action === 'request_signup_otp') {
+          const r = await handleRequestSignupOtp(newData, kvUrl, kvToken, req);
+          return res.status(r.status).json(r.json);
+        }
+        if (newData && newData.action === 'verify_signup_otp') {
+          const r = await handleVerifySignupOtp(newData, kvUrl, kvToken);
           return res.status(r.status).json(r.json);
         }
         if (newData && newData.action === 'signup_salon') {

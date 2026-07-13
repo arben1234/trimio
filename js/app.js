@@ -3848,12 +3848,13 @@ function renderSaloni(){
 }
 /* ---- REGISTRAZIONE SALONE (self-signup dalla vLogin pubblica) ---- */
 let suStep=0;
+const SU_STEPS=['suStep0','suStepOtp','suStep1','suStep2'];
 const SU_CONTRACT_HTML = `
   <b>CONTRATTO DI COLLABORAZIONE — TRIMIO</b><br>
   <i>(Modello standard — non sostituisce una consulenza legale.)</i><br><br>
   <b>1. Oggetto.</b> TRIMIO fornisce al Salone l'accesso alla piattaforma software di gestione prenotazioni online, inclusa assistenza tecnica e manutenzione della piattaforma 24 ore su 24, 7 giorni su 7.<br><br>
   <b>2. Canone mensile.</b> Il Salone corrisponde un canone mensile calcolato in base al numero di barbieri registrati: €50 (1-5 barbieri), €100 (6-10), €150 (11-15), con incrementi proporzionali oltre questa soglia.<br><br>
-  <b>3. Termini di pagamento.</b> Il canone è dovuto il giorno 1 di ogni mese. Il primo mese di utilizzo, dalla data di registrazione alla fine dello stesso mese solare, è gratuito.<br><br>
+  <b>3. Termini di pagamento.</b> Il canone è dovuto il giorno 1 di ogni mese, tramite bonifico bancario sull'IBAN indicato in fase di registrazione. Il primo mese di utilizzo, dalla data di registrazione alla fine dello stesso mese solare, è gratuito.<br><br>
   <b>4. Mancato pagamento.</b> Se il pagamento non risulta registrato entro il giorno 5 del mese, il servizio viene sospeso; il Salone riceve un promemoria via email ogni giorno dal giorno 2 fino alla sospensione o al pagamento.<br><br>
   <b>5. Riattivazione.</b> Il servizio viene riattivato non appena TRIMIO conferma la ricezione del pagamento.<br><br>
   <b>6. Durata e recesso.</b> Il contratto si rinnova mensilmente; il Salone può recedere in qualsiasi momento con effetto dalla fine del mese in corso.<br><br>
@@ -3861,35 +3862,92 @@ const SU_CONTRACT_HTML = `
 `;
 function renderSuStep(){
   clearErr('suErr');
-  ['suStep0','suStep1','suStep2'].forEach((id,i)=>{const el=$(id);if(el)el.style.display=(i===suStep?'block':'none');});
+  SU_STEPS.forEach((id,i)=>{const el=$(id);if(el)el.style.display=(i===suStep?'block':'none');});
 }
 function suUpdateFeePreview(){
   const n=parseInt($('suWorkerCount').value)||1;
   $('suFeePreview').textContent='€'+feeForWorkerCount(n);
 }
-function suGoto(step){
-  if(step>suStep){
-    if(suStep===0){
-      const name=$('suOwnerName').value.trim(),pwd=$('suPassword').value;
-      if(name.length<2)return showErr('suErr','Inserisci il tuo nome e cognome');
-      const formatted=formatItalianPhone($('suOwnerPhone').value.trim());
-      if(!isValidItalianPhone(formatted))return showErr('suErr','Numero di telefono non valido. Es. +39 345 678 9012');
-      $('suOwnerPhone').value=formatted;
-      if(pwd.length<4)return showErr('suErr','La password deve avere almeno 4 caratteri');
+function suBack(){ suStep=Math.max(0,suStep-1); renderSuStep(); }
+
+// Step 0 -> sends an SMS verification code before continuing (real anti-fraud
+// check: proves the phone number is real and reachable by the registrant,
+// not just typed in — see api/sync.js's request_signup_otp/verify_signup_otp).
+// If SMS delivery isn't available server-side (Twilio unconfigured or the
+// send failed), the server skips requiring verification too — see
+// sms_unavailable below — so this never blocks signup outright.
+async function suNext0(){
+  const name=$('suOwnerName').value.trim(),pwd=$('suPassword').value,uname=$('suUsername').value.trim();
+  if(name.length<2)return showErr('suErr','Inserisci il tuo nome e cognome');
+  const formatted=formatItalianPhone($('suOwnerPhone').value.trim());
+  if(!isValidItalianPhone(formatted))return showErr('suErr','Numero di telefono non valido. Es. +39 345 678 9012');
+  $('suOwnerPhone').value=formatted;
+  if(!/^[a-zA-Z0-9._-]{3,30}$/.test(uname))return showErr('suErr','Lo username deve avere 3-30 caratteri (lettere, numeri, punto o trattino)');
+  if(pwd.length<6)return showErr('suErr','La password deve avere almeno 6 caratteri');
+
+  const btn=$('suNext0');const orig=btn.textContent;btn.disabled=true;btn.textContent='Invio codice…';
+  try{
+    const resp=await fetch('/api/sync',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'request_signup_otp',phone:formatted})});
+    const r=await resp.json().catch(()=>({}));
+    if(r.success){
+      $('suOtpPhoneShown').textContent=formatted;
+      $('suOtpMsg').textContent='';
+      $('suOtpCode').value='';
+      suStep=1;renderSuStep();
+    }else if(r.error==='sms_unavailable'){
+      suStep=2;renderSuStep(); // server won't require verification either — proceed
+    }else{
+      const msgs={rate_limited:'Troppi tentativi, riprova più tardi.',invalid_phone:'Numero di telefono non valido.'};
+      showErr('suErr',msgs[r.error]||'Errore durante l\'invio del codice. Riprova.');
     }
-    if(suStep===1){
-      if($('suSalonName').value.trim().length<2)return showErr('suErr','Inserisci il nome del salone');
-      if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test($('suEmail').value.trim()))return showErr('suErr','Inserisci un indirizzo email valido');
-      if($('suCity').value.trim().length<2)return showErr('suErr','Inserisci la città del salone');
-      if($('suAddress').value.trim().length<3)return showErr('suErr','Inserisci l\'indirizzo del salone');
-      const formattedPhone=formatItalianPhone($('suPhone').value.trim());
-      if(!isValidItalianPhone(formattedPhone))return showErr('suErr','Inserisci un numero di telefono del salone valido');
-      $('suPhone').value=formattedPhone;
-      const wc=parseInt($('suWorkerCount').value);
-      if(!wc||wc<1)return showErr('suErr','Inserisci il numero di barbieri');
-    }
+  }catch(e){
+    showErr('suErr','Errore di connessione. Riprova.');
+  }finally{
+    btn.disabled=false;btn.textContent=orig;
   }
-  suStep=step;renderSuStep();
+}
+async function suOtpVerifyClick(){
+  const code=$('suOtpCode').value.trim();
+  if(!/^\d{4,6}$/.test(code))return showErr('suErr','Inserisci il codice ricevuto via SMS');
+  const btn=$('suOtpVerify');btn.disabled=true;
+  try{
+    const resp=await fetch('/api/sync',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'verify_signup_otp',phone:$('suOwnerPhone').value.trim(),code})});
+    const r=await resp.json().catch(()=>({}));
+    if(r.success){ suStep=2;renderSuStep(); }
+    else showErr('suErr','Codice non valido o scaduto.');
+  }catch(e){
+    showErr('suErr','Errore di connessione. Riprova.');
+  }finally{
+    btn.disabled=false;
+  }
+}
+async function suOtpResendClick(){
+  $('suOtpMsg').textContent='Invio in corso…';
+  try{
+    const resp=await fetch('/api/sync',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'request_signup_otp',phone:$('suOwnerPhone').value.trim()})});
+    const r=await resp.json().catch(()=>({}));
+    $('suOtpMsg').textContent = r.success ? 'Codice inviato di nuovo.' : 'Impossibile inviare il codice ora, riprova tra poco.';
+  }catch(e){
+    $('suOtpMsg').textContent='Errore di connessione.';
+  }
+}
+function suNext1(){
+  if($('suSalonName').value.trim().length<2)return showErr('suErr','Inserisci il nome del salone');
+  const email=$('suEmail').value.trim(),emailConfirm=$('suEmailConfirm').value.trim();
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return showErr('suErr','Inserisci un indirizzo email valido');
+  if(email.toLowerCase()!==emailConfirm.toLowerCase())return showErr('suErr','Le due email inserite non coincidono');
+  if($('suCity').value.trim().length<2)return showErr('suErr','Inserisci la città del salone');
+  if($('suAddress').value.trim().length<3)return showErr('suErr','Inserisci l\'indirizzo del salone');
+  const formattedPhone=formatItalianPhone($('suPhone').value.trim());
+  if(!isValidItalianPhone(formattedPhone))return showErr('suErr','Inserisci un numero di telefono del salone valido');
+  $('suPhone').value=formattedPhone;
+  const wc=parseInt($('suWorkerCount').value);
+  if(!wc||wc<1)return showErr('suErr','Inserisci il numero di barbieri');
+  const iban=$('suIban').value.trim().toUpperCase().replace(/\s+/g,'');
+  if(!/^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/.test(iban))return showErr('suErr','Inserisci un IBAN valido');
+  $('suIban').value=iban;
+  if($('suTaxId').value.trim().length<6)return showErr('suErr','Inserisci una Partita IVA o Codice Fiscale valida');
+  suStep=3;renderSuStep();
 }
 async function suSubmit(){
   if(!$('suAccept').checked)return showErr('suErr','Devi accettare le condizioni del contratto');
@@ -3901,6 +3959,7 @@ async function suSubmit(){
     action:'signup_salon',
     ownerName,
     ownerPhone:$('suOwnerPhone').value.trim(),
+    username:$('suUsername').value.trim(),
     password:$('suPassword').value,
     salonName:$('suSalonName').value.trim(),
     email:$('suEmail').value.trim(),
@@ -3908,18 +3967,31 @@ async function suSubmit(){
     address:$('suAddress').value.trim(),
     phone:$('suPhone').value.trim(),
     declaredWorkerCount:parseInt($('suWorkerCount').value)||1,
+    paymentMethod:$('suPaymentMethod').value,
+    iban:$('suIban').value.trim(),
+    taxId:$('suTaxId').value.trim(),
     contractSignedName:signName,
-    contractAccepted:true
+    contractAccepted:true,
+    website:$('suWebsite').value // honeypot — real users never fill this
   };
   $('suSubmit').disabled=true;
   try{
     const resp=await fetch('/api/sync',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     const r=await resp.json().catch(()=>({}));
     if(resp.ok&&r.success){
-      ['suStep0','suStep1','suStep2'].forEach(id=>$(id).style.display='none');
+      SU_STEPS.forEach(id=>$(id).style.display='none');
       $('suStepDone').style.display='block';
     }else{
-      const msgs={phone_already_registered:'Questo numero di telefono è già registrato.',invalid_phone:'Numero di telefono non valido.',rate_limited:'Troppi tentativi, riprova più tardi.'};
+      const msgs={
+        phone_already_registered:'Questo numero di telefono è già registrato.',
+        username_taken:'Questo username è già in uso, scegline un altro.',
+        invalid_phone:'Numero di telefono non valido.',
+        invalid_email:'Indirizzo email non valido.',
+        disposable_email:'Usa un indirizzo email permanente, non temporaneo.',
+        invalid_iban:'IBAN non valido.',
+        phone_not_verified:'Devi prima verificare il tuo numero di telefono.',
+        rate_limited:'Troppi tentativi, riprova più tardi.'
+      };
       showErr('suErr',msgs[r.error]||'Errore durante l\'invio. Riprova.');
     }
   }catch(e){
@@ -4683,19 +4755,23 @@ async function boot(){
   $('loginModalClose')?.addEventListener('click', () => $('vLoginFormOverlay')?.classList.remove('show'));
 
   $('vLoginSignupTrigger')?.addEventListener('click', () => {
-    suStep=0;renderSuStep();
+    suStep=0;
     if($('suContractText'))$('suContractText').innerHTML=SU_CONTRACT_HTML;
     if($('suAccept'))$('suAccept').checked=false;
-    ['suStep0','suStep1','suStep2'].forEach((id,i)=>{const el=$(id);if(el)el.style.display=(i===0?'block':'none');});
+    if($('suWebsite'))$('suWebsite').value='';
+    renderSuStep();
     if($('suStepDone'))$('suStepDone').style.display='none';
     $('vLoginSignupOverlay')?.classList.add('show');
   });
   $('vLoginSignupOv')?.addEventListener('click', () => $('vLoginSignupOverlay')?.classList.remove('show'));
   $('signupModalClose')?.addEventListener('click', () => $('vLoginSignupOverlay')?.classList.remove('show'));
-  $('suNext0')?.addEventListener('click', () => suGoto(1));
-  $('suBack1')?.addEventListener('click', () => suGoto(0));
-  $('suNext1')?.addEventListener('click', () => suGoto(2));
-  $('suBack2')?.addEventListener('click', () => suGoto(1));
+  $('suNext0')?.addEventListener('click', suNext0);
+  $('suBackOtp')?.addEventListener('click', suBack);
+  $('suOtpVerify')?.addEventListener('click', suOtpVerifyClick);
+  $('suOtpResend')?.addEventListener('click', suOtpResendClick);
+  $('suBack1')?.addEventListener('click', suBack);
+  $('suNext1')?.addEventListener('click', suNext1);
+  $('suBack2')?.addEventListener('click', suBack);
   $('suWorkerCount')?.addEventListener('input', suUpdateFeePreview);
   $('suSubmit')?.addEventListener('click', suSubmit);
   $('gear').addEventListener('click',()=>{ loginSalonContext = custSalon ? custSalon.id : null; loginRoleContext = null; showView('vLogin'); });

@@ -553,10 +553,31 @@
 
           <div id="suStep0">
             <div class="login">
+              <!-- Honeypot: invisible to real users, but a naive bot filling
+                   every input will populate this — server silently discards
+                   the submission (fake "success") without creating anything. -->
+              <div style="position:absolute; left:-9999px; top:-9999px;" aria-hidden="true">
+                <label for="suWebsite">Non compilare</label>
+                <input type="text" id="suWebsite" name="suWebsite" tabindex="-1" autocomplete="off">
+              </div>
               <div class="field"><label>Il tuo nome e cognome *</label><input type="text" id="suOwnerName" placeholder="Mario Rossi" required></div>
               <div class="field"><label>Il tuo numero di telefono *</label><input type="text" id="suOwnerPhone" placeholder="+39 345 678 9012" required></div>
-              <div class="field"><label>Password *</label><input type="password" id="suPassword" placeholder="Scegli una password" required></div>
+              <div class="field"><label>Username *</label><input type="text" id="suUsername" placeholder="Es. mario.rossi" required></div>
+              <div class="field"><label>Password *</label><input type="password" id="suPassword" placeholder="Almeno 6 caratteri" required></div>
               <button class="btn btn-main" id="suNext0">Avanti →</button>
+            </div>
+          </div>
+
+          <div id="suStepOtp" style="display:none">
+            <div class="login">
+              <p style="font-size:13px; color:#d4d4d8; margin-bottom:14px;">Ti abbiamo inviato un codice via SMS al numero <b id="suOtpPhoneShown"></b>. Inseriscilo qui sotto per verificare la tua identità.</p>
+              <div class="field"><label>Codice di verifica *</label><input type="text" id="suOtpCode" inputmode="numeric" maxlength="6" placeholder="123456"></div>
+              <div id="suOtpMsg" style="font-size:12px; color:#a1a1aa; margin:-6px 0 10px;"></div>
+              <div style="display:flex; gap:10px;">
+                <button class="btn btn-ghost" id="suBackOtp" style="flex:1">← Indietro</button>
+                <button class="btn btn-main" id="suOtpVerify" style="flex:1">Verifica</button>
+              </div>
+              <button class="link" id="suOtpResend" style="text-align:center; margin-top:10px;">Non hai ricevuto il codice? Invia di nuovo</button>
             </div>
           </div>
 
@@ -564,11 +585,19 @@
             <div class="login">
               <div class="field"><label>Nome del salone *</label><input type="text" id="suSalonName" placeholder="Barber Art" required></div>
               <div class="field"><label>Email del salone *</label><input type="email" id="suEmail" placeholder="info@ilmiosalone.it" required></div>
+              <div class="field"><label>Conferma email *</label><input type="email" id="suEmailConfirm" placeholder="Ripeti l'indirizzo email" required></div>
               <div class="field"><label>Città *</label><input type="text" id="suCity" placeholder="Es. Milano" required></div>
               <div class="field"><label>Indirizzo *</label><input type="text" id="suAddress" placeholder="Via Roma 1" required></div>
               <div class="field"><label>Telefono del salone *</label><input type="text" id="suPhone" placeholder="+39 02 1234567" required></div>
               <div class="field"><label>Numero di barbieri *</label><input type="number" id="suWorkerCount" min="1" value="1" required></div>
               <div style="font-size:13px; color:#a1a1aa; margin:-6px 0 4px;">Canone mensile stimato: <b id="suFeePreview" style="color:#e5c158;">€50</b>/mese</div>
+              <div class="field"><label>Metodo di pagamento</label>
+                <select class="minput" id="suPaymentMethod">
+                  <option value="bonifico_bancario">Bonifico bancario</option>
+                </select>
+              </div>
+              <div class="field"><label>IBAN (per il bonifico mensile) *</label><input type="text" id="suIban" placeholder="IT60 X054 2811 1010 0000 0123 456" required></div>
+              <div class="field"><label>Partita IVA o Codice Fiscale *</label><input type="text" id="suTaxId" placeholder="Es. RSSMRA80A01H501U" required></div>
               <div style="display:flex; gap:10px;">
                 <button class="btn btn-ghost" id="suBack1" style="flex:1">← Indietro</button>
                 <button class="btn btn-main" id="suNext1" style="flex:1">Avanti →</button>
@@ -1126,6 +1155,6 @@
      own "Save as PDF" print target produces a clean report. -->
 <div id="printableStats"></div>
 
-<script src="/js/app.min.js?v=20260714_0002"></script>
+<script src="/js/app.min.js?v=20260714_0003"></script>
 </body>
 </html>
