@@ -3809,6 +3809,13 @@ function suGoto(step){
     }
     if(suStep===1){
       if($('suSalonName').value.trim().length<2)return showErr('suErr','Inserisci il nome del salone');
+      if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test($('suEmail').value.trim()))return showErr('suErr','Inserisci un indirizzo email valido');
+      if($('suAddress').value.trim().length<3)return showErr('suErr','Inserisci l\'indirizzo del salone');
+      const formattedPhone=formatItalianPhone($('suPhone').value.trim());
+      if(!isValidItalianPhone(formattedPhone))return showErr('suErr','Inserisci un numero di telefono del salone valido');
+      $('suPhone').value=formattedPhone;
+      const wc=parseInt($('suWorkerCount').value);
+      if(!wc||wc<1)return showErr('suErr','Inserisci il numero di barbieri');
     }
   }
   suStep=step;renderSuStep();
@@ -4591,6 +4598,7 @@ async function boot(){
   // toggle in showView(). Opens on the top-left trigger, closes on the
   // backdrop or the ✕ button; nothing here bypasses the actual form.
   $('vLoginAdminTrigger')?.addEventListener('click', () => $('vLoginFormOverlay')?.classList.add('show'));
+  $('vLoginTopLoginTrigger')?.addEventListener('click', () => $('vLoginFormOverlay')?.classList.add('show'));
   $('vLoginFormOv')?.addEventListener('click', () => $('vLoginFormOverlay')?.classList.remove('show'));
   $('loginModalClose')?.addEventListener('click', () => $('vLoginFormOverlay')?.classList.remove('show'));
 

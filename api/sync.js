@@ -126,17 +126,34 @@ async function handleSignupSalon(body, kvUrl, kvToken, req) {
   const ownerName = typeof body.ownerName === 'string' ? body.ownerName.trim() : '';
   const password = typeof body.password === 'string' ? body.password : '';
   const salonName = typeof body.salonName === 'string' ? body.salonName.trim() : '';
+  const email = typeof body.email === 'string' ? body.email.trim() : '';
+  const address = typeof body.address === 'string' ? body.address.trim() : '';
   const contractSignedName = typeof body.contractSignedName === 'string' ? body.contractSignedName.trim() : '';
 
+  // Every field below is mandatory in the signup wizard — reject a bare
+  // API call that skips the client-side checks the same way, rather than
+  // silently defaulting missing data to empty/1.
   if (ownerName.length < 2) return { status: 400, json: { success: false, error: 'invalid_owner_name' } };
   if (password.length < 4) return { status: 400, json: { success: false, error: 'invalid_password' } };
   if (salonName.length < 2) return { status: 400, json: { success: false, error: 'invalid_salon_name' } };
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { status: 400, json: { success: false, error: 'invalid_email' } };
+  if (address.length < 3) return { status: 400, json: { success: false, error: 'invalid_address' } };
   if (!body.contractAccepted || contractSignedName.length < 2) {
     return { status: 400, json: { success: false, error: 'contract_not_accepted' } };
   }
 
   const ownerUsername = toE164(body.ownerPhone);
   if (!ownerUsername) return { status: 400, json: { success: false, error: 'invalid_phone' } };
+  // Kept as the human-formatted string the client sent (matches how
+  // admin-created salons store their public contact phone), just required
+  // to at least look like a real number — toE164 only used to validate.
+  const salonPhone = typeof body.phone === 'string' ? body.phone.trim() : '';
+  if (!toE164(salonPhone)) return { status: 400, json: { success: false, error: 'invalid_salon_phone' } };
+
+  const workerCountNum = Number(body.declaredWorkerCount);
+  if (!Number.isFinite(workerCountNum) || workerCountNum < 1) {
+    return { status: 400, json: { success: false, error: 'invalid_worker_count' } };
+  }
 
   const rl = await checkRateLimit(kvUrl, kvToken, `ratelimit:signup:${getClientIp(req)}`, 5, 3600);
   if (!rl.allowed) return { status: 429, json: { success: false, error: 'rate_limited' } };
@@ -150,18 +167,18 @@ async function handleSignupSalon(body, kvUrl, kvToken, req) {
   let slug = baseSlug, n = 2;
   while (salons.some(s => s.slug === slug)) slug = `${baseSlug}_${n++}`;
 
-  const declaredWorkerCount = Math.max(1, Math.min(200, Math.round(Number(body.declaredWorkerCount)) || 1));
+  const declaredWorkerCount = Math.max(1, Math.min(200, Math.round(workerCountNum)));
 
   salons.push({
     id: 'salon' + Date.now(),
     name: salonName, slug,
-    city: '', address: String(body.address || '').trim(), phone: String(body.phone || '').trim(), promo: '',
+    city: '', address, phone: salonPhone, promo: '',
     bgImage: '', gallery: [], themeColor: '#e5c158',
     closedDays: [], bookingDays: 30,
     services: DEFAULT_SERVICES.map(s => ({ ...s })),
     workers: [],
     ownerUsername, ownerPassword: password,
-    ownerName, ownerPhone: ownerUsername, email: String(body.email || '').trim(),
+    ownerName, ownerPhone: ownerUsername, email,
     inactive: true,
     billing: {
       declaredWorkerCount,
@@ -172,7 +189,43 @@ async function handleSignupSalon(body, kvUrl, kvToken, req) {
     }
   });
   await setSalonsDb(kvUrl, kvToken, salons);
+  // Must be awaited (not fire-and-forget) — Vercel can freeze the function
+  // right after the response is sent, same reason booking pushes are
+  // awaited above.
+  await notifyAdminsOfNewSignup(salonName, kvUrl, kvToken);
   return { status: 200, json: { success: true } };
+}
+
+// Alerts every admin device the moment a new salon self-registers, so admin
+// doesn't have to stumble onto a pending signup by chance — same
+// push-subscription lookup sendPushNotifications() uses for new bookings,
+// just always targeted at admin-role subscriptions.
+async function notifyAdminsOfNewSignup(salonName, kvUrl, kvToken) {
+  if (!VAPID_PRIVATE_KEY) return;
+  try {
+    const subResp = await fetch(`${kvUrl}/get/push_subscriptions`, { headers: { Authorization: `Bearer ${kvToken}` } });
+    if (!subResp.ok) return;
+    const subResData = await subResp.json();
+    if (!subResData.result) return;
+    let subscriptions = JSON.parse(subResData.result);
+    if (typeof subscriptions === 'string') subscriptions = JSON.parse(subscriptions);
+    if (!Array.isArray(subscriptions)) return;
+
+    const payload = JSON.stringify({
+      title: '🆕 Nuovo salone in attesa di approvazione',
+      body: `"${salonName}" si è registrato su TRIMIO e attende la tua approvazione.`,
+      url: '/#DASHBOARD'
+    });
+    for (const target of subscriptions.filter(s => s.role === 'admin')) {
+      try {
+        await webPush.sendNotification(target.subscription, payload);
+      } catch (err) {
+        console.error('[PUSH] signup-notify to admin failed:', err.message);
+      }
+    }
+  } catch (err) {
+    console.error('[PUSH] notifyAdminsOfNewSignup error:', err);
+  }
 }
 
 // Admin-only: confirms this month's fee was received (payment is manual for

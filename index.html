@@ -419,11 +419,12 @@
            staff/owner login reached from a specific salon's page shows just
            the form below, unchanged. Toggled in js/app.js's showView(). -->
       <div id="vLoginMarketing">
-        <div style="text-align:center; padding:14px 16px 0;">
-          <button type="button" id="vLoginSignupTrigger" style="background:none;border:1px solid #e5c158;color:#e5c158;border-radius:10px;padding:8px 16px;text-decoration:none;cursor:pointer;font:inherit;font-size:12.5px;font-weight:700;">📝 Registra il tuo salone</button>
-        </div>
         <div class="hp-lead">
           <img src="/logo.png" alt="TRIMIO Logo" style="width: 110px; height: 110px; margin-bottom: 14px; border-radius: 50%; border: none; box-shadow: 0 8px 32px rgba(0,0,0,0.6); background:transparent; object-fit: cover;">
+          <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin-bottom:18px;">
+            <button type="button" id="vLoginTopLoginTrigger" style="background:#e5c158;color:#18181b;border:none;border-radius:10px;padding:10px 18px;cursor:pointer;font:inherit;font-size:13px;font-weight:800;">Accedi</button>
+            <button type="button" id="vLoginSignupTrigger" style="background:#e5c158;color:#18181b;border:none;border-radius:10px;padding:10px 18px;cursor:pointer;font:inherit;font-size:13px;font-weight:800;">📝 Registra il tuo salone</button>
+          </div>
           <div class="hp-title" style="font-size:26px;">La piattaforma che fa crescere<br>il tuo business da barbiere</div>
           <div class="hp-sub" style="margin-top:8px;">Prenotazioni online. Gestione semplice. Risultati reali.</div>
           <div class="hp-stats-row">
@@ -552,20 +553,20 @@
 
           <div id="suStep0">
             <div class="login">
-              <div class="field"><label>Il tuo nome e cognome</label><input type="text" id="suOwnerName" placeholder="Mario Rossi"></div>
-              <div class="field"><label>Il tuo numero di telefono</label><input type="text" id="suOwnerPhone" placeholder="+39 345 678 9012"></div>
-              <div class="field"><label>Password</label><input type="password" id="suPassword" placeholder="Scegli una password"></div>
+              <div class="field"><label>Il tuo nome e cognome *</label><input type="text" id="suOwnerName" placeholder="Mario Rossi" required></div>
+              <div class="field"><label>Il tuo numero di telefono *</label><input type="text" id="suOwnerPhone" placeholder="+39 345 678 9012" required></div>
+              <div class="field"><label>Password *</label><input type="password" id="suPassword" placeholder="Scegli una password" required></div>
               <button class="btn btn-main" id="suNext0">Avanti →</button>
             </div>
           </div>
 
           <div id="suStep1" style="display:none">
             <div class="login">
-              <div class="field"><label>Nome del salone</label><input type="text" id="suSalonName" placeholder="Barber Art"></div>
-              <div class="field"><label>Email del salone</label><input type="email" id="suEmail" placeholder="info@ilmiosalone.it"></div>
-              <div class="field"><label>Indirizzo</label><input type="text" id="suAddress" placeholder="Via Roma 1, Milano"></div>
-              <div class="field"><label>Telefono del salone</label><input type="text" id="suPhone" placeholder="+39 02 1234567"></div>
-              <div class="field"><label>Numero di barbieri</label><input type="number" id="suWorkerCount" min="1" value="1"></div>
+              <div class="field"><label>Nome del salone *</label><input type="text" id="suSalonName" placeholder="Barber Art" required></div>
+              <div class="field"><label>Email del salone *</label><input type="email" id="suEmail" placeholder="info@ilmiosalone.it" required></div>
+              <div class="field"><label>Indirizzo *</label><input type="text" id="suAddress" placeholder="Via Roma 1, Milano" required></div>
+              <div class="field"><label>Telefono del salone *</label><input type="text" id="suPhone" placeholder="+39 02 1234567" required></div>
+              <div class="field"><label>Numero di barbieri *</label><input type="number" id="suWorkerCount" min="1" value="1" required></div>
               <div style="font-size:13px; color:#a1a1aa; margin:-6px 0 4px;">Canone mensile stimato: <b id="suFeePreview" style="color:#e5c158;">€50</b>/mese</div>
               <div style="display:flex; gap:10px;">
                 <button class="btn btn-ghost" id="suBack1" style="flex:1">← Indietro</button>
@@ -580,7 +581,7 @@
               <label style="display:flex; align-items:flex-start; gap:8px; font-size:12px; margin-bottom:10px; text-align:left; color:#d4d4d8;">
                 <input type="checkbox" id="suAccept" style="margin-top:3px;"> Ho letto e accetto le condizioni sopra riportate.
               </label>
-              <div class="field"><label>Conferma nome e cognome (firma)</label><input type="text" id="suSignName" placeholder="Mario Rossi"></div>
+              <div class="field"><label>Conferma nome e cognome (firma) *</label><input type="text" id="suSignName" placeholder="Mario Rossi" required></div>
               <div style="display:flex; gap:10px;">
                 <button class="btn btn-ghost" id="suBack2" style="flex:1">← Indietro</button>
                 <button class="btn btn-main" id="suSubmit" style="flex:1">Invia richiesta</button>
@@ -1117,6 +1118,6 @@
      own "Save as PDF" print target produces a clean report. -->
 <div id="printableStats"></div>
 
-<script src="/js/app.min.js?v=20260713_0003"></script>
+<script src="/js/app.min.js?v=20260713_0004"></script>
 </body>
 </html>
