@@ -2444,7 +2444,7 @@ function showView(view){
   if (isLogin) {
     const loginTitle = $('loginTitle');
     if (loginTitle) {
-      if (!loginSalonContext) loginTitle.textContent = 'Accesso Amministratore';
+      if (!loginSalonContext) loginTitle.textContent = loginRoleContext === 'owner' ? 'Accesso Proprietario' : 'Accesso Amministratore';
       else if (loginRoleContext === 'owner') loginTitle.textContent = 'Accesso Proprietario';
       else if (loginRoleContext === 'barber') loginTitle.textContent = 'Accesso Barbiere';
       else loginTitle.textContent = 'Accesso Staff';
@@ -2626,6 +2626,24 @@ async function doLogin(){
   // there sets loginSalonContext), never from the bare root login screen —
   // and, symmetrically, admin credentials are never accepted once a salon
   // context is set, even if they happen to match what was typed.
+  if (!loginSalonContext && loginRoleContext === 'owner') {
+    // Owner login from the generic homepage "Accedi" button — no salon URL
+    // needed, since ownerUsername (the phone number) is looked up globally
+    // server-side (see lib/auth.js's handleLogin).
+    const r = await tryLogin({ role: 'owner', username: usr, password: pwd });
+    if (r && r.error === 'salon_inactive') return showErr('lErr', 'Questo salone è inattivo. Accesso negato.');
+    if (r && (r.error === 'service_unavailable' || r.error === 'network_error')) {
+      return showErr('lErr', 'Impossibile contattare il server. Riprova tra poco.');
+    }
+    if (r && r.success) {
+      SESSION = {role:'owner', salonId:r.salonId, workerId:null, name:'Proprietario · '+r.salonName, token:r.sessionToken||null};
+      saveSession();
+      onLoginSuccess();
+      return;
+    }
+    return showErr('lErr', 'Credenziali non valide');
+  }
+
   if (!loginSalonContext) {
     // LIVELLO 1 — Amministratore
     const r = await tryLogin({ role: 'admin', username: usr, password: pwd });
@@ -3682,7 +3700,7 @@ function renderPendingSaloni(){
         <div class="si-slug">Proprietario: ${escapeHtml(s.ownerName||'—')} · ${escapeHtml(s.ownerUsername||'—')}</div>
         <div class="si-stats">
           Email: ${escapeHtml(s.email||'—')}<br>
-          Indirizzo: ${escapeHtml(s.address||'—')} · Tel: ${escapeHtml(s.phone||'—')}<br>
+          Indirizzo: ${escapeHtml(s.address||'—')}, ${escapeHtml(s.city||'—')} · Tel: ${escapeHtml(s.phone||'—')}<br>
           Barbieri dichiarati: ${s.billing.declaredWorkerCount||1} · Canone stimato: €${feeForWorkerCount(s.billing.declaredWorkerCount||1)}/mese<br>
           Contratto firmato da: ${escapeHtml(s.billing.contractSignedName||'—')} il ${s.billing.contractSignedAt?new Date(s.billing.contractSignedAt).toLocaleString('it-IT'):'—'}
         </div>
@@ -3862,6 +3880,7 @@ function suGoto(step){
     if(suStep===1){
       if($('suSalonName').value.trim().length<2)return showErr('suErr','Inserisci il nome del salone');
       if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test($('suEmail').value.trim()))return showErr('suErr','Inserisci un indirizzo email valido');
+      if($('suCity').value.trim().length<2)return showErr('suErr','Inserisci la città del salone');
       if($('suAddress').value.trim().length<3)return showErr('suErr','Inserisci l\'indirizzo del salone');
       const formattedPhone=formatItalianPhone($('suPhone').value.trim());
       if(!isValidItalianPhone(formattedPhone))return showErr('suErr','Inserisci un numero di telefono del salone valido');
@@ -3885,6 +3904,7 @@ async function suSubmit(){
     password:$('suPassword').value,
     salonName:$('suSalonName').value.trim(),
     email:$('suEmail').value.trim(),
+    city:$('suCity').value.trim(),
     address:$('suAddress').value.trim(),
     phone:$('suPhone').value.trim(),
     declaredWorkerCount:parseInt($('suWorkerCount').value)||1,
@@ -4649,8 +4669,16 @@ async function boot(){
   // Admin login modal on the marketing entry point — see the .as-modal
   // toggle in showView(). Opens on the top-left trigger, closes on the
   // backdrop or the ✕ button; nothing here bypasses the actual form.
-  $('vLoginAdminTrigger')?.addEventListener('click', () => $('vLoginFormOverlay')?.classList.add('show'));
-  $('vLoginTopLoginTrigger')?.addEventListener('click', () => $('vLoginFormOverlay')?.classList.add('show'));
+  $('vLoginAdminTrigger')?.addEventListener('click', () => {
+    loginSalonContext = null; loginRoleContext = null;
+    if ($('loginTitle')) $('loginTitle').textContent = 'Accesso Amministratore';
+    $('vLoginFormOverlay')?.classList.add('show');
+  });
+  $('vLoginTopLoginTrigger')?.addEventListener('click', () => {
+    loginSalonContext = null; loginRoleContext = 'owner';
+    if ($('loginTitle')) $('loginTitle').textContent = 'Accesso Proprietario';
+    $('vLoginFormOverlay')?.classList.add('show');
+  });
   $('vLoginFormOv')?.addEventListener('click', () => $('vLoginFormOverlay')?.classList.remove('show'));
   $('loginModalClose')?.addEventListener('click', () => $('vLoginFormOverlay')?.classList.remove('show'));
 

@@ -133,6 +133,7 @@ async function handleSignupSalon(body, kvUrl, kvToken, req) {
   const password = typeof body.password === 'string' ? body.password : '';
   const salonName = typeof body.salonName === 'string' ? body.salonName.trim() : '';
   const email = typeof body.email === 'string' ? body.email.trim() : '';
+  const city = typeof body.city === 'string' ? body.city.trim() : '';
   const address = typeof body.address === 'string' ? body.address.trim() : '';
   const contractSignedName = typeof body.contractSignedName === 'string' ? body.contractSignedName.trim() : '';
 
@@ -143,6 +144,7 @@ async function handleSignupSalon(body, kvUrl, kvToken, req) {
   if (password.length < 4) return { status: 400, json: { success: false, error: 'invalid_password' } };
   if (salonName.length < 2) return { status: 400, json: { success: false, error: 'invalid_salon_name' } };
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { status: 400, json: { success: false, error: 'invalid_email' } };
+  if (city.length < 2) return { status: 400, json: { success: false, error: 'invalid_city' } };
   if (address.length < 3) return { status: 400, json: { success: false, error: 'invalid_address' } };
   if (!body.contractAccepted || contractSignedName.length < 2) {
     return { status: 400, json: { success: false, error: 'contract_not_accepted' } };
@@ -178,7 +180,7 @@ async function handleSignupSalon(body, kvUrl, kvToken, req) {
   salons.push({
     id: 'salon' + Date.now(),
     name: salonName, slug,
-    city: '', address, phone: salonPhone, promo: '',
+    city, address, phone: salonPhone, promo: '',
     bgImage: '', gallery: [], themeColor: '#e5c158',
     closedDays: [], bookingDays: 30,
     services: DEFAULT_SERVICES.map(s => ({ ...s })),
@@ -205,7 +207,7 @@ async function handleSignupSalon(body, kvUrl, kvToken, req) {
        <li><b>Salone:</b> ${salonName}</li>
        <li><b>Proprietario:</b> ${ownerName} (${ownerUsername})</li>
        <li><b>Email:</b> ${email}</li>
-       <li><b>Indirizzo:</b> ${address}</li>
+       <li><b>Indirizzo:</b> ${address}, ${city}</li>
        <li><b>Barbieri dichiarati:</b> ${declaredWorkerCount}</li>
      </ul>
      <p>Vai su TRIMIO → <b>Nuove Richieste</b> per esaminare e approvare la richiesta.</p>`);
