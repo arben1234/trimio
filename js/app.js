@@ -874,6 +874,13 @@ function initCloudSync() {
       if (response.ok) {
         updateUIStatus(true);
         const data = await response.json();
+        // Re-check: this poll's fetch may have been in flight when a save
+        // started (isSaving only guards against STARTING a new poll, not one
+        // already underway) — applying this now-stale response would clobber
+        // the edit the save just made (e.g. a service price reverting right
+        // after "Salva", then getting pushed back to the server stale by the
+        // next unrelated save).
+        if (isSaving) return;
         if (data) {
           const fbBookings = data.bookings ? (Array.isArray(data.bookings) ? data.bookings : Object.values(data.bookings)) : [];
           const prevBookings = STATE.bookings || [];
