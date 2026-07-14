@@ -2859,6 +2859,7 @@ function navItems(){
       {sec:'calendario',  ic:'📆',label:'Calendario'},
       {sec:'prossimi',    ic:'🕐',label:'Prossimi'},
       {sec:'clienti',     ic:'👥',label:'Clienti'},
+      {sec:'dipendenti',  ic:'👔',label:'Dipendenti'},
       {sec:'recensioni',  ic:'💬',label:'Recensioni'},
       {sec:'servizi',     ic:'✂️',label:'Servizi'},
       {sec:'stats',       ic:'📊',label:'Statistiche'},
