@@ -1129,6 +1129,19 @@ async function renderPushNotifBanner() {
   if (!banner) return;
   if (!SESSION || (SESSION.role !== 'owner' && SESSION.role !== 'barber')) { banner.style.display = 'none'; return; }
 
+  // Once the browser permission itself is granted, never show this banner
+  // again for any reason — re-confirming "notifications are active" (or
+  // worse, re-showing the Attiva prompt) every time the dashboard opens had
+  // no purpose once the owner/barber already said yes once. The
+  // subscription-active check below can flap across sessions (service
+  // worker/registration timing) without the underlying permission ever
+  // having changed, which was exactly what made the prompt look like it kept
+  // coming back despite already being granted.
+  if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+    banner.style.display = 'none';
+    return;
+  }
+
   const status = await getPushNotifStatus();
   const icon = $('pushNotifIcon'), msg = $('pushNotifMsg'), btn = $('pushNotifBtn');
 
@@ -1148,11 +1161,10 @@ async function renderPushNotifBanner() {
   }
 
   banner.style.display = 'flex';
-  if (status === 'active') {
-    icon.textContent = '🔔';
-    msg.textContent = 'Notifiche push attive per le nuove prenotazioni';
-    btn.style.display = 'none';
-  } else if (status === 'blocked') {
+  // 'active' can't reach here — Notification.permission==='granted' already
+  // returned above, and getPushNotifStatus() only reports 'active' when
+  // permission is granted.
+  if (status === 'blocked') {
     icon.textContent = '⚠️';
     msg.textContent = 'Notifiche bloccate — su iPhone: Impostazioni → Notifiche → TRIMIO; su altri browser: impostazioni del sito';
     btn.style.display = 'none';
@@ -3302,7 +3314,7 @@ function renderDipendenti(){
   });
   if(!targetSalon.workers.length)html+=`<div class="empty" style="padding:30px 0"><div class="empty-t">Nessun dipendente</div></div>`;
   $('dipendentiList').innerHTML=html;
-  $('addWorkerBtn').style.display=r==='admin'?'block':'none'; // Only admin can add staff
+  $('addWorkerBtn').style.display=canEdit?'block':'none'; // Owner can now register new barbers too; delete stays admin-only
   $('dipendentiList').querySelectorAll('[data-wedit]').forEach(b=>b.addEventListener('click',()=>openWorkerModal(b.dataset.wedit,targetSalon)));
   $('dipendentiList').querySelectorAll('[data-wbreak]').forEach(b=>b.addEventListener('click',()=>openBreakModal(b.dataset.wbreak,targetSalon)));
   $('dipendentiList').querySelectorAll('[data-wdel]').forEach(b=>b.addEventListener('click',async()=>{
@@ -3336,7 +3348,10 @@ function openWorkerModal(wid,salon){
   // then silently mutate a detached copy that never reaches STATE.salons.
   workerEditSalonId=salon.id;clearErr('wErr');
   const isOwner = SESSION.role === 'owner';
-  ['wName','wUser','wPwd','wImg','wImgFile','wPhone','wRole','wDesc'].forEach(id=>{ $(id).disabled = isOwner; });
+  // Owner can register a brand-new barber (full form), but can only ever
+  // change vacation dates on an EXISTING one — renaming/re-crendentialing a
+  // barber that's already there stays admin-only.
+  ['wName','wUser','wPwd','wImg','wImgFile','wPhone','wRole','wDesc'].forEach(id=>{ $(id).disabled = isOwner && wid!=='new'; });
   $('wImgStatus').textContent='';
   if(wid==='new'){
     $('workerModalH').textContent='Nuovo dipendente';
@@ -3361,9 +3376,11 @@ function openWorkerModal(wid,salon){
 async function saveWorker(){
   const salon=STATE.salons.find(x=>x.id===workerEditSalonId);if(!salon)return;
   const vacFrom=$('wVacFrom').value,vacTo=$('wVacTo').value;
-  // Owner only updates vacation dates (no access to the rest of the barber's
-  // data). Lunch break + weekly rest live in the separate "Pause" modal.
-  if (SESSION.role === 'owner') {
+  // Owner can register a brand-new barber (falls through to the same path
+  // admin uses below), but on an EXISTING barber can only ever update
+  // vacation dates — renaming/re-crendentialing them stays admin-only.
+  // Lunch break + weekly rest live in the separate "Pause" modal.
+  if (SESSION.role === 'owner' && editWorker !== 'new') {
     const w=salon.workers.find(x=>x.id===editWorker);
     if(w) {
       w.vacFrom=vacFrom;
