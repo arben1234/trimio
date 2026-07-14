@@ -663,6 +663,14 @@ async function loadState(){
 }
 
 let isSaving = false;
+// Timestamp a save started, not just the isSaving boolean — a poll's own
+// fetch can be a "straggler" already in flight when a save begins, and
+// still resolve AFTER isSaving has already cycled back to false (save
+// finished, then its 2.5s propagation buffer elapsed) if the poll's
+// request was unusually slow (real-world network variance, cold starts).
+// isSaving alone can't catch that case since it's already false again by
+// the time the stale response arrives — see the pollStartedAt check below.
+let lastSaveStartedAt = 0;
 // Settles when the first /api/sync fetch completes (ok or not) — boot's
 // routing awaits it before deciding a salon slug is unknown, because a
 // fresh install has no local copy of the cloud salons yet.
@@ -680,6 +688,7 @@ function authHeaders(){
 
 async function saveState(){
   isSaving = true;
+  lastSaveStartedAt = Date.now();
   const cleanBookings = (STATE.bookings || []).filter(b => !b.isDemo);
   const stateCopy = { ...STATE, bookings: cleanBookings };
 
@@ -874,6 +883,7 @@ function initCloudSync() {
   // staff catching new bookings) — revisit once on Pro.
   setInterval(async () => {
     if (isSaving) return; // Skip polling updates while we are actively saving to prevent overwrites
+    const pollStartedAt = Date.now();
     try {
       const response = await fetch('/api/sync?t=' + Date.now(), { cache: 'no-store', headers: authHeaders() });
       if (response.ok) {
@@ -884,8 +894,12 @@ function initCloudSync() {
         // already underway) — applying this now-stale response would clobber
         // the edit the save just made (e.g. a service price reverting right
         // after "Salva", then getting pushed back to the server stale by the
-        // next unrelated save).
-        if (isSaving) return;
+        // next unrelated save). isSaving alone isn't enough: a slow/straggler
+        // poll can resolve AFTER isSaving has already cycled back to false
+        // (save finished + its 2.5s propagation buffer elapsed), so also
+        // discard any response whose request started before the most
+        // recent save began — that response can only reflect pre-save data.
+        if (isSaving || pollStartedAt < lastSaveStartedAt) return;
         if (data) {
           const fbBookings = data.bookings ? (Array.isArray(data.bookings) ? data.bookings : Object.values(data.bookings)) : [];
           const prevBookings = STATE.bookings || [];
