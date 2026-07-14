@@ -3252,6 +3252,13 @@ function renderServizi(){
     $('serviziList').querySelectorAll('[data-sid]').forEach(b=>b.addEventListener('click',()=>{editSrvSalonId=b.dataset.sid;editSrv=null;renderServizi();}));
   }
   if(!targetSalon){$('serviziList').innerHTML+='<div class="empty"><div class="empty-t">Nessun salone</div></div>';return;}
+  // Re-resolved fresh from STATE.salons inside each handler below, not
+  // closed over here — the 6s background poll can replace STATE.salons
+  // with brand-new objects while this section sits open (a human editing
+  // a price easily takes longer than 6s), which would otherwise silently
+  // mutate a detached copy that never reaches STATE.salons or the server
+  // (same class of bug openWorkerModal/saveWorker were fixed for earlier).
+  const editSalonId=targetSalon.id;
   const svcs=targetSalon.services||[];
   const canEdit=r==='admin'||r==='owner';
   let html=r==='admin'?$('serviziList').innerHTML:'';
@@ -3283,15 +3290,17 @@ function renderServizi(){
   $('serviziList').querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click',()=>{editSrv=b.dataset.edit;renderServizi();}));
   $('serviziList').querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',async()=>{
     if(!confirm('Eliminare?'))return;
-    targetSalon.services=targetSalon.services.filter(x=>x.id!==b.dataset.del);
+    const liveSalon=STATE.salons.find(x=>x.id===editSalonId);if(!liveSalon)return;
+    liveSalon.services=liveSalon.services.filter(x=>x.id!==b.dataset.del);
     await saveState();renderServizi();
   }));
   $('serviziList').querySelectorAll('[data-x]').forEach(b=>b.addEventListener('click',async()=>{
     if(b.dataset.x==='cancel'){editSrv=null;renderServizi();return;}
     const name=$('esName').value.trim(),min=parseInt($('esMin').value)||0,price=parseInt($('esPrice').value)||0;
     if(name.length<2||price<=0){alert('Inserisci nome e prezzo validi');return;}
-    if(b.dataset.id==='new')targetSalon.services.push({id:'sv'+Date.now(),name,dur:min+' min',price});
-    else{const s=targetSalon.services.find(x=>x.id===b.dataset.id);if(s){s.name=name;s.dur=min+' min';s.price=price;}}
+    const liveSalon=STATE.salons.find(x=>x.id===editSalonId);if(!liveSalon)return;
+    if(b.dataset.id==='new')liveSalon.services.push({id:'sv'+Date.now(),name,dur:min+' min',price});
+    else{const s=liveSalon.services.find(x=>x.id===b.dataset.id);if(s){s.name=name;s.dur=min+' min';s.price=price;}}
     editSrv=null;await saveState();renderServizi();
   }));
 }
@@ -3334,7 +3343,11 @@ function renderDipendenti(){
   $('dipendentiList').querySelectorAll('[data-wbreak]').forEach(b=>b.addEventListener('click',()=>openBreakModal(b.dataset.wbreak,targetSalon)));
   $('dipendentiList').querySelectorAll('[data-wdel]').forEach(b=>b.addEventListener('click',async()=>{
     if(!confirm('Eliminare questo dipendente?'))return;
-    targetSalon.workers=targetSalon.workers.filter(x=>x.id!==b.dataset.wdel);
+    // Re-resolved fresh, not the targetSalon closed over above — see the
+    // comment on editSalonId in renderServizi() for why (stale reference
+    // if a background poll replaced STATE.salons while this list sat open).
+    const liveSalon=STATE.salons.find(x=>x.id===targetSalon.id);if(!liveSalon)return;
+    liveSalon.workers=liveSalon.workers.filter(x=>x.id!==b.dataset.wdel);
     await saveState();renderDipendenti();
   }));
 }
