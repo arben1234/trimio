@@ -806,7 +806,7 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
   fake.strings.set('push_subscriptions', JSON.stringify([{ subscription: { endpoint: 'x' }, role: 'customer' }]));
   fake.strings.set('lock:salonA:w1:2030-01-01:10:00', 'bkA1');
   // Folded into api/sync.js from the former standalone api/reset-all-data.js
-  // (freed a Vercel function slot for the Stripe webhook endpoint) — same
+  // (freed a Vercel function slot for the payment webhook endpoint) — same
   // body.password + verifyAdminPassword auth shape, now dispatched by action.
   const handler = await freshImport('api/sync.js');
 

@@ -207,7 +207,7 @@ export default async function handler(req, res) {
     let billingChanged = false;
     for (const salon of salons) {
       if (!salon.billing || salon.billing.pendingApproval) continue;
-      // Autopay salons are fully handled by api/stripe-webhook.js (payment
+      // Autopay salons are fully handled by api/paypal-webhook.js (payment
       // confirmation, active suspension on final retry failure) — this
       // manual warning/suspend track is only for salons still paying by
       // bank transfer.

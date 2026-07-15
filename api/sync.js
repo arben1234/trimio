@@ -10,7 +10,7 @@ import { sendEmail } from '../lib/email.js';
 import { handleLogin, handleChangePassword, getVerifiedSession, getClientIp, verifyAdminPassword } from '../lib/auth.js';
 import { isQuietHours, romeYearMonth } from '../lib/time.js';
 import { feeForWorkerCount } from '../lib/billing.js';
-import { getStripe, stripeConfigured } from '../lib/stripe.js';
+import { paypalFetch, paypalConfigured } from '../lib/paypal.js';
 
 // Fixed operational inbox (forwards to the real team, see CLAUDE.md) —
 // used for admin-facing notifications that aren't tied to a specific admin
@@ -364,7 +364,7 @@ async function notifyAdminsOfNewSignup(salonName, kvUrl, kvToken) {
 // or from someone who only knows a static confirmation phrase. Folded in
 // from the former standalone api/reset-all-data.js — same body.password +
 // verifyAdminPassword auth shape, unchanged — to free a Vercel function slot
-// for the Stripe webhook endpoint (Hobby plan caps a deployment at 12).
+// for the payment webhook endpoint (Hobby plan caps a deployment at 12).
 async function handleResetAllData(body, kvUrl, kvToken) {
   if (!body || typeof body.password !== 'string' || !body.password) {
     return { status: 400, json: { success: false, error: 'Missing password' } };
@@ -445,17 +445,48 @@ async function handleApproveSalon(body, kvUrl, kvToken, req) {
   return { status: 200, json: { success: true } };
 }
 
-// Owner-only, own-salon: creates a Stripe Checkout Session (subscription
-// mode) so the owner can activate automatic monthly card billing — an
-// opt-in alternative to the existing manual bank-transfer + admin mark-paid
-// flow, never required. Only self-signup salons (which carry a `billing`
-// object) are eligible; admin-created salons aren't billed at all.
+// The Product + Plan are long-lived and shared across every salon (only the
+// price is overridden per-subscription below) — created lazily on first use
+// and cached on admin_db so we don't recreate them on every checkout.
+async function ensurePaypalPlan(kvUrl, kvToken) {
+  const admin = await getAdminDb(kvUrl, kvToken);
+  if (admin.paypalPlanId) return admin.paypalPlanId;
+
+  const product = await paypalFetch('/v1/catalogs/products', {
+    method: 'POST',
+    body: { name: 'TRIMIO - Canone mensile', type: 'SERVICE' }
+  });
+  const plan = await paypalFetch('/v1/billing/plans', {
+    method: 'POST',
+    body: {
+      product_id: product.id,
+      name: 'TRIMIO Monthly',
+      status: 'ACTIVE',
+      billing_cycles: [{
+        frequency: { interval_unit: 'MONTH', interval_count: 1 },
+        tenure_type: 'REGULAR',
+        sequence: 1,
+        total_cycles: 0, // 0 = renews until cancelled, not a fixed-term plan
+        pricing_scheme: { fixed_price: { value: '1.00', currency_code: 'EUR' } }
+      }],
+      payment_preferences: { auto_bill_outstanding: true, payment_failure_threshold: 3 }
+    }
+  });
+  await setAdminDb(kvUrl, kvToken, { ...admin, paypalProductId: product.id, paypalPlanId: plan.id });
+  return plan.id;
+}
+
+// Owner-only, own-salon: creates a PayPal subscription so the owner can
+// activate automatic monthly card billing — an opt-in alternative to the
+// existing manual bank-transfer + admin mark-paid flow, never required.
+// Only self-signup salons (which carry a `billing` object) are eligible;
+// admin-created salons aren't billed at all.
 async function handleCreateBillingCheckoutSession(body, kvUrl, kvToken, req) {
   const session = getVerifiedSession(req);
   if (!session || session.role !== 'owner' || session.salonId !== body.salonId) {
     return { status: 403, json: { success: false, error: 'forbidden' } };
   }
-  if (!stripeConfigured()) {
+  if (!paypalConfigured()) {
     return { status: 200, json: { success: false, error: 'not_configured' } };
   }
 
@@ -465,100 +496,96 @@ async function handleCreateBillingCheckoutSession(body, kvUrl, kvToken, req) {
   if (!salon.billing) return { status: 409, json: { success: false, error: 'billing_not_applicable' } };
   if (salon.billing.autopay) return { status: 200, json: { success: false, error: 'already_active' } };
 
-  const stripe = getStripe();
   const fee = feeForWorkerCount(Math.max((salon.workers || []).length, salon.billing.declaredWorkerCount || 0));
 
-  // Reuse an existing Stripe Customer when we have one (e.g. a previous
-  // subscription was cancelled and the owner is reactivating) — but the
-  // customer could have been deleted directly in the Stripe dashboard, so
-  // fall back to creating a fresh one rather than passing a dead id through.
-  let customerId = salon.billing.stripeCustomerId;
-  if (customerId) {
-    try {
-      const existing = await stripe.customers.retrieve(customerId);
-      if (existing.deleted) customerId = null;
-    } catch {
-      customerId = null;
-    }
-  }
-  if (!customerId) {
-    try {
-      const customer = await stripe.customers.create({ email: salon.email, metadata: { salonId: salon.id } });
-      customerId = customer.id;
-    } catch (err) {
-      console.error('[BILLING] Stripe customer creation failed:', err.message);
-      return { status: 502, json: { success: false, error: 'stripe_error' } };
-    }
-  }
-
-  let checkoutSession;
+  let subscription;
   try {
-    checkoutSession = await stripe.checkout.sessions.create({
-      mode: 'subscription',
-      customer: customerId,
-      client_reference_id: salon.id,
-      // Attached to the Subscription itself (not just this transient
-      // Session) — Stripe webhook delivery isn't ordered, so invoice.paid
-      // for the first invoice can arrive before checkout.session.completed
-      // has written stripeCustomerId onto the salon. This lets the webhook
-      // correlate by salonId as a fallback instead of losing that event.
-      subscription_data: { metadata: { salonId: salon.id } },
-      line_items: [{
-        price_data: {
-          currency: 'eur',
-          unit_amount: fee * 100,
-          recurring: { interval: 'month' },
-          product_data: { name: 'Canone mensile TRIMIO' }
+    const planId = await ensurePaypalPlan(kvUrl, kvToken);
+    subscription = await paypalFetch('/v1/billing/subscriptions', {
+      method: 'POST',
+      body: {
+        plan_id: planId,
+        // Echoed back on every webhook event for this subscription — the
+        // PayPal equivalent of Stripe's client_reference_id/metadata, used
+        // to correlate an incoming event back to a salon.
+        custom_id: salon.id,
+        // Per-subscription price override — PayPal has no ad-hoc "price at
+        // checkout" object like Stripe's price_data, so the shared Plan
+        // carries a placeholder price and every real subscription overrides
+        // it with this salon's actual fee tier.
+        plan: {
+          billing_cycles: [{
+            sequence: 1,
+            pricing_scheme: { fixed_price: { value: fee.toFixed(2), currency_code: 'EUR' } }
+          }]
         },
-        quantity: 1
-      }],
-      success_url: 'https://trimio.org/#DASHBOARD',
-      cancel_url: 'https://trimio.org/#DASHBOARD'
+        application_context: {
+          brand_name: 'TRIMIO',
+          user_action: 'SUBSCRIBE_NOW',
+          return_url: 'https://trimio.org/#DASHBOARD',
+          cancel_url: 'https://trimio.org/#DASHBOARD'
+        }
+      }
     });
   } catch (err) {
-    console.error('[BILLING] Stripe checkout session creation failed:', err.message);
-    return { status: 502, json: { success: false, error: 'stripe_error' } };
+    console.error('[BILLING] PayPal subscription creation failed:', err.message);
+    return { status: 502, json: { success: false, error: 'paypal_error' } };
   }
 
-  // Persist immediately rather than waiting for the webhook — a reload
-  // before checkout.session.completed lands shouldn't lose the association.
-  salon.billing.stripeCustomerId = customerId;
+  const approveLink = (subscription.links || []).find(l => l.rel === 'approve');
+  if (!approveLink) {
+    console.error('[BILLING] PayPal subscription response missing approve link:', JSON.stringify(subscription));
+    return { status: 502, json: { success: false, error: 'paypal_error' } };
+  }
+
+  // Persisted immediately (pending) so a reload before the ACTIVATED webhook
+  // lands doesn't lose the association — autopay itself only flips true once
+  // api/paypal-webhook.js confirms the buyer actually approved it.
+  salon.billing.paypalSubscriptionId = subscription.id;
   await setSalonsDb(kvUrl, kvToken, salons);
 
-  return { status: 200, json: { success: true, url: checkoutSession.url } };
+  return { status: 200, json: { success: true, url: approveLink.href } };
 }
 
-// Owner-only, own-salon: opens the Stripe-hosted Billing Portal so the owner
-// can update their card, view invoices, or cancel automatic billing —
-// without any of that needing custom UI here. Requires autopay to have
-// already been activated at least once (there's a Stripe Customer to manage).
-async function handleCreateBillingPortalSession(body, kvUrl, kvToken, req) {
+// Owner-only, own-salon: cancels the PayPal subscription directly — PayPal
+// has no Stripe-Billing-Portal equivalent to redirect to for self-service
+// card updates, so this is a direct API call instead. Card updates aren't
+// possible on an existing subscription either way; the owner reactivates
+// (a new subscription) if they need to change the card. Requires autopay to
+// have already been activated at least once (there's a subscription to act on).
+async function handleCancelBillingSubscription(body, kvUrl, kvToken, req) {
   const session = getVerifiedSession(req);
   if (!session || session.role !== 'owner' || session.salonId !== body.salonId) {
     return { status: 403, json: { success: false, error: 'forbidden' } };
   }
-  if (!stripeConfigured()) {
+  if (!paypalConfigured()) {
     return { status: 200, json: { success: false, error: 'not_configured' } };
   }
 
   const salons = await getSalonsDb(kvUrl, kvToken);
   const salon = salons.find(s => s.id === body.salonId);
   if (!salon) return { status: 404, json: { success: false, error: 'salon_not_found' } };
-  if (!salon.billing || !salon.billing.stripeCustomerId) {
+  if (!salon.billing || !salon.billing.paypalSubscriptionId) {
     return { status: 409, json: { success: false, error: 'no_subscription' } };
   }
 
   try {
-    const stripe = getStripe();
-    const portalSession = await stripe.billingPortal.sessions.create({
-      customer: salon.billing.stripeCustomerId,
-      return_url: 'https://trimio.org/#DASHBOARD'
+    await paypalFetch(`/v1/billing/subscriptions/${encodeURIComponent(salon.billing.paypalSubscriptionId)}/cancel`, {
+      method: 'POST',
+      body: { reason: 'Disattivato dal proprietario dal pannello TRIMIO' }
     });
-    return { status: 200, json: { success: true, url: portalSession.url } };
   } catch (err) {
-    console.error('[BILLING] Stripe billing portal session creation failed:', err.message);
-    return { status: 502, json: { success: false, error: 'stripe_error' } };
+    console.error('[BILLING] PayPal subscription cancel failed:', err.message);
+    return { status: 502, json: { success: false, error: 'paypal_error' } };
   }
+
+  // Reflected immediately rather than waiting for the CANCELLED webhook —
+  // the owner is looking at this screen right now and the cancel call above
+  // already succeeded synchronously.
+  salon.billing.autopay = false;
+  await setSalonsDb(kvUrl, kvToken, salons);
+
+  return { status: 200, json: { success: true } };
 }
 
 function isValidBooking(b) {
@@ -743,8 +770,8 @@ export default async function handler(req, res) {
           const r = await handleCreateBillingCheckoutSession(newData, kvUrl, kvToken, req);
           return res.status(r.status).json(r.json);
         }
-        if (newData && newData.action === 'create_billing_portal_session') {
-          const r = await handleCreateBillingPortalSession(newData, kvUrl, kvToken, req);
+        if (newData && newData.action === 'cancel_billing_subscription') {
+          const r = await handleCancelBillingSubscription(newData, kvUrl, kvToken, req);
           return res.status(r.status).json(r.json);
         }
 

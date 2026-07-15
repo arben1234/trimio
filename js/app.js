@@ -3021,9 +3021,13 @@ function renderDash(){
 }
 
 /* ---- FATTURAZIONE (owner, self-signup salons only) ----
-   Pagamento automatico mensile con carta via Stripe — un'alternativa
+   Pagamento automatico mensile con carta via PayPal — un'alternativa
    opzionale al bonifico bancario manuale + conferma admin esistenti. Se il
-   proprietario non lo attiva mai, nulla cambia per lui. */
+   proprietario non lo attiva mai, nulla cambia per lui. PayPal non ha un
+   "portale di gestione" ospitato come altri processori: il pulsante qui
+   sotto disattiva direttamente l'abbonamento; per cambiare la carta il
+   proprietario riattiva (crea un nuovo abbonamento), oppure gestisce da solo
+   dal proprio account PayPal. */
 function renderFatturazione(){
   const salon=getSalon();
   const box=$('fatturazioneBox');
@@ -3040,11 +3044,11 @@ function renderFatturazione(){
   let actionHtml='';
   if(b.autopay){
     actionHtml=`
-      <p style="font-size:13px;color:#52525b;margin:10px 0 14px;">Pagamento automatico con carta attivo. Il canone viene addebitato automaticamente ogni mese.</p>
-      <button class="btn btn-main" id="fattManageBtn">Gestisci pagamento</button>`;
+      <p style="font-size:13px;color:#52525b;margin:10px 0 14px;">Pagamento automatico con PayPal attivo. Il canone viene addebitato automaticamente ogni mese. Puoi gestire il metodo di pagamento anche dal tuo account PayPal (<a href="https://www.paypal.com/myaccount/autopay/" target="_blank" rel="noopener">paypal.com/myaccount/autopay</a>).</p>
+      <button class="btn btn-ghost" id="fattCancelBtn">Disattiva pagamento automatico</button>`;
   } else {
     actionHtml=`
-      <p style="font-size:13px;color:#52525b;margin:10px 0 14px;">Attiva il pagamento automatico con carta per non doverti più preoccupare del bonifico mensile. La tariffa resta fissa a €${fee}/mese finché non disattivi il pagamento automatico, anche se il numero di barbieri cambia.</p>
+      <p style="font-size:13px;color:#52525b;margin:10px 0 14px;">Attiva il pagamento automatico con PayPal per non doverti più preoccupare del bonifico mensile. La tariffa resta fissa a €${fee}/mese finché non disattivi il pagamento automatico, anche se il numero di barbieri cambia.</p>
       <button class="btn btn-main" id="fattActivateBtn">Attiva pagamento automatico</button>`;
   }
 
@@ -3064,13 +3068,14 @@ function renderFatturazione(){
       alert(r&&r.error==='not_configured'?'Il pagamento automatico non è ancora disponibile — riprova più tardi.':'Errore durante l\'attivazione. Riprova.');
     }
   });
-  $('fattManageBtn')?.addEventListener('click', async (e)=>{
+  $('fattCancelBtn')?.addEventListener('click', async (e)=>{
+    if(!confirm('Disattivare il pagamento automatico? Dovrai tornare al bonifico bancario manuale finché non lo riattivi.'))return;
     const btn=e.target;btn.disabled=true;btn.textContent='…';
-    const r=await createBillingPortalSession(salon.id);
-    if(r&&r.success&&r.url){ location.href=r.url; }
+    const r=await cancelBillingSubscription(salon.id);
+    if(r&&r.success){ salon.billing.autopay=false; renderFatturazione(); }
     else{
-      btn.disabled=false;btn.textContent='Gestisci pagamento';
-      alert('Errore durante l\'apertura della gestione pagamento. Riprova.');
+      btn.disabled=false;btn.textContent='Disattiva pagamento automatico';
+      alert('Errore durante la disattivazione. Riprova.');
     }
   });
 }
@@ -3080,9 +3085,9 @@ async function createBillingCheckoutSession(salonId){
     return await resp.json().catch(()=>({}));
   }catch(e){return {success:false,error:'network'};}
 }
-async function createBillingPortalSession(salonId){
+async function cancelBillingSubscription(salonId){
   try{
-    const resp=await fetch('/api/sync',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify({action:'create_billing_portal_session',salonId})});
+    const resp=await fetch('/api/sync',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify({action:'cancel_billing_subscription',salonId})});
     return await resp.json().catch(()=>({}));
   }catch(e){return {success:false,error:'network'};}
 }
@@ -3879,7 +3884,7 @@ function renderSaloni(){
         const paid=s.billing.paidThroughMonth>=nowMonth;
         const label=paid?'PAGATO':(s.billing.suspendedByBilling?'SOSPESO':'IN SCADENZA');
         const color=paid?'#10b981':(s.billing.suspendedByBilling?'#ef4444':'#f59e0b');
-        // Auto-pay salons are tracked by the Stripe webhook, not this manual
+        // Auto-pay salons are tracked by the payment webhook, not this manual
         // 💶 button — the badge tells admin not to expect to need it here.
         const autoBadge=s.billing.autopay?`<span style="padding:3px 8px;border-radius:8px;font-size:10px;font-weight:800;background:#4f46e5;color:#fff;margin-left:4px;">🔄 Auto</span>`:'';
         const failingBadge=s.billing.paymentFailing?`<span style="padding:3px 8px;border-radius:8px;font-size:10px;font-weight:800;background:#ef4444;color:#fff;margin-left:4px;">⚠️ pagamento fallito</span>`:'';

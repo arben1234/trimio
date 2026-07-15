@@ -60,12 +60,6 @@ function readBody(req) {
     let data = '';
     req.on('data', chunk => { data += chunk; });
     req.on('end', () => {
-      // Stashed unconditionally (harmless for every other handler) so
-      // api/stripe-webhook.js can verify its signature against the exact raw
-      // bytes Stripe signed — this dev server always consumes+parses the
-      // stream itself before any handler runs, unlike Vercel production,
-      // which that file disables bodyParser for and reads the stream itself.
-      req.rawBody = data;
       if (!data) return resolve(undefined);
       try { resolve(JSON.parse(data)); } catch { resolve(data); }
     });
