@@ -694,17 +694,22 @@ export default async function handler(req, res) {
         // directly, so the client has no need to hold these locally at all.
         const session = getVerifiedSession(req);
         const isAdminCaller = !!(session && session.role === 'admin');
-        // billing (iban, taxId, signupIp, paidThroughMonth, ...), the
-        // owner's personal email/name/phone, and their login username are
-        // admin-review-only data — this used to strip only the two password
-        // fields, so EVERY salon's full record (including every other
-        // salon's IBAN/tax id) shipped to any caller, authenticated or not.
-        // No client UI outside the admin dashboard ever reads these fields
-        // (verified: not even a salon's own owner/barber dashboard does),
-        // so they're simply omitted for anyone but an admin session.
+        // iban/taxId/signupIp/contract fields, the owner's personal
+        // email/name/phone, and their login username are admin-review-only
+        // data — this used to strip only the two password fields, so EVERY
+        // salon's full record (including every other salon's IBAN/tax id)
+        // shipped to any caller, authenticated or not. No client UI outside
+        // the admin dashboard reads email/ownerName/ownerPhone/ownerUsername,
+        // so those stay admin-only. `billing` itself, though, is also read by
+        // the owner's own "Fatturazione" dashboard section (fee tier, paid
+        // status, autopay state) — so a salon's own owner needs it back for
+        // their own salon specifically, never for any other salon.
         const sanitizedSalons = salons.map(({ ownerPassword, workers, billing, email, ownerName, ownerPhone, ownerUsername, ...rest }) => {
           const base = { ...rest, workers: (workers || []).map(({ password, ...w }) => w) };
-          return isAdminCaller ? { ...base, billing, email, ownerName, ownerPhone, ownerUsername } : base;
+          if (isAdminCaller) return { ...base, billing, email, ownerName, ownerPhone, ownerUsername };
+          const isOwnSalonOwner = session && session.role === 'owner' && session.salonId === rest.id;
+          if (isOwnSalonOwner) return { ...base, billing };
+          return base;
         });
         return res.status(200).json({
           bookings: scopeBookingsForSession(Array.from(bookingsMap.values()), session),
