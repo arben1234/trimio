@@ -16,7 +16,10 @@ if (VAPID_PRIVATE_KEY) {
 //  - ~3h before: every confirmed booking for "today" whose start time is at
 //    most 3 hours away (booking.sameDayReminderSent). For early-morning
 //    appointments (e.g. 9:00) it lands at the 8:00 run instead — only 1h
-//    before, because of the 8:00 floor.
+//    before, because of the 8:00 floor. For evening appointments whose ideal
+//    3h-before instant falls too close to (or after) 20:00, it goes out
+//    during the last run before the cutoff instead — earlier than 3h, but
+//    still same-day, instead of never going out at all.
 // A booking never gets more than one reminder per day: the two kinds fire on
 // different days, so a customer who booked days ahead gets 2 in total, and a
 // same-day booking gets only the ~3h one. The customer receives them only if
@@ -62,12 +65,24 @@ export default async function handler(req, res) {
     const dueTomorrow = all.filter(
       b => b.status === 'confirmed' && b.dateISO === now.tomorrowISO && !b.reminderSent
     );
+    // Once we're within the last hour before the 20:00 cutoff, this is the
+    // final chance to remind anyone about an appointment later today — the
+    // next hourly tick either lands inside quiet hours (no more sends) or,
+    // by tomorrow's first run, the date will no longer be "today" at all.
+    // An evening appointment whose ideal "exactly 3h before" instant falls
+    // between two hourly ticks (or after 20:00 entirely) would otherwise be
+    // silently missed forever instead of just getting a slightly-earlier
+    // reminder — same "closest achievable" principle the 8:00 floor already
+    // applies to early-morning bookings on the other end of the day.
+    const lastChanceBeforeQuietHours = now.minutes >= 19 * 60;
     const dueToday = all.filter(b => {
       if (b.status !== 'confirmed' || b.dateISO !== now.todayISO || b.sameDayReminderSent) return false;
       const start = bookingMinutes(b.time);
       if (start === null) return false;
       const left = start - now.minutes;
-      return left > 0 && left <= 3 * 60;
+      if (left <= 0) return false;
+      if (left <= 3 * 60) return true;
+      return lastChanceBeforeQuietHours;
     });
     const salons = await getSalonsDb(kvUrl, kvToken);
 
