@@ -500,11 +500,20 @@ export default async function handler(req, res) {
         // password change now go through the action-based branches of the
         // POST handler below (backed by lib/auth.js), which read/write KV
         // directly, so the client has no need to hold these locally at all.
-        const sanitizedSalons = salons.map(({ ownerPassword, workers, ...rest }) => ({
-          ...rest,
-          workers: (workers || []).map(({ password, ...w }) => w)
-        }));
         const session = getVerifiedSession(req);
+        const isAdminCaller = !!(session && session.role === 'admin');
+        // billing (iban, taxId, signupIp, paidThroughMonth, ...), the
+        // owner's personal email/name/phone, and their login username are
+        // admin-review-only data — this used to strip only the two password
+        // fields, so EVERY salon's full record (including every other
+        // salon's IBAN/tax id) shipped to any caller, authenticated or not.
+        // No client UI outside the admin dashboard ever reads these fields
+        // (verified: not even a salon's own owner/barber dashboard does),
+        // so they're simply omitted for anyone but an admin session.
+        const sanitizedSalons = salons.map(({ ownerPassword, workers, billing, email, ownerName, ownerPhone, ownerUsername, ...rest }) => {
+          const base = { ...rest, workers: (workers || []).map(({ password, ...w }) => w) };
+          return isAdminCaller ? { ...base, billing, email, ownerName, ownerPhone, ownerUsername } : base;
+        });
         return res.status(200).json({
           bookings: scopeBookingsForSession(Array.from(bookingsMap.values()), session),
           salons: sanitizedSalons,
@@ -755,6 +764,27 @@ export default async function handler(req, res) {
                 // so any password it sends back here is stale/blank. Password
                 // changes only happen through /api/change-password.
                 incoming.ownerPassword = existing.ownerPassword;
+                // Billing (fee tier, paidThroughMonth, suspendedByBilling,
+                // pendingApproval, iban/taxId/signupIp, ...), the owner's
+                // personal contact info, and their login username are
+                // admin-review-only — an owner's own client no longer even
+                // receives these fields from GET (see the sanitizedSalons
+                // change above), so without this an owner's very next save
+                // of anything (a vacation date, a new worker...) would wipe
+                // them to undefined. Also closes the escalation this was
+                // protecting against even before that: a client that DID
+                // still hold stale values (or a hand-crafted request) could
+                // set its own billing.paidThroughMonth into the future or
+                // clear suspendedByBilling to dodge the payment-suspension
+                // cron in api/daily-health-check.js.
+                if (session.role !== 'admin') {
+                  incoming.billing = existing.billing;
+                  incoming.email = existing.email;
+                  incoming.ownerName = existing.ownerName;
+                  incoming.ownerPhone = existing.ownerPhone;
+                  incoming.ownerUsername = existing.ownerUsername;
+                  incoming.inactive = existing.inactive;
+                }
                 // Reviews only ever change through action=submit_review (see
                 // handleSubmitReview below) now — never through this bulk
                 // path, which sends the client's last-known LOCAL snapshot
