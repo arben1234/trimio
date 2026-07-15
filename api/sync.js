@@ -4,7 +4,7 @@ import {
   tryAcquireSlotLock, promoteLock, releaseSlotLock, hsetBooking,
   acquireBarberDayLock, releaseBarberDayLock, checkRateLimit,
   ensureMigratedV2, getAdminDb, setAdminDb,
-  acquireBillingLock, releaseBillingLock
+  acquireBillingLock, releaseBillingLock, claimCancellationNotifyOnce
 } from '../lib/kv.js';
 import { sendCustomerText, toE164, twilioConfigured } from '../lib/sms.js';
 import { sendEmail } from '../lib/email.js';
@@ -649,6 +649,28 @@ function isValidSalonsArray(salons) {
     && salons.every(s => s && typeof s === 'object' && typeof s.id === 'string' && s.id);
 }
 
+// A brand-new salon (no `existing` match in the bulk-save loop below) can
+// only ever come from an admin session — an owner's isAuthorizedEditor check
+// requires session.salonId === incoming.id, which only ever matches a salon
+// they already own. Until now, isValidSalonsArray's bare "has a non-empty
+// id" check was the ONLY server-side validation a new salon got; everything
+// else (name, slug, owner credentials) was trusted verbatim from the client.
+// A duplicate slug in particular silently made a salon unreachable by its
+// own URL/QR code (every slug lookup is a first-match find()), with no
+// error surfaced anywhere.
+function isValidNewSalon(s, existingSalonsMap) {
+  if (typeof s.name !== 'string' || s.name.trim().length < 2) return false;
+  if (typeof s.slug !== 'string' || !/^[A-Z0-9_]{2,50}$/.test(s.slug)) return false;
+  if (typeof s.ownerUsername !== 'string' || !/^[a-zA-Z0-9._-]{3,30}$/.test(s.ownerUsername)) return false;
+  if (typeof s.ownerPassword !== 'string' || s.ownerPassword.length < 4) return false;
+  for (const other of existingSalonsMap.values()) {
+    if (other.id === s.id) continue;
+    if (other.slug === s.slug) return false;
+    if (other.ownerUsername === s.ownerUsername) return false;
+  }
+  return true;
+}
+
 // Mirrors js/app.js's isOnVacation/isWeeklyOff — the UI already hides these
 // slots from the customer, but nothing stopped a request POSTed directly to
 // this endpoint (bypassing the UI entirely) from booking a worker during
@@ -959,7 +981,12 @@ export default async function handler(req, res) {
                 await releaseSlotLock(kvUrl, kvToken, merged);
                 // Only a STAFF-initiated cancellation is news to the customer —
                 // if they cancelled it themselves there's nothing to tell them.
-                if (existing.status !== 'cancelled' && merged.cancelledBy === 'staff') {
+                // claimCancellationNotifyOnce dedupes two concurrent requests
+                // for the same booking (this branch takes no per-booking lock)
+                // down to a single notification — the cancellation itself is
+                // written correctly by both either way.
+                if (existing.status !== 'cancelled' && merged.cancelledBy === 'staff'
+                    && await claimCancellationNotifyOnce(kvUrl, kvToken, merged.id)) {
                   staffCancelledBks.push(merged);
                 }
               }
@@ -1029,6 +1056,12 @@ export default async function handler(req, res) {
               if (!isAuthorizedEditor) {
                 console.warn('[SYNC] Rejected unauthorized salon write for', incoming.id);
                 continue; // existing record (or absence of one) is left untouched
+              }
+              if (!existing) {
+                if (!isValidNewSalon(incoming, salonMap)) {
+                  console.warn('[SYNC] Rejected invalid new salon payload for', incoming.id);
+                  continue;
+                }
               }
               if (existing) {
                 // Credentials for anything that already exists must never be

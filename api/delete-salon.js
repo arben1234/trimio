@@ -65,12 +65,44 @@ export default async function handler(req, res) {
     // Clean up bookings + slot locks that belonged to this salon.
     const bookingsMap = await getAllBookings(kvUrl, kvToken);
     let removedBookings = 0;
+    const removedBookingIds = new Set();
     for (const b of bookingsMap.values()) {
       if (b.salonId === salonId) {
         await kvCmd(kvUrl, kvToken, ['HDEL', 'bookings', b.id]);
         await releaseSlotLock(kvUrl, kvToken, b);
+        removedBookingIds.add(b.id);
         removedBookings++;
       }
+    }
+
+    // Push subscriptions used to just accumulate forever after a salon was
+    // deleted — the owner's/barbers' own subscriptions (scoped by salonId)
+    // and any customer subscription tied to one of this salon's now-deleted
+    // bookings are cleaned up here too. Best-effort: a failure here doesn't
+    // undo the delete, which has already happened above.
+    try {
+      const subResp = await fetch(`${kvUrl}/get/push_subscriptions`, { headers: { Authorization: `Bearer ${kvToken}` } });
+      if (subResp.ok) {
+        const subData = await subResp.json();
+        if (subData.result) {
+          let subs = JSON.parse(subData.result);
+          if (typeof subs === 'string') subs = JSON.parse(subs);
+          if (Array.isArray(subs)) {
+            const filtered = subs.filter(sub =>
+              sub.salonId !== salonId && !(sub.bookingId && removedBookingIds.has(sub.bookingId))
+            );
+            if (filtered.length !== subs.length) {
+              await fetch(`${kvUrl}/set/push_subscriptions`, {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${kvToken}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify(JSON.stringify(filtered))
+              });
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[DELETE-SALON] Failed to clean up push subscriptions:', err.message);
     }
 
     console.log(`[DELETE-SALON] Deleted salon "${salon.name}" (${salonId}) and ${removedBookings} booking(s)`);

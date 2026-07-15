@@ -3316,7 +3316,11 @@ function renderClienti(){
   bks.forEach(b=>{
     const k=(b.name||'Cliente').trim().toLowerCase();
     if(!map[k])map[k]={name:b.name||'Cliente',visits:0,spent:0,last:'',month:0};
-    const c=map[k];c.visits++;c.spent+=(b.price||0);
+    const c=map[k];c.visits++;
+    // Revenue only counts bookings actually completed (not yet-to-happen
+    // "confirmed" ones), matching how Stats/Oggi already compute incasso —
+    // visits/month/last stay unrestricted since those track engagement, not money.
+    if(b.status==='completed')c.spent+=(b.price||0);
     if(b.dateISO>c.last)c.last=b.dateISO;
     if((b.dateISO||'').slice(0,7)===mk)c.month++;
   });
@@ -3610,10 +3614,12 @@ function filterByPeriod(bks){
   if(statsPeriod==='settimana'){
     const d=new Date();d.setDate(d.getDate()-7);
     const iso = isoOf(d.getFullYear(), d.getMonth(), d.getDate());
-    return bks.filter(b=>b.dateISO>=iso);
+    // Upper-bounded at today — without this, a booking already taken for
+    // NEXT week/month/year showed up in "this" period's stats too.
+    return bks.filter(b=>b.dateISO>=iso&&b.dateISO<=tiso);
   }
-  if(statsPeriod==='mese'){const k=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;return bks.filter(b=>b.dateISO>=k);}
-  if(statsPeriod==='anno')return bks.filter(b=>b.dateISO>=(now.getFullYear()+'-01-01'));
+  if(statsPeriod==='mese'){const k=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;return bks.filter(b=>b.dateISO>=k&&b.dateISO<=tiso);}
+  if(statsPeriod==='anno')return bks.filter(b=>b.dateISO>=(now.getFullYear()+'-01-01')&&b.dateISO<=tiso);
   if(statsPeriod==='custom'&&statFrom&&statTo)return bks.filter(b=>b.dateISO>=statFrom&&b.dateISO<=statTo);
   return bks;
 }
@@ -4267,21 +4273,30 @@ async function saveSalon(){
       if (!r || !r.success) return; // adminSetPassword already alerted the reason
     }
 
+    // Re-resolved fresh, not the `s` captured above — a background sync poll
+    // can replace STATE.salons wholesale while the awaited adminSetPassword
+    // request was in flight, which would otherwise leave the service edits
+    // below silently mutating a detached copy that never reaches STATE
+    // (same stale-reference bug class fixed elsewhere in this file, e.g.
+    // renderDipendenti's delete handler).
+    const liveSalon = STATE.salons.find(x=>x.id===salonEditId);
+    if(!liveSalon) return;
+
     // Save Services list prices and durations
     const priceInputs = $('smServicesList').querySelectorAll('.sm-svc-price');
     const durInputs = $('smServicesList').querySelectorAll('.sm-svc-dur');
-    
+
     priceInputs.forEach(input => {
       const name = input.dataset.name;
       const price = parseInt(input.value) || 0;
-      const svc = s.services.find(x => x.name === name);
+      const svc = liveSalon.services.find(x => x.name === name);
       if (svc) svc.price = price;
     });
-    
+
     durInputs.forEach(input => {
       const name = input.dataset.name;
       const dur = input.value.trim() || '30 min';
-      const svc = s.services.find(x => x.name === name);
+      const svc = liveSalon.services.find(x => x.name === name);
       if (svc) svc.dur = dur;
     });
   }
