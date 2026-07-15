@@ -557,6 +557,11 @@ async function handleCreateBillingCheckoutSession(body, kvUrl, kvToken, req) {
           plan: {
             billing_cycles: [{
               sequence: 1,
+              // Matches the base plan's own total_cycles (ensurePaypalPlan
+              // above) explicitly, rather than relying on this override
+              // implicitly inheriting it — an unconfirmed assumption not
+              // worth carrying into money-handling code.
+              total_cycles: 0,
               pricing_scheme: { fixed_price: { value: fee.toFixed(2), currency_code: 'EUR' } }
             }]
           },

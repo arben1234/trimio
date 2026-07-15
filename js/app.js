@@ -4152,7 +4152,14 @@ async function suSubmit(){
         invalid_email:'Indirizzo email non valido.',
         disposable_email:'Usa un indirizzo email permanente, non temporaneo.',
         phone_not_verified:'Devi prima verificare il tuo numero di telefono.',
-        rate_limited:'Troppi tentativi, riprova più tardi.'
+        rate_limited:'Troppi tentativi, riprova più tardi.',
+        invalid_owner_name:'Inserisci il tuo nome e cognome.',
+        invalid_salon_name:'Inserisci il nome del salone.',
+        invalid_city:'Inserisci la città del salone.',
+        invalid_address:'Inserisci l\'indirizzo del salone.',
+        invalid_salon_phone:'Numero di telefono del salone non valido.',
+        invalid_worker_count:'Inserisci un numero di barbieri valido.',
+        contract_not_accepted:'Devi accettare le condizioni del contratto.'
       };
       showErr('suErr',msgs[r.error]||'Errore durante l\'invio. Riprova.');
     }
