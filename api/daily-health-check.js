@@ -3,11 +3,7 @@ import { put, list, del } from '@vercel/blob';
 import { getAllBookings, getSalonsDb, setSalonsDb, getAdminDb, getBlob, setBlob } from '../lib/kv.js';
 import { twilioConfigured } from '../lib/sms.js';
 import { sendEmail } from '../lib/email.js';
-
-// Mirrors js/app.js's feeForWorkerCount — self-signup salons pick a fee tier
-// by declared/actual barber count: €50 (1-5), €100 (6-10), €150 (11-15), and
-// the same +€50-per-5-barber band extrapolated beyond that.
-function feeForWorkerCount(n) { return Math.ceil(Math.max(Number(n) || 1, 1) / 5) * 50; }
+import { feeForWorkerCount } from '../lib/billing.js';
 
 const VAPID_PUBLIC_KEY = 'BLLKr1SroPRHybfSN2OunQUzy6yd5hggq2fmAmT90LL32Pgyaa_VkoESjUq3DGk0bgD2a5tb17bSZHc2heLJXGo';
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY?.trim();
@@ -211,6 +207,11 @@ export default async function handler(req, res) {
     let billingChanged = false;
     for (const salon of salons) {
       if (!salon.billing || salon.billing.pendingApproval) continue;
+      // Autopay salons are fully handled by api/stripe-webhook.js (payment
+      // confirmation, active suspension on final retry failure) — this
+      // manual warning/suspend track is only for salons still paying by
+      // bank transfer.
+      if (salon.billing.autopay) continue;
       if (salon.billing.paidThroughMonth >= currentMonth) continue; // paid up
 
       if (dayOfMonth >= 2 && dayOfMonth <= 5) {

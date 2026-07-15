@@ -796,7 +796,7 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
   eq(r2.status, 404, 'delete-salon returns 404 for an unknown salonId');
 });
 
-section('api/reset-all-data.js — wipe all test data before going live (fake KV, no live network)');
+section('api/sync.js action:reset_all_data — wipe all test data before going live (fake KV, no live network)');
 await withFakeKv(makeFakeRedis(), async (fake) => {
   fake.strings.set('salons_db', JSON.stringify([{ id: 'salonA', name: 'Salon A' }]));
   fake.strings.set('admin_db', JSON.stringify({ username: 'admin', password: 'realSecret1' }));
@@ -805,19 +805,22 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
   ]));
   fake.strings.set('push_subscriptions', JSON.stringify([{ subscription: { endpoint: 'x' }, role: 'customer' }]));
   fake.strings.set('lock:salonA:w1:2030-01-01:10:00', 'bkA1');
-  const handler = await freshImport('api/reset-all-data.js');
+  // Folded into api/sync.js from the former standalone api/reset-all-data.js
+  // (freed a Vercel function slot for the Stripe webhook endpoint) — same
+  // body.password + verifyAdminPassword auth shape, now dispatched by action.
+  const handler = await freshImport('api/sync.js');
 
   const r0 = mkRes();
-  await handler({ method: 'POST', body: {} }, r0.obj);
+  await handler({ method: 'POST', body: { action: 'reset_all_data' } }, r0.obj);
   eq(r0.status, 400, 'rejects a request with no password at all');
 
   const r1 = mkRes();
-  await handler({ method: 'POST', body: { password: 'wrongPassword' } }, r1.obj);
+  await handler({ method: 'POST', body: { action: 'reset_all_data', password: 'wrongPassword' } }, r1.obj);
   eq(r1.status, 401, 'rejects a request with an incorrect admin password');
   ok(fake.strings.has('salons_db') && JSON.parse(fake.strings.get('salons_db')).length === 1, 'salons_db untouched after a rejected password');
 
   const r2 = mkRes();
-  await handler({ method: 'POST', body: { password: 'realSecret1' } }, r2.obj);
+  await handler({ method: 'POST', body: { action: 'reset_all_data', password: 'realSecret1' } }, r2.obj);
   ok(r2.status === 200 && r2.body.success === true, 'wipes everything once the correct current admin password is provided');
   eq(JSON.parse(fake.strings.get('salons_db')).length, 0, 'salons_db is now an empty array');
   ok(!fake.hashes.has('bookings') || fake.hashes.get('bookings').size === 0, 'bookings hash is emptied');

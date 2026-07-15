@@ -742,6 +742,14 @@
           <button class="add-srv" id="addWorkerBtn">+ Aggiungi dipendente</button>
         </section>
 
+        <!-- FATTURAZIONE — Solo Livello 2 (owner), solo saloni self-signup
+             (quelli con un oggetto billing). Pagamento automatico con carta
+             via Stripe, opzionale, alternativo al bonifico manuale. -->
+        <section class="d-sec" id="secFatturazione">
+          <div class="sec-h">Fatturazione</div>
+          <div id="fatturazioneBox"></div>
+        </section>
+
         <!-- STATISTICHE — Livelli 1, 2, 3 (con scope diverso) -->
         <section class="d-sec" id="secStats">
           <div class="sec-h">Statistiche</div>
@@ -1160,6 +1168,6 @@
      own "Save as PDF" print target produces a clean report. -->
 <div id="printableStats"></div>
 
-<script src="/js/app.min.js?v=20260715_0003"></script>
+<script src="/js/app.min.js?v=20260715_0004"></script>
 </body>
 </html>

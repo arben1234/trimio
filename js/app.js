@@ -2886,6 +2886,13 @@ function navItems(){
       {sec:'servizi',     ic:'✂️',label:'Servizi'},
       {sec:'stats',       ic:'📊',label:'Statistiche'},
     ];
+    // Only self-signup salons carry a billing object — admin-created salons
+    // aren't billed at all, so this section stays hidden for them instead of
+    // inviting them into a billing relationship nobody asked for.
+    const ownSalon = getSalon();
+    if (ownSalon && ownSalon.billing) {
+      items.push({sec:'fatturazione', ic:'💳', label:'Fatturazione'});
+    }
   }
   // LIVELLO 3 — Barbiere
   else {
@@ -2933,12 +2940,12 @@ function buildNav(){
 
 function showSec(sec){
   curSec=sec;
-  ['secOggi','secCalendario','secProssimi','secClienti','secServizi','secDipendenti','secStats','secSaloni','secUtenti','secRecensioni','secPending']
+  ['secOggi','secCalendario','secProssimi','secClienti','secServizi','secDipendenti','secStats','secSaloni','secUtenti','secRecensioni','secPending','secFatturazione']
     .forEach(id=>$(id).classList.remove('on'));
   const map={oggi:'secOggi',calendario:'secCalendario',prossimi:'secProssimi',clienti:'secClienti',
-    servizi:'secServizi',dipendenti:'secDipendenti',stats:'secStats',saloni:'secSaloni',utenti:'secUtenti',recensioni:'secRecensioni',pending:'secPending'};
+    servizi:'secServizi',dipendenti:'secDipendenti',stats:'secStats',saloni:'secSaloni',utenti:'secUtenti',recensioni:'secRecensioni',pending:'secPending',fatturazione:'secFatturazione'};
   const titles={oggi:'Oggi',calendario:'Calendario',prossimi:'Prossimi',clienti:'Clienti',
-    servizi:'Servizi & prezzi',dipendenti:'Dipendenti',stats:'Statistiche',saloni:'Saloni',utenti:'Utenti',recensioni:'Recensioni Ricevute',pending:'Nuove Richieste'};
+    servizi:'Servizi & prezzi',dipendenti:'Dipendenti',stats:'Statistiche',saloni:'Saloni',utenti:'Utenti',recensioni:'Recensioni Ricevute',pending:'Nuove Richieste',fatturazione:'Fatturazione'};
   if(map[sec])$(map[sec]).classList.add('on');
   $('sideNav').querySelectorAll('.side-item').forEach(b=>b.classList.toggle('active',b.dataset.sec===sec));
   $('dTitle').textContent=titles[sec]||sec;
@@ -3010,6 +3017,74 @@ function renderDash(){
   else if(curSec==='saloni')renderSaloni();
   else if(curSec==='utenti')renderUtenti();
   else if(curSec==='pending')renderPendingSaloni();
+  else if(curSec==='fatturazione')renderFatturazione();
+}
+
+/* ---- FATTURAZIONE (owner, self-signup salons only) ----
+   Pagamento automatico mensile con carta via Stripe — un'alternativa
+   opzionale al bonifico bancario manuale + conferma admin esistenti. Se il
+   proprietario non lo attiva mai, nulla cambia per lui. */
+function renderFatturazione(){
+  const salon=getSalon();
+  const box=$('fatturazioneBox');
+  if(!salon||!salon.billing||!box)return;
+  const b=salon.billing;
+  const fee=feeForWorkerCount(Math.max((salon.workers||[]).length, b.declaredWorkerCount||0));
+  const nowMonth=todayISO().slice(0,7);
+  const paid=b.paidThroughMonth>=nowMonth;
+  let statusLabel='IN SCADENZA', statusColor='#f59e0b';
+  if(b.paymentFailing){statusLabel='PAGAMENTO FALLITO — nuovo tentativo in corso';statusColor='#ef4444';}
+  else if(b.suspendedByBilling){statusLabel='SOSPESO PER MANCATO PAGAMENTO';statusColor='#ef4444';}
+  else if(paid){statusLabel='PAGATO fino a '+b.paidThroughMonth;statusColor='#10b981';}
+
+  let actionHtml='';
+  if(b.autopay){
+    actionHtml=`
+      <p style="font-size:13px;color:#52525b;margin:10px 0 14px;">Pagamento automatico con carta attivo. Il canone viene addebitato automaticamente ogni mese.</p>
+      <button class="btn btn-main" id="fattManageBtn">Gestisci pagamento</button>`;
+  } else {
+    actionHtml=`
+      <p style="font-size:13px;color:#52525b;margin:10px 0 14px;">Attiva il pagamento automatico con carta per non doverti più preoccupare del bonifico mensile. La tariffa resta fissa a €${fee}/mese finché non disattivi il pagamento automatico, anche se il numero di barbieri cambia.</p>
+      <button class="btn btn-main" id="fattActivateBtn">Attiva pagamento automatico</button>`;
+  }
+
+  box.innerHTML=`
+    <div class="srv" style="padding:18px;">
+      <div style="font-size:15px;font-weight:700;color:#111;margin-bottom:4px;">Canone mensile: €${fee}</div>
+      <div style="font-size:12px;font-weight:700;color:${statusColor};margin-bottom:8px;">${statusLabel}</div>
+      ${actionHtml}
+    </div>`;
+
+  $('fattActivateBtn')?.addEventListener('click', async (e)=>{
+    const btn=e.target;btn.disabled=true;btn.textContent='…';
+    const r=await createBillingCheckoutSession(salon.id);
+    if(r&&r.success&&r.url){ location.href=r.url; }
+    else{
+      btn.disabled=false;btn.textContent='Attiva pagamento automatico';
+      alert(r&&r.error==='not_configured'?'Il pagamento automatico non è ancora disponibile — riprova più tardi.':'Errore durante l\'attivazione. Riprova.');
+    }
+  });
+  $('fattManageBtn')?.addEventListener('click', async (e)=>{
+    const btn=e.target;btn.disabled=true;btn.textContent='…';
+    const r=await createBillingPortalSession(salon.id);
+    if(r&&r.success&&r.url){ location.href=r.url; }
+    else{
+      btn.disabled=false;btn.textContent='Gestisci pagamento';
+      alert('Errore durante l\'apertura della gestione pagamento. Riprova.');
+    }
+  });
+}
+async function createBillingCheckoutSession(salonId){
+  try{
+    const resp=await fetch('/api/sync',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify({action:'create_billing_checkout_session',salonId})});
+    return await resp.json().catch(()=>({}));
+  }catch(e){return {success:false,error:'network'};}
+}
+async function createBillingPortalSession(salonId){
+  try{
+    const resp=await fetch('/api/sync',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify({action:'create_billing_portal_session',salonId})});
+    return await resp.json().catch(()=>({}));
+  }catch(e){return {success:false,error:'network'};}
 }
 
 /* ---- OGGI ---- */
@@ -3804,7 +3879,11 @@ function renderSaloni(){
         const paid=s.billing.paidThroughMonth>=nowMonth;
         const label=paid?'PAGATO':(s.billing.suspendedByBilling?'SOSPESO':'IN SCADENZA');
         const color=paid?'#10b981':(s.billing.suspendedByBilling?'#ef4444':'#f59e0b');
-        billingPill=`<span style="padding:3px 8px;border-radius:8px;font-size:10px;font-weight:800;background:${color};color:#fff;">${label}</span>${!paid?`<button class="iconbtn" data-markpaid="${s.id}" title="Segna come pagato">💶</button>`:''}`;
+        // Auto-pay salons are tracked by the Stripe webhook, not this manual
+        // 💶 button — the badge tells admin not to expect to need it here.
+        const autoBadge=s.billing.autopay?`<span style="padding:3px 8px;border-radius:8px;font-size:10px;font-weight:800;background:#4f46e5;color:#fff;margin-left:4px;">🔄 Auto</span>`:'';
+        const failingBadge=s.billing.paymentFailing?`<span style="padding:3px 8px;border-radius:8px;font-size:10px;font-weight:800;background:#ef4444;color:#fff;margin-left:4px;">⚠️ pagamento fallito</span>`:'';
+        billingPill=`<span style="padding:3px 8px;border-radius:8px;font-size:10px;font-weight:800;background:${color};color:#fff;">${label}</span>${autoBadge}${failingBadge}${!paid&&!s.billing.autopay?`<button class="iconbtn" data-markpaid="${s.id}" title="Segna come pagato">💶</button>`:''}`;
       }
     }
     html+=`<div class="salon-item">
@@ -4961,20 +5040,21 @@ async function boot(){
     const typed = prompt('Questa azione ELIMINA PERMANENTEMENTE tutti i saloni e le prenotazioni. Per confermare, inserisci la tua password di amministratore:');
     if (typed === null) return;
     // The client no longer holds the real admin password locally to
-    // pre-check against — /api/reset-all-data verifies it server-side and
-    // returns 401 if wrong.
+    // pre-check against — the reset_all_data action verifies it server-side
+    // (in api/sync.js, folded in from the former standalone
+    // api/reset-all-data.js) and returns success:false if wrong.
     try {
-      const resp = await fetch('/api/reset-all-data', {
+      const resp = await fetch('/api/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: typed })
+        body: JSON.stringify({ action: 'reset_all_data', password: typed })
       });
-      if (resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      if (data.success) {
         alert('Tutti i dati sono stati eliminati. La pagina verrà ricaricata.');
         location.reload();
       } else {
-        const err = await resp.json().catch(() => ({}));
-        alert('Errore durante l\'eliminazione: ' + (err.error || 'sconosciuto'));
+        alert('Errore durante l\'eliminazione: ' + (data.error || 'sconosciuto'));
       }
     } catch (e) {
       alert('Errore di connessione al server: ' + e.message);

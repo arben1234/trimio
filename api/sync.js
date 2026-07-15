@@ -7,8 +7,10 @@ import {
 } from '../lib/kv.js';
 import { sendCustomerText, toE164, twilioConfigured } from '../lib/sms.js';
 import { sendEmail } from '../lib/email.js';
-import { handleLogin, handleChangePassword, getVerifiedSession, getClientIp } from '../lib/auth.js';
-import { isQuietHours } from '../lib/time.js';
+import { handleLogin, handleChangePassword, getVerifiedSession, getClientIp, verifyAdminPassword } from '../lib/auth.js';
+import { isQuietHours, romeYearMonth } from '../lib/time.js';
+import { feeForWorkerCount } from '../lib/billing.js';
+import { getStripe, stripeConfigured } from '../lib/stripe.js';
 
 // Fixed operational inbox (forwards to the real team, see CLAUDE.md) —
 // used for admin-facing notifications that aren't tied to a specific admin
@@ -32,12 +34,6 @@ const DEFAULT_SERVICES = [
   { id: 'sv2', name: 'Taglio + Barba', dur: '45 min', price: 25 },
   { id: 'sv3', name: 'Shampoo + Taglio', dur: '40 min', price: 20 }
 ];
-
-function romeYearMonth() {
-  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Rome', year: 'numeric', month: '2-digit' }).formatToParts(new Date());
-  const get = t => parts.find(p => p.type === t).value;
-  return `${get('year')}-${get('month')}`;
-}
 
 // Every booking carries the customer's name + phone. Sending that back
 // unscoped (as this endpoint used to) meant any anonymous visitor — or any
@@ -360,6 +356,35 @@ async function notifyAdminsOfNewSignup(salonName, kvUrl, kvToken) {
   }
 }
 
+// Admin-only, destructive, one-shot "start fresh with real salons" action —
+// wipes every salon/worker/booking/push-subscription/slot-lock currently
+// stored, used once when the business switches from test/demo data to real
+// production data. Requires the admin's actual current password (verified
+// here server-side too, not just in the UI) so this can't fire by accident
+// or from someone who only knows a static confirmation phrase. Folded in
+// from the former standalone api/reset-all-data.js — same body.password +
+// verifyAdminPassword auth shape, unchanged — to free a Vercel function slot
+// for the Stripe webhook endpoint (Hobby plan caps a deployment at 12).
+async function handleResetAllData(body, kvUrl, kvToken) {
+  if (!body || typeof body.password !== 'string' || !body.password) {
+    return { status: 400, json: { success: false, error: 'Missing password' } };
+  }
+  if (!(await verifyAdminPassword(body.password, kvUrl, kvToken))) {
+    return { status: 401, json: { success: false, error: 'Incorrect password' } };
+  }
+
+  await setSalonsDb(kvUrl, kvToken, []);
+  await kvCmd(kvUrl, kvToken, ['DEL', 'bookings']);
+  await kvCmd(kvUrl, kvToken, ['DEL', 'push_subscriptions']);
+
+  const lockKeys = await kvCmd(kvUrl, kvToken, ['KEYS', 'lock:*']);
+  if (Array.isArray(lockKeys) && lockKeys.length > 0) {
+    await kvCmd(kvUrl, kvToken, ['DEL', ...lockKeys]);
+  }
+
+  return { status: 200, json: { success: true } };
+}
+
 // Admin-only: confirms this month's fee was received (payment is manual for
 // now — no bank/card processor wired up yet). Also reactivates a salon that
 // had been auto-suspended by the daily billing check (api/daily-health-check.js),
@@ -418,6 +443,122 @@ async function handleApproveSalon(body, kvUrl, kvToken, req) {
      <img src="${qrUrl}" alt="QR Code" width="200" height="200">`);
 
   return { status: 200, json: { success: true } };
+}
+
+// Owner-only, own-salon: creates a Stripe Checkout Session (subscription
+// mode) so the owner can activate automatic monthly card billing — an
+// opt-in alternative to the existing manual bank-transfer + admin mark-paid
+// flow, never required. Only self-signup salons (which carry a `billing`
+// object) are eligible; admin-created salons aren't billed at all.
+async function handleCreateBillingCheckoutSession(body, kvUrl, kvToken, req) {
+  const session = getVerifiedSession(req);
+  if (!session || session.role !== 'owner' || session.salonId !== body.salonId) {
+    return { status: 403, json: { success: false, error: 'forbidden' } };
+  }
+  if (!stripeConfigured()) {
+    return { status: 200, json: { success: false, error: 'not_configured' } };
+  }
+
+  const salons = await getSalonsDb(kvUrl, kvToken);
+  const salon = salons.find(s => s.id === body.salonId);
+  if (!salon) return { status: 404, json: { success: false, error: 'salon_not_found' } };
+  if (!salon.billing) return { status: 409, json: { success: false, error: 'billing_not_applicable' } };
+  if (salon.billing.autopay) return { status: 200, json: { success: false, error: 'already_active' } };
+
+  const stripe = getStripe();
+  const fee = feeForWorkerCount(Math.max((salon.workers || []).length, salon.billing.declaredWorkerCount || 0));
+
+  // Reuse an existing Stripe Customer when we have one (e.g. a previous
+  // subscription was cancelled and the owner is reactivating) — but the
+  // customer could have been deleted directly in the Stripe dashboard, so
+  // fall back to creating a fresh one rather than passing a dead id through.
+  let customerId = salon.billing.stripeCustomerId;
+  if (customerId) {
+    try {
+      const existing = await stripe.customers.retrieve(customerId);
+      if (existing.deleted) customerId = null;
+    } catch {
+      customerId = null;
+    }
+  }
+  if (!customerId) {
+    try {
+      const customer = await stripe.customers.create({ email: salon.email, metadata: { salonId: salon.id } });
+      customerId = customer.id;
+    } catch (err) {
+      console.error('[BILLING] Stripe customer creation failed:', err.message);
+      return { status: 502, json: { success: false, error: 'stripe_error' } };
+    }
+  }
+
+  let checkoutSession;
+  try {
+    checkoutSession = await stripe.checkout.sessions.create({
+      mode: 'subscription',
+      customer: customerId,
+      client_reference_id: salon.id,
+      // Attached to the Subscription itself (not just this transient
+      // Session) — Stripe webhook delivery isn't ordered, so invoice.paid
+      // for the first invoice can arrive before checkout.session.completed
+      // has written stripeCustomerId onto the salon. This lets the webhook
+      // correlate by salonId as a fallback instead of losing that event.
+      subscription_data: { metadata: { salonId: salon.id } },
+      line_items: [{
+        price_data: {
+          currency: 'eur',
+          unit_amount: fee * 100,
+          recurring: { interval: 'month' },
+          product_data: { name: 'Canone mensile TRIMIO' }
+        },
+        quantity: 1
+      }],
+      success_url: 'https://trimio.org/#DASHBOARD',
+      cancel_url: 'https://trimio.org/#DASHBOARD'
+    });
+  } catch (err) {
+    console.error('[BILLING] Stripe checkout session creation failed:', err.message);
+    return { status: 502, json: { success: false, error: 'stripe_error' } };
+  }
+
+  // Persist immediately rather than waiting for the webhook — a reload
+  // before checkout.session.completed lands shouldn't lose the association.
+  salon.billing.stripeCustomerId = customerId;
+  await setSalonsDb(kvUrl, kvToken, salons);
+
+  return { status: 200, json: { success: true, url: checkoutSession.url } };
+}
+
+// Owner-only, own-salon: opens the Stripe-hosted Billing Portal so the owner
+// can update their card, view invoices, or cancel automatic billing —
+// without any of that needing custom UI here. Requires autopay to have
+// already been activated at least once (there's a Stripe Customer to manage).
+async function handleCreateBillingPortalSession(body, kvUrl, kvToken, req) {
+  const session = getVerifiedSession(req);
+  if (!session || session.role !== 'owner' || session.salonId !== body.salonId) {
+    return { status: 403, json: { success: false, error: 'forbidden' } };
+  }
+  if (!stripeConfigured()) {
+    return { status: 200, json: { success: false, error: 'not_configured' } };
+  }
+
+  const salons = await getSalonsDb(kvUrl, kvToken);
+  const salon = salons.find(s => s.id === body.salonId);
+  if (!salon) return { status: 404, json: { success: false, error: 'salon_not_found' } };
+  if (!salon.billing || !salon.billing.stripeCustomerId) {
+    return { status: 409, json: { success: false, error: 'no_subscription' } };
+  }
+
+  try {
+    const stripe = getStripe();
+    const portalSession = await stripe.billingPortal.sessions.create({
+      customer: salon.billing.stripeCustomerId,
+      return_url: 'https://trimio.org/#DASHBOARD'
+    });
+    return { status: 200, json: { success: true, url: portalSession.url } };
+  } catch (err) {
+    console.error('[BILLING] Stripe billing portal session creation failed:', err.message);
+    return { status: 502, json: { success: false, error: 'stripe_error' } };
+  }
 }
 
 function isValidBooking(b) {
@@ -586,12 +727,24 @@ export default async function handler(req, res) {
           const r = await handleSignupSalon(newData, kvUrl, kvToken, req);
           return res.status(r.status).json(r.json);
         }
+        if (newData && newData.action === 'reset_all_data') {
+          const r = await handleResetAllData(newData, kvUrl, kvToken);
+          return res.status(r.status).json(r.json);
+        }
         if (newData && newData.action === 'mark_salon_paid') {
           const r = await handleMarkSalonPaid(newData, kvUrl, kvToken, req);
           return res.status(r.status).json(r.json);
         }
         if (newData && newData.action === 'approve_salon') {
           const r = await handleApproveSalon(newData, kvUrl, kvToken, req);
+          return res.status(r.status).json(r.json);
+        }
+        if (newData && newData.action === 'create_billing_checkout_session') {
+          const r = await handleCreateBillingCheckoutSession(newData, kvUrl, kvToken, req);
+          return res.status(r.status).json(r.json);
+        }
+        if (newData && newData.action === 'create_billing_portal_session') {
+          const r = await handleCreateBillingPortalSession(newData, kvUrl, kvToken, req);
           return res.status(r.status).json(r.json);
         }
 
