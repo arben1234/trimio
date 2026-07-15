@@ -129,6 +129,29 @@ async function handleUpdateHomepagePhotos(body, kvUrl, kvToken, req) {
   return { status: 200, json: { success: true, homepagePhotos: cleaned } };
 }
 
+// The promo/coupon banner on the public marketing page (trimio.org, vLogin)
+// — same storage pattern as handleUpdateHomepagePhotos above (admin_db blob,
+// admin-session-gated). This used to only ever be written to the editing
+// admin's own localStorage via the generic bulk saveState() call, which
+// never actually included it in its POST body — every other device/session
+// silently kept seeing the hardcoded default text, forever.
+async function handleUpdateHomepageAd(body, kvUrl, kvToken, req) {
+  const session = getVerifiedSession(req);
+  if (!session || session.role !== 'admin') {
+    return { status: 403, json: { success: false, error: 'forbidden' } };
+  }
+  const ad = body.ad && typeof body.ad === 'object' ? body.ad : {};
+  const cleaned = {
+    title: (typeof ad.title === 'string' ? ad.title : '').trim().slice(0, 60),
+    description: (typeof ad.description === 'string' ? ad.description : '').trim().slice(0, 300),
+    btnText: (typeof ad.btnText === 'string' ? ad.btnText : '').trim().slice(0, 30),
+    code: (typeof ad.code === 'string' ? ad.code : '').trim().slice(0, 40)
+  };
+  const admin = await getAdminDb(kvUrl, kvToken);
+  await setAdminDb(kvUrl, kvToken, { ...admin, homepageAd: cleaned });
+  return { status: 200, json: { success: true, homepageAd: cleaned } };
+}
+
 // Sends a 6-digit SMS code the signup wizard's step 2 must echo back before
 // continuing — real proof the phone is reachable by whoever is registering,
 // not just typed in (see the signup_otp_sent gate in handleSignupSalon).
@@ -517,7 +540,7 @@ export default async function handler(req, res) {
         return res.status(200).json({
           bookings: scopeBookingsForSession(Array.from(bookingsMap.values()), session),
           salons: sanitizedSalons,
-          admin: { username: admin.username, homepagePhotos: admin.homepagePhotos || [] }
+          admin: { username: admin.username, homepagePhotos: admin.homepagePhotos || [], homepageAd: admin.homepageAd || null }
         });
       }
 
@@ -544,6 +567,10 @@ export default async function handler(req, res) {
         }
         if (newData && newData.action === 'update_homepage_photos') {
           const r = await handleUpdateHomepagePhotos(newData, kvUrl, kvToken, req);
+          return res.status(r.status).json(r.json);
+        }
+        if (newData && newData.action === 'update_homepage_ad') {
+          const r = await handleUpdateHomepageAd(newData, kvUrl, kvToken, req);
           return res.status(r.status).json(r.json);
         }
         if (newData && newData.action === 'request_signup_otp') {

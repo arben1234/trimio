@@ -807,6 +807,9 @@ function initCloudSync() {
         if (data.admin && Array.isArray(data.admin.homepagePhotos)) {
           STATE.admin.homepagePhotos = data.admin.homepagePhotos;
         }
+        if (data.admin && data.admin.homepageAd && typeof data.admin.homepageAd === 'object') {
+          STATE.homepageAd = data.admin.homepageAd;
+        }
 
         if (data.bookings) {
           const fbBookings = Array.isArray(data.bookings) ? data.bookings : Object.values(data.bookings);
@@ -830,6 +833,7 @@ function initCloudSync() {
         if (typeof renderHomepage === 'function' && !custSalon) renderHomepage();
         if (typeof renderVLoginSalonShowcase === 'function') renderVLoginSalonShowcase();
         if (typeof renderVLoginPhotoGallery === 'function') renderVLoginPhotoGallery();
+        if (typeof renderVLoginAdBanner === 'function') renderVLoginAdBanner();
         // Kick out customer if salon became inactive
         if (custSalon) {
           const refreshed = STATE.salons.find(s => s.id === custSalon.id);
@@ -928,6 +932,9 @@ function initCloudSync() {
           }
           if (data.admin && Array.isArray(data.admin.homepagePhotos)) {
             STATE.admin.homepagePhotos = data.admin.homepagePhotos;
+          }
+          if (data.admin && data.admin.homepageAd && typeof data.admin.homepageAd === 'object') {
+            STATE.homepageAd = data.admin.homepageAd;
           }
 
           localStorage.setItem(SK, JSON.stringify({ ...STATE, bookings: fbBookings }));
@@ -2495,6 +2502,7 @@ function showView(view){
     }
     if (showMarketing && typeof renderVLoginSalonShowcase === 'function') renderVLoginSalonShowcase();
     if (showMarketing && typeof renderVLoginPhotoGallery === 'function') renderVLoginPhotoGallery();
+    if (showMarketing && typeof renderVLoginAdBanner === 'function') renderVLoginAdBanner();
     // Lives in the shared header (not inside #vLoginMarketing) so it sits on
     // the same row as the TRIMIO logo — that bar isn't toggled per-view, so
     // it needs its own visibility switch here.
@@ -4448,35 +4456,10 @@ function renderHomepage(){
     return;
   }
 
-  // Render Homepage Ad dynamically
-  const ad = STATE.homepageAd || { title: '', description: '', btnText: '', code: '' };
-  if (ad.description) {
-    $('hpAdBannerContainer').innerHTML = `
-      <div class="hp-ad-banner">
-        <div class="ad-glow"></div>
-        <div class="ad-content">
-          <span class="ad-tag">Sponsorizzato</span>
-          <h3>${ad.title || 'TRIMIO'}</h3>
-          <p>${ad.description}</p>
-          <button class="ad-btn" id="hpAdBtn">${ad.btnText || 'Copia'}</button>
-        </div>
-      </div>`;
-    
-    // Wire copy button
-    const btn = $('hpAdBtn');
-    if (btn && ad.code) {
-      btn.addEventListener('click', e => {
-        e.preventDefault();
-        e.stopPropagation();
-        navigator.clipboard?.writeText(ad.code).then(() => {
-          btn.textContent = '✓ Copiato!';
-          setTimeout(() => btn.textContent = ad.btnText || 'Copia', 2000);
-        }).catch(() => alert('Codice: ' + ad.code));
-      });
-    }
-  } else {
-    $('hpAdBannerContainer').innerHTML = '';
-  }
+  // Homepage ad preview inside the admin's own dashboard home — the ad
+  // actually reaches real visitors via renderVLoginAdBanner() below instead,
+  // since vHome only ever renders for a logged-in admin session.
+  renderAdBannerInto('hpAdBannerContainer', 'hpAdBtn');
 
   $('hpSalonList').innerHTML=salons.map(s=>{
     const link=base+'#'+s.slug;
@@ -4579,6 +4562,44 @@ function renderVLoginPhotoGallery(){
       <img src="${escapeHtml(u)}" alt="TRIMIO" loading="lazy">
     </div>
   `).join('');
+}
+
+// Renders the admin-authored promo/coupon banner (STATE.homepageAd) into a
+// given container, wiring its "copy code" button under a given id — shared
+// by the admin's own vHome preview and the real public vLogin page below,
+// since it's the exact same content in two different DOM locations.
+function renderAdBannerInto(containerId, btnId){
+  const el = $(containerId);
+  if (!el) return;
+  const ad = STATE.homepageAd || { title: '', description: '', btnText: '', code: '' };
+  if (!ad.description) { el.innerHTML = ''; return; }
+  el.innerHTML = `
+    <div class="hp-ad-banner">
+      <div class="ad-glow"></div>
+      <div class="ad-content">
+        <span class="ad-tag">Sponsorizzato</span>
+        <h3>${escapeHtml(ad.title || 'TRIMIO')}</h3>
+        <p>${escapeHtml(ad.description)}</p>
+        <button class="ad-btn" id="${btnId}">${escapeHtml(ad.btnText || 'Copia')}</button>
+      </div>
+    </div>`;
+  const btn = $(btnId);
+  if (btn && ad.code) {
+    btn.addEventListener('click', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      navigator.clipboard?.writeText(ad.code).then(() => {
+        btn.textContent = '✓ Copiato!';
+        setTimeout(() => btn.textContent = ad.btnText || 'Copia', 2000);
+      }).catch(() => alert('Codice: ' + ad.code));
+    });
+  }
+}
+// The actual public-facing rendering of the ad — vHome (where the block
+// above also renders it) only ever shows for a logged-in admin session, so
+// without this the ad never reached a real anonymous visitor at all.
+function renderVLoginAdBanner(){
+  renderAdBannerInto('vLoginAdBannerContainer', 'vLoginAdBtn');
 }
 
 let hpReplaceIndex = null;
@@ -4901,16 +4922,32 @@ async function boot(){
     }
   });
 
-  // Wire Homepage Ad Editor save button
+  // Wire Homepage Ad Editor save button. Persisted through its own action
+  // (like update_homepage_photos) instead of the generic saveState() bulk
+  // save, which never even included homepageAd in its POST body — it used
+  // to only ever survive in the editing admin's own localStorage.
   $('saveAdBtn')?.addEventListener('click', async () => {
-    if (!STATE.homepageAd) STATE.homepageAd = {};
-    STATE.homepageAd.title = $('adTitleInput').value.trim();
-    STATE.homepageAd.description = $('adDescInput').value.trim();
-    STATE.homepageAd.btnText = $('adBtnInput').value.trim() || 'Copia';
-    STATE.homepageAd.code = $('adCodeInput').value.trim();
-    await saveState();
+    STATE.homepageAd = {
+      title: $('adTitleInput').value.trim(),
+      description: $('adDescInput').value.trim(),
+      btnText: $('adBtnInput').value.trim() || 'Copia',
+      code: $('adCodeInput').value.trim()
+    };
+    try {
+      const resp = await fetch('/api/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ action: 'update_homepage_ad', ad: STATE.homepageAd })
+      });
+      const r = await resp.json().catch(() => ({}));
+      if (!r.success) { alert('Errore durante il salvataggio dell\'annuncio.'); return; }
+    } catch (e) {
+      alert('Errore di connessione al server.');
+      return;
+    }
     alert('Annuncio salvato con successo!');
     renderHomepage();
+    if (typeof renderVLoginAdBanner === 'function') renderVLoginAdBanner();
   });
 
   // Zona Pericolosa (solo admin) — cancella permanentemente saloni/prenotazioni
