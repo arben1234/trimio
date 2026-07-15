@@ -3376,10 +3376,8 @@ function openWorkerModal(wid,salon){
   // then silently mutate a detached copy that never reaches STATE.salons.
   workerEditSalonId=salon.id;clearErr('wErr');
   const isOwner = SESSION.role === 'owner';
-  // Owner can register a brand-new barber (full form), but can only ever
-  // change vacation dates on an EXISTING one — renaming/re-crendentialing a
-  // barber that's already there stays admin-only.
-  ['wName','wUser','wPwd','wImg','wImgFile','wPhone','wRole','wDesc'].forEach(id=>{ $(id).disabled = isOwner && wid!=='new'; });
+  // Owner can fully create AND edit their own barbers now — only deletion
+  // stays admin-only (see showDel/wDelete below).
   $('wImgStatus').textContent='';
   if(wid==='new'){
     $('workerModalH').textContent='Nuovo dipendente';
@@ -3404,37 +3402,32 @@ function openWorkerModal(wid,salon){
 async function saveWorker(){
   const salon=STATE.salons.find(x=>x.id===workerEditSalonId);if(!salon)return;
   const vacFrom=$('wVacFrom').value,vacTo=$('wVacTo').value;
-  // Owner can register a brand-new barber (falls through to the same path
-  // admin uses below), but on an EXISTING barber can only ever update
-  // vacation dates — renaming/re-crendentialing them stays admin-only.
-  // Lunch break + weekly rest live in the separate "Pause" modal.
-  if (SESSION.role === 'owner' && editWorker !== 'new') {
-    const w=salon.workers.find(x=>x.id===editWorker);
-    if(w) {
-      w.vacFrom=vacFrom;
-      w.vacTo=vacTo;
-    }
+  // Owner and admin now share the same full create/edit path — only
+  // deletion stays admin-only. Lunch break + weekly rest live in the
+  // separate "Pause" modal.
+  const name=$('wName').value.trim(),usr=$('wUser').value.trim(),pwd=$('wPwd').value.trim();
+  const img=$('wImg').value.trim(),phone=$('wPhone').value.trim();
+  const role=$('wRole').value.trim(),desc=$('wDesc').value.trim();
+  if(name.length<2)return showErr('wErr','Inserisci il nome');
+  if(!usr)return showErr('wErr','Inserisci username');
+  if(!phone)return showErr('wErr','Il numero di telefono è obbligatorio');
+  if(!isValidItalianPhone(phone))return showErr('wErr','Inserisci un numero di telefono italiano valido (es. +39 333 123 4567)');
+  if(editWorker==='new'){
+    if(!pwd)return showErr('wErr','Password obbligatoria per nuovo dipendente');
+    salon.workers.push({id:'w'+Date.now(),name,username:usr,password:pwd,img,phone,role,desc,vacFrom,vacTo,reviews:[]});
   } else {
-    const name=$('wName').value.trim(),usr=$('wUser').value.trim(),pwd=$('wPwd').value.trim();
-    const img=$('wImg').value.trim(),phone=$('wPhone').value.trim();
-    const role=$('wRole').value.trim(),desc=$('wDesc').value.trim();
-    if(name.length<2)return showErr('wErr','Inserisci il nome');
-    if(!usr)return showErr('wErr','Inserisci username');
-    if(!phone)return showErr('wErr','Il numero di telefono è obbligatorio');
-    if(!isValidItalianPhone(phone))return showErr('wErr','Inserisci un numero di telefono italiano valido (es. +39 333 123 4567)');
-    if(editWorker==='new'){
-      if(!pwd)return showErr('wErr','Password obbligatoria per nuovo dipendente');
-      salon.workers.push({id:'w'+Date.now(),name,username:usr,password:pwd,img,phone,role,desc,vacFrom,vacTo,reviews:[]});
-    } else {
-      const w=salon.workers.find(x=>x.id===editWorker);if(!w)return;
-      w.name=name;w.username=usr;
-      w.img=img;w.phone=phone;w.role=role;w.desc=desc;w.vacFrom=vacFrom;w.vacTo=vacTo;
-      // Password lives only server-side now — a change here must go through
-      // the verified admin_set endpoint, never through the generic bulk save.
-      if (pwd) {
-        const r = await adminSetPassword({ targetType: 'barber', salonId: salon.id, workerId: w.id, newPassword: pwd });
-        if (!r || !r.success) return; // adminSetPassword already alerted the reason
-      }
+    const w=salon.workers.find(x=>x.id===editWorker);if(!w)return;
+    w.name=name;w.username=usr;
+    w.img=img;w.phone=phone;w.role=role;w.desc=desc;w.vacFrom=vacFrom;w.vacTo=vacTo;
+    // Password lives only server-side now — a change here must go through
+    // a verified endpoint, never through the generic bulk save. Owner proves
+    // identity via their own session token (they don't know the admin
+    // password); admin proves it by re-typing the admin password.
+    if (pwd) {
+      const r = SESSION.role === 'owner'
+        ? await ownerSetWorkerPassword({ salonId: salon.id, workerId: w.id, newPassword: pwd })
+        : await adminSetPassword({ targetType: 'barber', salonId: salon.id, workerId: w.id, newPassword: pwd });
+      if (!r || !r.success) return; // already alerted the reason
     }
   }
 
@@ -4245,6 +4238,27 @@ async function adminSetPassword({ targetType, salonId, workerId, newPassword }){
     const r = await resp.json().catch(() => ({}));
     if (!r.success) {
       alert(r.error === 'wrong_admin_password' ? 'Password amministratore errata.' : 'Errore durante l\'operazione.');
+      return null;
+    }
+    return r;
+  } catch (e) {
+    alert('Errore di connessione al server.');
+    return null;
+  }
+}
+// Owner setting/changing one of their OWN barbers' password — proven via
+// the owner's already-verified session token (Authorization header), never
+// a password prompt, since the owner has no admin password to give.
+async function ownerSetWorkerPassword({ salonId, workerId, newPassword }){
+  try {
+    const resp = await fetch('/api/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ action: 'change_password', type: 'owner_set', salonId, workerId, newPassword })
+    });
+    const r = await resp.json().catch(() => ({}));
+    if (!r.success) {
+      alert('Errore durante l\'operazione.');
       return null;
     }
     return r;

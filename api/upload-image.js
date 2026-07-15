@@ -39,11 +39,13 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  // Only reachable from the admin salon/worker photo pickers client-side
-  // (owner/barber never get that UI), but nothing enforced that server-side —
-  // anyone could hit this endpoint directly and run up Blob/KV storage costs.
+  // Reachable from admin AND owner salon/worker photo pickers client-side
+  // (owners can create/edit their own barbers, including photos) — any
+  // verified session is enough here, since the actual write authorization
+  // (which salon/worker a photo URL gets attached to) is enforced separately
+  // by the salons[] bulk-save path in api/sync.js, not by this endpoint.
   const session = getVerifiedSession(req);
-  if (!session || session.role !== 'admin') {
+  if (!session) {
     return res.status(401).json({ error: 'invalid_session' });
   }
 

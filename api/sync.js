@@ -525,7 +525,7 @@ export default async function handler(req, res) {
           return res.status(r.status).json(r.json);
         }
         if (newData && newData.action === 'change_password') {
-          const r = await handleChangePassword(newData, kvUrl, kvToken);
+          const r = await handleChangePassword(newData, kvUrl, kvToken, req);
           return res.status(r.status).json(r.json);
         }
 
@@ -767,6 +767,16 @@ export default async function handler(req, res) {
                     const ew = existingWorkersById.get(w.id);
                     return ew ? { ...w, password: ew.password, reviews: ew.reviews || [] } : w;
                   });
+                  // Only admin may actually remove a worker — an owner's
+                  // payload that omits an existing worker (client bug, stale
+                  // local copy, or a tampered request) must not silently
+                  // delete them; restore anything missing from a non-admin save.
+                  if (session.role !== 'admin') {
+                    const incomingIds = new Set(incoming.workers.map(w => w.id));
+                    for (const ew of existingWorkersById.values()) {
+                      if (!incomingIds.has(ew.id)) incoming.workers.push(ew);
+                    }
+                  }
                 }
               }
               salonMap.set(incoming.id, incoming);

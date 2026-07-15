@@ -23,7 +23,7 @@ Almost all client logic lives in `js/app.js` (~4700 lines) rendering into the si
 
 Four user levels, gated purely by `SESSION.role`:
 1. **Admin** (Livello 1) — manages all salons, users, the homepage ad, global stats. Lands on `vHome`.
-2. **Owner** (Livello 2, `ownerUsername`/`ownerPassword` per salon) — manages one salon (bookings, services, stats, reviews). Cannot add/delete workers (admin-only) — can only edit a worker's vacation dates.
+2. **Owner** (Livello 2, `ownerUsername`/`ownerPassword` per salon) — manages one salon (bookings, services, stats, reviews). Can create new workers and fully edit existing ones (name, username, phone, role, photo, password, vacation dates) — deleting a worker stays admin-only, enforced both client-side (delete button hidden) and server-side (`api/sync.js`'s bulk salon-save restores any worker a non-admin payload omits, so an owner can't delete one even via a crafted request).
 3. **Barber** (Livello 3, per-worker `username`/`password`) — manages their own calendar/bookings/stats/break-and-rest-day settings ("Le mie Pause").
 4. **Customer** — no login; books via a salon's public link/QR code.
 
