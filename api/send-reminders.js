@@ -1,6 +1,7 @@
 import webPush from 'web-push';
 import { getAllBookings, hsetBooking, getSalonsDb, claimReminderOnce } from '../lib/kv.js';
 import { sendCustomerText, twilioConfigured } from '../lib/sms.js';
+import { romeNow } from '../lib/time.js';
 
 const VAPID_PUBLIC_KEY = 'BLLKr1SroPRHybfSN2OunQUzy6yd5hggq2fmAmT90LL32Pgyaa_VkoESjUq3DGk0bgD2a5tb17bSZHc2heLJXGo';
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY?.trim();
@@ -22,24 +23,6 @@ if (VAPID_PRIVATE_KEY) {
 // they opted in on the confirmation screen (see initCustomerPushNotifications
 // in js/app.js) — the subscription is tied to the bookingId. The *Sent flags
 // make each reminder fire at most once even if the cron runs again.
-
-// All date math is done in Italian wall-clock time, because the server runs
-// in UTC while booking dateISO/time are what the customer saw on screen.
-function romeNow() {
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'Europe/Rome', hourCycle: 'h23',
-    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
-  }).formatToParts(new Date());
-  const get = t => parts.find(p => p.type === t).value;
-  const year = Number(get('year')), month = Number(get('month')), day = Number(get('day'));
-  const pad = n => String(n).padStart(2, '0');
-  const next = new Date(Date.UTC(year, month - 1, day) + 86400000);
-  return {
-    todayISO: `${year}-${pad(month)}-${pad(day)}`,
-    tomorrowISO: `${next.getUTCFullYear()}-${pad(next.getUTCMonth() + 1)}-${pad(next.getUTCDate())}`,
-    minutes: Number(get('hour')) * 60 + Number(get('minute'))
-  };
-}
 
 function bookingMinutes(time) {
   const m = /^(\d{1,2}):(\d{2})/.exec(time || '');

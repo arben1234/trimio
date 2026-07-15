@@ -8,6 +8,7 @@ import {
 import { sendCustomerText, toE164, twilioConfigured } from '../lib/sms.js';
 import { sendEmail } from '../lib/email.js';
 import { handleLogin, handleChangePassword, getVerifiedSession, getClientIp } from '../lib/auth.js';
+import { isQuietHours } from '../lib/time.js';
 
 // Fixed operational inbox (forwards to the real team, see CLAUDE.md) —
 // used for admin-facing notifications that aren't tied to a specific admin
@@ -907,6 +908,11 @@ async function sendPushNotifications(newBookings, salons, kvUrl, kvToken) {
     console.warn('[PUSH] VAPID_PRIVATE_KEY not configured — skipping push notifications.');
     return;
   }
+  // No push/SMS to anyone (admin, owner, or the barber) between 20:00 and
+  // 8:00 Italian time — the booking itself is still created either way and
+  // shows up the moment anyone next opens the dashboard (the 6s sync poll
+  // sees it regardless), only the proactive ping is withheld overnight.
+  if (isQuietHours()) return;
   try {
     // 1. Fetch all push subscriptions
     const subResp = await fetch(`${kvUrl}/get/push_subscriptions`, {
@@ -1006,6 +1012,10 @@ async function sendPushNotifications(newBookings, salons, kvUrl, kvToken) {
 // until the reminder or a cancellation. Phone number has been required at
 // booking time, so an immediate SMS receipt is always possible.
 async function sendCustomerBookingConfirmations(newBookings) {
+  // No SMS between 20:00 and 8:00 Italian time — the on-screen confirmation
+  // the customer is already looking at is enough overnight; the receipt SMS
+  // is a nice-to-have, not worth a text landing at 3am.
+  if (isQuietHours()) return;
   // Each booking's confirmation is independent of the others — fire them
   // concurrently instead of one Twilio round trip at a time.
   await Promise.all(newBookings.map(async bk => {
@@ -1024,6 +1034,11 @@ async function sendCustomerBookingConfirmations(newBookings) {
 // notification — they already know). Falls back to SMS/WhatsApp when the
 // customer never opted into push, same as the manual notify-customer button.
 async function sendCancellationNotifications(cancelledBookings, salons, kvUrl, kvToken) {
+  // No push/SMS between 20:00 and 8:00 Italian time — same rule as every
+  // other immediate send. The cancellation itself still takes effect right
+  // away; the customer sees it the next time the app syncs even without a
+  // ping overnight.
+  if (isQuietHours()) return;
   let subscriptions = [];
   if (VAPID_PRIVATE_KEY) {
     try {

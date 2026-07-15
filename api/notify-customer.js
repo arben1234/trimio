@@ -2,6 +2,7 @@ import webPush from 'web-push';
 import { getAllBookings, getSalonsDb, checkRateLimit } from '../lib/kv.js';
 import { sendCustomerText, twilioConfigured } from '../lib/sms.js';
 import { getVerifiedSession } from '../lib/auth.js';
+import { isQuietHours } from '../lib/time.js';
 
 const VAPID_PUBLIC_KEY = 'BLLKr1SroPRHybfSN2OunQUzy6yd5hggq2fmAmT90LL32Pgyaa_VkoESjUq3DGk0bgD2a5tb17bSZHc2heLJXGo';
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY?.trim();
@@ -50,6 +51,15 @@ export default async function handler(req, res) {
 
     if (session.role !== 'admin' && session.salonId !== bk.salonId) {
       return res.status(403).json({ error: 'forbidden' });
+    }
+
+    // No push/SMS to a real customer between 20:00 and 8:00 Italian time,
+    // same rule as every other send in the app — checked before the rate
+    // limit below so a staff member trying this during quiet hours doesn't
+    // burn their one-per-2-minutes cooldown for nothing and can just retry
+    // once 8:00 arrives.
+    if (isQuietHours()) {
+      return res.status(200).json({ success: false, reason: 'quiet_hours' });
     }
 
     // Cooldown per booking, not per caller — stops the same customer from
