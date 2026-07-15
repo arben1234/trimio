@@ -402,6 +402,31 @@ async function handleMarkSalonPaid(body, kvUrl, kvToken, req) {
   return { status: 200, json: { success: true, paidThroughMonth: salon.billing.paidThroughMonth } };
 }
 
+// Admin-only: opts an admin-created salon (which has no billing object at
+// all by default — see CLAUDE.md) into the billing system on request, e.g.
+// an owner who wants automatic PayPal billing but can't self-signup a whole
+// new account for it. Starts them "paid up" for the current month rather
+// than backdating an obligation for time they were never actually billed
+// for — no surprise retroactive warning/suspension.
+async function handleEnableSalonBilling(body, kvUrl, kvToken, req) {
+  const session = getVerifiedSession(req);
+  if (!session || session.role !== 'admin') return { status: 403, json: { success: false, error: 'forbidden' } };
+  if (!body.salonId) return { status: 400, json: { success: false, error: 'missing_fields' } };
+
+  const salons = await getSalonsDb(kvUrl, kvToken);
+  const salon = salons.find(s => s.id === body.salonId);
+  if (!salon) return { status: 404, json: { success: false, error: 'salon_not_found' } };
+  if (salon.billing) return { status: 409, json: { success: false, error: 'already_enabled' } };
+
+  salon.billing = {
+    declaredWorkerCount: Math.max((salon.workers || []).length, 1),
+    paidThroughMonth: romeYearMonth(),
+    pendingApproval: false
+  };
+  await setSalonsDb(kvUrl, kvToken, salons);
+  return { status: 200, json: { success: true, billing: salon.billing } };
+}
+
 // Admin-only: the dedicated "Nuove Richieste" approval action — deliberately
 // separate from the generic Attiva/Inattivo toggle (api/toggle-salon.js),
 // which is also used to reactivate a billing-suspended salon and doesn't
@@ -759,6 +784,10 @@ export default async function handler(req, res) {
         }
         if (newData && newData.action === 'mark_salon_paid') {
           const r = await handleMarkSalonPaid(newData, kvUrl, kvToken, req);
+          return res.status(r.status).json(r.json);
+        }
+        if (newData && newData.action === 'enable_salon_billing') {
+          const r = await handleEnableSalonBilling(newData, kvUrl, kvToken, req);
           return res.status(r.status).json(r.json);
         }
         if (newData && newData.action === 'approve_salon') {

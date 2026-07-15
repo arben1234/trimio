@@ -3876,7 +3876,12 @@ function renderSaloni(){
         ${s.inactive ? 'Inattivo' : 'Attivo'}
       </button>`;
     let pendingBadge='',billingPill='';
-    if(s.billing){
+    if(!s.billing){
+      // Admin-created salons carry no billing object by default (not billed)
+      // — but an owner may still ask to activate automatic PayPal billing,
+      // which needs one to exist first.
+      billingPill=`<button class="iconbtn" data-enablebilling="${s.id}" title="Attiva Fatturazione (permette al proprietario di attivare il pagamento automatico)">💳</button>`;
+    } else if(s.billing){
       if(s.billing.pendingApproval){
         pendingBadge=`<span style="padding:3px 8px;border-radius:8px;font-size:10px;font-weight:800;background:#f59e0b;color:#fff;margin-left:6px;">IN ATTESA</span>`;
       }else{
@@ -3912,6 +3917,21 @@ function renderSaloni(){
         s.billing.paidThroughMonth=r.paidThroughMonth;
         s.billing.suspendedByBilling=false;
         s.inactive=false;
+        try{localStorage.setItem(SK,JSON.stringify(STATE));}catch(e){}
+        renderSaloni();
+      }else{
+        alert('Errore: '+(r.error||'sconosciuto'));
+      }
+    }catch(e){alert('Errore di connessione: '+e.message);}
+  }));
+  $('saloniList').querySelectorAll('[data-enablebilling]').forEach(b=>b.addEventListener('click',async()=>{
+    const s=STATE.salons.find(x=>x.id===b.dataset.enablebilling);if(!s)return;
+    if(!confirm(`Attivare la Fatturazione per "${s.name}"? Il proprietario potrà così attivare il pagamento automatico dal proprio pannello.`))return;
+    try{
+      const resp=await fetch('/api/sync',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify({action:'enable_salon_billing',salonId:s.id})});
+      const r=await resp.json().catch(()=>({}));
+      if(r.success){
+        s.billing=r.billing;
         try{localStorage.setItem(SK,JSON.stringify(STATE));}catch(e){}
         renderSaloni();
       }else{
