@@ -1,5 +1,6 @@
 import { getSalonsDb, setSalonsDb, ensureMigratedV2 } from '../lib/kv.js';
 import { verifyAdminPassword } from '../lib/auth.js';
+import { cancelPaypalSubscription } from '../lib/paypal.js';
 
 export default async function handler(req, res) {
   // CORS
@@ -57,6 +58,16 @@ export default async function handler(req, res) {
     if (!salon.inactive && salon.billing) {
       salon.billing.pendingApproval = false;
       salon.billing.suspendedByBilling = false;
+    }
+    // Deactivating a salon that still has a live PayPal subscription must
+    // stop it from continuing to charge the customer every month for a
+    // service that's no longer being provided — this used to be a pure gap,
+    // nothing here ever told PayPal the salon went away. Best-effort: if the
+    // cancel call fails, the salon still gets deactivated either way.
+    if (salon.inactive && salon.billing && salon.billing.autopay && salon.billing.paypalSubscriptionId) {
+      await cancelPaypalSubscription(salon.billing.paypalSubscriptionId, 'Salone disattivato su TRIMIO');
+      salon.billing.autopay = false;
+      salon.billing.paypalSubscriptionId = null;
     }
     console.log(`[TOGGLE] Found salon "${salon.name}", set inactive=${salon.inactive}`);
 

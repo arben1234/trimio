@@ -3071,8 +3071,18 @@ function renderFatturazione(){
   $('fattCancelBtn')?.addEventListener('click', async (e)=>{
     if(!confirm('Disattivare il pagamento automatico? Dovrai tornare al bonifico bancario manuale finché non lo riattivi.'))return;
     const btn=e.target;btn.disabled=true;btn.textContent='…';
-    const r=await cancelBillingSubscription(salon.id);
-    if(r&&r.success){ salon.billing.autopay=false; renderFatturazione(); }
+    const salonId=salon.id;
+    const r=await cancelBillingSubscription(salonId);
+    if(r&&r.success){
+      // Re-resolved fresh, not the `salon` closed over above — a background
+      // sync poll can replace STATE.salons wholesale while this await was in
+      // flight, which would otherwise silently mutate a detached copy that
+      // never reaches STATE (same stale-reference class fixed elsewhere in
+      // this file, e.g. renderDipendenti's delete handler).
+      const liveSalon=STATE.salons.find(x=>x.id===salonId);
+      if(liveSalon&&liveSalon.billing)liveSalon.billing.autopay=false;
+      renderFatturazione();
+    }
     else{
       btn.disabled=false;btn.textContent='Disattiva pagamento automatico';
       alert('Errore durante la disattivazione. Riprova.');

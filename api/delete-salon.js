@@ -1,5 +1,6 @@
 import { getSalonsDb, setSalonsDb, getAllBookings, releaseSlotLock, kvCmd, ensureMigratedV2 } from '../lib/kv.js';
 import { verifyAdminPassword } from '../lib/auth.js';
+import { cancelPaypalSubscription } from '../lib/paypal.js';
 
 export default async function handler(req, res) {
   // CORS
@@ -47,6 +48,15 @@ export default async function handler(req, res) {
     const salon = salons.find(s => s.id === salonId);
     if (!salon) {
       return res.status(404).json({ error: 'Salon not found', salonId });
+    }
+
+    // Deleting a salon that still has a live PayPal subscription must stop
+    // it from continuing to charge the customer every month for a service
+    // that no longer exists — this used to be a pure gap, nothing here ever
+    // told PayPal the salon was gone. Best-effort: the delete proceeds
+    // either way even if this call fails.
+    if (salon.billing && salon.billing.autopay && salon.billing.paypalSubscriptionId) {
+      await cancelPaypalSubscription(salon.billing.paypalSubscriptionId, 'Salone eliminato su TRIMIO');
     }
 
     const remaining = salons.filter(s => s.id !== salonId);

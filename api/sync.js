@@ -3,14 +3,15 @@ import {
   getSalonsDb, setSalonsDb, getAllBookings, kvCmd,
   tryAcquireSlotLock, promoteLock, releaseSlotLock, hsetBooking,
   acquireBarberDayLock, releaseBarberDayLock, checkRateLimit,
-  ensureMigratedV2, getAdminDb, setAdminDb
+  ensureMigratedV2, getAdminDb, setAdminDb,
+  acquireBillingLock, releaseBillingLock
 } from '../lib/kv.js';
 import { sendCustomerText, toE164, twilioConfigured } from '../lib/sms.js';
 import { sendEmail } from '../lib/email.js';
 import { handleLogin, handleChangePassword, getVerifiedSession, getClientIp, verifyAdminPassword } from '../lib/auth.js';
 import { isQuietHours, romeYearMonth } from '../lib/time.js';
 import { feeForWorkerCount } from '../lib/billing.js';
-import { paypalFetch, paypalConfigured } from '../lib/paypal.js';
+import { paypalFetch, paypalConfigured, cancelPaypalSubscription } from '../lib/paypal.js';
 
 // Fixed operational inbox (forwards to the real team, see CLAUDE.md) —
 // used for admin-facing notifications that aren't tied to a specific admin
@@ -413,18 +414,26 @@ async function handleEnableSalonBilling(body, kvUrl, kvToken, req) {
   if (!session || session.role !== 'admin') return { status: 403, json: { success: false, error: 'forbidden' } };
   if (!body.salonId) return { status: 400, json: { success: false, error: 'missing_fields' } };
 
-  const salons = await getSalonsDb(kvUrl, kvToken);
-  const salon = salons.find(s => s.id === body.salonId);
-  if (!salon) return { status: 404, json: { success: false, error: 'salon_not_found' } };
-  if (salon.billing) return { status: 409, json: { success: false, error: 'already_enabled' } };
+  // Same per-salon lock api/paypal-webhook.js uses — this read-modify-write
+  // must never race a webhook event landing for this salon at the same time.
+  const locked = await acquireBillingLock(kvUrl, kvToken, body.salonId);
+  if (!locked) return { status: 503, json: { success: false, error: 'busy' } };
+  try {
+    const salons = await getSalonsDb(kvUrl, kvToken);
+    const salon = salons.find(s => s.id === body.salonId);
+    if (!salon) return { status: 404, json: { success: false, error: 'salon_not_found' } };
+    if (salon.billing) return { status: 409, json: { success: false, error: 'already_enabled' } };
 
-  salon.billing = {
-    declaredWorkerCount: Math.max((salon.workers || []).length, 1),
-    paidThroughMonth: romeYearMonth(),
-    pendingApproval: false
-  };
-  await setSalonsDb(kvUrl, kvToken, salons);
-  return { status: 200, json: { success: true, billing: salon.billing } };
+    salon.billing = {
+      declaredWorkerCount: Math.max((salon.workers || []).length, 1),
+      paidThroughMonth: romeYearMonth(),
+      pendingApproval: false
+    };
+    await setSalonsDb(kvUrl, kvToken, salons);
+    return { status: 200, json: { success: true, billing: salon.billing } };
+  } finally {
+    await releaseBillingLock(kvUrl, kvToken, body.salonId);
+  }
 }
 
 // Admin-only: the dedicated "Nuove Richieste" approval action — deliberately
@@ -509,61 +518,77 @@ async function handleCreateBillingCheckoutSession(body, kvUrl, kvToken, req) {
     return { status: 200, json: { success: false, error: 'not_configured' } };
   }
 
-  const salons = await getSalonsDb(kvUrl, kvToken);
-  const salon = salons.find(s => s.id === body.salonId);
-  if (!salon) return { status: 404, json: { success: false, error: 'salon_not_found' } };
-  if (!salon.billing) return { status: 409, json: { success: false, error: 'billing_not_applicable' } };
-  if (salon.billing.autopay) return { status: 200, json: { success: false, error: 'already_active' } };
-
-  const fee = feeForWorkerCount(Math.max((salon.workers || []).length, salon.billing.declaredWorkerCount || 0));
-
-  let subscription;
+  const locked = await acquireBillingLock(kvUrl, kvToken, body.salonId);
+  if (!locked) return { status: 503, json: { success: false, error: 'busy' } };
   try {
-    const planId = await ensurePaypalPlan(kvUrl, kvToken);
-    subscription = await paypalFetch('/v1/billing/subscriptions', {
-      method: 'POST',
-      body: {
-        plan_id: planId,
-        // Echoed back on every webhook event for this subscription — the
-        // PayPal equivalent of Stripe's client_reference_id/metadata, used
-        // to correlate an incoming event back to a salon.
-        custom_id: salon.id,
-        // Per-subscription price override — PayPal has no ad-hoc "price at
-        // checkout" object like Stripe's price_data, so the shared Plan
-        // carries a placeholder price and every real subscription overrides
-        // it with this salon's actual fee tier.
-        plan: {
-          billing_cycles: [{
-            sequence: 1,
-            pricing_scheme: { fixed_price: { value: fee.toFixed(2), currency_code: 'EUR' } }
-          }]
-        },
-        application_context: {
-          brand_name: 'TRIMIO',
-          user_action: 'SUBSCRIBE_NOW',
-          return_url: 'https://trimio.org/#DASHBOARD',
-          cancel_url: 'https://trimio.org/#DASHBOARD'
+    const salons = await getSalonsDb(kvUrl, kvToken);
+    const salon = salons.find(s => s.id === body.salonId);
+    if (!salon) return { status: 404, json: { success: false, error: 'salon_not_found' } };
+    if (!salon.billing) return { status: 409, json: { success: false, error: 'billing_not_applicable' } };
+    if (salon.billing.autopay) return { status: 200, json: { success: false, error: 'already_active' } };
+
+    // A previous checkout was started but never approved (abandoned tab,
+    // owner clicked "Attiva" twice, etc.) — cancel that stale subscription
+    // before creating a new one, so it can't later be approved out-of-band
+    // (an old email, a duplicate tab) and leave two live subscriptions
+    // charging the same salon. Best-effort: a subscription that's already
+    // expired/gone at PayPal just fails harmlessly here.
+    if (salon.billing.paypalSubscriptionId) {
+      await cancelPaypalSubscription(salon.billing.paypalSubscriptionId, 'Superseded by a new checkout attempt');
+    }
+
+    const fee = feeForWorkerCount(Math.max((salon.workers || []).length, salon.billing.declaredWorkerCount || 0));
+
+    let subscription;
+    try {
+      const planId = await ensurePaypalPlan(kvUrl, kvToken);
+      subscription = await paypalFetch('/v1/billing/subscriptions', {
+        method: 'POST',
+        body: {
+          plan_id: planId,
+          // Echoed back on every webhook event for this subscription — the
+          // PayPal equivalent of Stripe's client_reference_id/metadata, used
+          // to correlate an incoming event back to a salon.
+          custom_id: salon.id,
+          // Per-subscription price override — PayPal has no ad-hoc "price at
+          // checkout" object like Stripe's price_data, so the shared Plan
+          // carries a placeholder price and every real subscription overrides
+          // it with this salon's actual fee tier.
+          plan: {
+            billing_cycles: [{
+              sequence: 1,
+              pricing_scheme: { fixed_price: { value: fee.toFixed(2), currency_code: 'EUR' } }
+            }]
+          },
+          application_context: {
+            brand_name: 'TRIMIO',
+            user_action: 'SUBSCRIBE_NOW',
+            return_url: 'https://trimio.org/#DASHBOARD',
+            cancel_url: 'https://trimio.org/#DASHBOARD'
+          }
         }
-      }
-    });
-  } catch (err) {
-    console.error('[BILLING] PayPal subscription creation failed:', err.message);
-    return { status: 502, json: { success: false, error: 'paypal_error' } };
+      });
+    } catch (err) {
+      console.error('[BILLING] PayPal subscription creation failed:', err.message);
+      return { status: 502, json: { success: false, error: 'paypal_error' } };
+    }
+
+    const approveLink = (subscription.links || []).find(l => l.rel === 'approve');
+    if (!approveLink) {
+      console.error('[BILLING] PayPal subscription response missing approve link:', JSON.stringify(subscription));
+      return { status: 502, json: { success: false, error: 'paypal_error' } };
+    }
+
+    // Persisted immediately (pending) so a reload before the ACTIVATED
+    // webhook lands doesn't lose the association — autopay itself only
+    // flips true once api/paypal-webhook.js confirms the buyer approved it.
+    salon.billing.paypalSubscriptionId = subscription.id;
+    await setSalonsDb(kvUrl, kvToken, salons);
+
+    return { status: 200, json: { success: true, url: approveLink.href } };
+  } finally {
+    await releaseBillingLock(kvUrl, kvToken, body.salonId);
   }
-
-  const approveLink = (subscription.links || []).find(l => l.rel === 'approve');
-  if (!approveLink) {
-    console.error('[BILLING] PayPal subscription response missing approve link:', JSON.stringify(subscription));
-    return { status: 502, json: { success: false, error: 'paypal_error' } };
-  }
-
-  // Persisted immediately (pending) so a reload before the ACTIVATED webhook
-  // lands doesn't lose the association — autopay itself only flips true once
-  // api/paypal-webhook.js confirms the buyer actually approved it.
-  salon.billing.paypalSubscriptionId = subscription.id;
-  await setSalonsDb(kvUrl, kvToken, salons);
-
-  return { status: 200, json: { success: true, url: approveLink.href } };
 }
 
 // Owner-only, own-salon: cancels the PayPal subscription directly — PayPal
@@ -581,30 +606,34 @@ async function handleCancelBillingSubscription(body, kvUrl, kvToken, req) {
     return { status: 200, json: { success: false, error: 'not_configured' } };
   }
 
-  const salons = await getSalonsDb(kvUrl, kvToken);
-  const salon = salons.find(s => s.id === body.salonId);
-  if (!salon) return { status: 404, json: { success: false, error: 'salon_not_found' } };
-  if (!salon.billing || !salon.billing.paypalSubscriptionId) {
-    return { status: 409, json: { success: false, error: 'no_subscription' } };
-  }
-
+  const locked = await acquireBillingLock(kvUrl, kvToken, body.salonId);
+  if (!locked) return { status: 503, json: { success: false, error: 'busy' } };
   try {
-    await paypalFetch(`/v1/billing/subscriptions/${encodeURIComponent(salon.billing.paypalSubscriptionId)}/cancel`, {
-      method: 'POST',
-      body: { reason: 'Disattivato dal proprietario dal pannello TRIMIO' }
-    });
-  } catch (err) {
-    console.error('[BILLING] PayPal subscription cancel failed:', err.message);
-    return { status: 502, json: { success: false, error: 'paypal_error' } };
+    const salons = await getSalonsDb(kvUrl, kvToken);
+    const salon = salons.find(s => s.id === body.salonId);
+    if (!salon) return { status: 404, json: { success: false, error: 'salon_not_found' } };
+    if (!salon.billing || !salon.billing.paypalSubscriptionId) {
+      return { status: 409, json: { success: false, error: 'no_subscription' } };
+    }
+
+    const cancelled = await cancelPaypalSubscription(salon.billing.paypalSubscriptionId, 'Disattivato dal proprietario dal pannello TRIMIO');
+    if (!cancelled) return { status: 502, json: { success: false, error: 'paypal_error' } };
+
+    // autopay reflected immediately rather than waiting for the CANCELLED
+    // webhook — the owner is looking at this screen right now and the
+    // cancel call above already succeeded synchronously. paypalSubscriptionId
+    // is cleared too (not left pointing at the now-dead subscription) so a
+    // stale/delayed webhook for it (e.g. a late PAYMENT.FAILED or SUSPENDED)
+    // can no longer correlate to this salon and re-suspend someone who
+    // already opted out.
+    salon.billing.autopay = false;
+    salon.billing.paypalSubscriptionId = null;
+    await setSalonsDb(kvUrl, kvToken, salons);
+
+    return { status: 200, json: { success: true } };
+  } finally {
+    await releaseBillingLock(kvUrl, kvToken, body.salonId);
   }
-
-  // Reflected immediately rather than waiting for the CANCELLED webhook —
-  // the owner is looking at this screen right now and the cancel call above
-  // already succeeded synchronously.
-  salon.billing.autopay = false;
-  await setSalonsDb(kvUrl, kvToken, salons);
-
-  return { status: 200, json: { success: true } };
 }
 
 function isValidBooking(b) {
