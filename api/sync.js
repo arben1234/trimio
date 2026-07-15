@@ -675,8 +675,16 @@ export default async function handler(req, res) {
                   conflicts.push({ id: nb.id, salonId: nb.salonId, workerId: nb.workerId, dateISO: nb.dateISO, time: nb.time });
                   continue;
                 }
-                await hsetBooking(kvUrl, kvToken, nb);
-                await promoteLock(kvUrl, kvToken, nb);
+                // Independent writes to different keys (the booking hash
+                // field vs. the slot lock's TTL) — running them concurrently
+                // instead of sequentially shrinks how long this request holds
+                // the day-lock, so more bookings for the same busy barber+day
+                // can cycle through the lock within acquireBarberDayLock's
+                // wait budget instead of piling up behind it.
+                await Promise.all([
+                  hsetBooking(kvUrl, kvToken, nb),
+                  promoteLock(kvUrl, kvToken, nb)
+                ]);
                 bookingsMap.set(nb.id, nb);
                 if (nb.status !== 'cancelled') addedBks.push(nb);
               } finally {
