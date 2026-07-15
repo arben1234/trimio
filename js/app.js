@@ -3988,7 +3988,7 @@ const SU_CONTRACT_HTML = `
   <i>(Modello standard — non sostituisce una consulenza legale.)</i><br><br>
   <b>1. Oggetto.</b> TRIMIO fornisce al Salone l'accesso alla piattaforma software di gestione prenotazioni online, inclusa assistenza tecnica e manutenzione della piattaforma 24 ore su 24, 7 giorni su 7.<br><br>
   <b>2. Canone mensile.</b> Il Salone corrisponde un canone mensile calcolato in base al numero di barbieri registrati: €50 (1-5 barbieri), €100 (6-10), €150 (11-15), con incrementi proporzionali oltre questa soglia.<br><br>
-  <b>3. Termini di pagamento.</b> Il canone è dovuto il giorno 1 di ogni mese, tramite bonifico bancario sull'IBAN indicato in fase di registrazione. Il primo mese di utilizzo, dalla data di registrazione alla fine dello stesso mese solare, è gratuito.<br><br>
+  <b>3. Termini di pagamento.</b> Il canone è dovuto il giorno 1 di ogni mese, tramite autorizzazione di pagamento automatico attivata dal Salone dal proprio pannello dopo l'approvazione. Il primo mese di utilizzo, dalla data di registrazione alla fine dello stesso mese solare, è gratuito.<br><br>
   <b>4. Mancato pagamento.</b> Se il pagamento non risulta registrato entro il giorno 5 del mese, il servizio viene sospeso; il Salone riceve un promemoria via email ogni giorno dal giorno 2 fino alla sospensione o al pagamento.<br><br>
   <b>5. Riattivazione.</b> Il servizio viene riattivato non appena TRIMIO conferma la ricezione del pagamento.<br><br>
   <b>6. Durata e recesso.</b> Il contratto si rinnova mensilmente; il Salone può recedere in qualsiasi momento con effetto dalla fine del mese in corso.<br><br>
@@ -4077,10 +4077,6 @@ function suNext1(){
   $('suPhone').value=formattedPhone;
   const wc=parseInt($('suWorkerCount').value);
   if(!wc||wc<1)return showErr('suErr','Inserisci il numero di barbieri');
-  const iban=$('suIban').value.trim().toUpperCase().replace(/\s+/g,'');
-  if(!/^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/.test(iban))return showErr('suErr','Inserisci un IBAN valido');
-  $('suIban').value=iban;
-  if($('suTaxId').value.trim().length<6)return showErr('suErr','Inserisci una Partita IVA o Codice Fiscale valida');
   suStep=3;renderSuStep();
 }
 async function suSubmit(){
@@ -4101,9 +4097,6 @@ async function suSubmit(){
     address:$('suAddress').value.trim(),
     phone:$('suPhone').value.trim(),
     declaredWorkerCount:parseInt($('suWorkerCount').value)||1,
-    paymentMethod:$('suPaymentMethod').value,
-    iban:$('suIban').value.trim(),
-    taxId:$('suTaxId').value.trim(),
     contractSignedName:signName,
     contractAccepted:true,
     website:$('suWebsite').value // honeypot — real users never fill this
@@ -4122,7 +4115,6 @@ async function suSubmit(){
         invalid_phone:'Numero di telefono non valido.',
         invalid_email:'Indirizzo email non valido.',
         disposable_email:'Usa un indirizzo email permanente, non temporaneo.',
-        invalid_iban:'IBAN non valido.',
         phone_not_verified:'Devi prima verificare il tuo numero di telefono.',
         rate_limited:'Troppi tentativi, riprova più tardi.'
       };

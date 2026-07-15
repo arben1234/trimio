@@ -217,9 +217,6 @@ async function handleSignupSalon(body, kvUrl, kvToken, req) {
   const email = typeof body.email === 'string' ? body.email.trim() : '';
   const city = typeof body.city === 'string' ? body.city.trim() : '';
   const address = typeof body.address === 'string' ? body.address.trim() : '';
-  const iban = typeof body.iban === 'string' ? body.iban.trim().toUpperCase().replace(/\s+/g, '') : '';
-  const taxId = typeof body.taxId === 'string' ? body.taxId.trim().toUpperCase() : '';
-  const paymentMethod = typeof body.paymentMethod === 'string' && body.paymentMethod ? body.paymentMethod : 'bonifico_bancario';
   const contractSignedName = typeof body.contractSignedName === 'string' ? body.contractSignedName.trim() : '';
 
   // Every field below is mandatory in the signup wizard — reject a bare
@@ -235,8 +232,6 @@ async function handleSignupSalon(body, kvUrl, kvToken, req) {
   }
   if (city.length < 2) return { status: 400, json: { success: false, error: 'invalid_city' } };
   if (address.length < 3) return { status: 400, json: { success: false, error: 'invalid_address' } };
-  if (!/^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/.test(iban)) return { status: 400, json: { success: false, error: 'invalid_iban' } };
-  if (taxId.length < 6) return { status: 400, json: { success: false, error: 'invalid_tax_id' } };
   if (!body.contractAccepted || contractSignedName.length < 2) {
     return { status: 400, json: { success: false, error: 'contract_not_accepted' } };
   }
@@ -296,7 +291,6 @@ async function handleSignupSalon(body, kvUrl, kvToken, req) {
       declaredWorkerCount,
       paidThroughMonth: romeYearMonth(), // first partial month is free
       pendingApproval: true,
-      paymentMethod, iban, taxId,
       contractSignedAt: new Date().toISOString(),
       contractSignedName,
       signupIp: getClientIp(req) // fraud-review signal for admin, not enforcement

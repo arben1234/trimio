@@ -595,14 +595,7 @@
               <div class="field"><label>Indirizzo *</label><input type="text" id="suAddress" placeholder="Via Roma 1" required></div>
               <div class="field"><label>Telefono del salone *</label><input type="text" id="suPhone" placeholder="+39 02 1234567" required></div>
               <div class="field"><label>Numero di barbieri *</label><input type="number" id="suWorkerCount" min="1" value="1" required></div>
-              <div style="font-size:13px; color:#a1a1aa; margin:-6px 0 4px;">Canone mensile stimato: <b id="suFeePreview" style="color:#e5c158;">€50</b>/mese</div>
-              <div class="field"><label>Metodo di pagamento</label>
-                <select class="minput" id="suPaymentMethod">
-                  <option value="bonifico_bancario">Bonifico bancario</option>
-                </select>
-              </div>
-              <div class="field"><label>IBAN (per il bonifico mensile) *</label><input type="text" id="suIban" placeholder="IT60 X054 2811 1010 0000 0123 456" required></div>
-              <div class="field"><label>Partita IVA o Codice Fiscale *</label><input type="text" id="suTaxId" placeholder="Es. RSSMRA80A01H501U" required></div>
+              <div style="font-size:13px; color:#a1a1aa; margin:-6px 0 4px;">Canone mensile stimato: <b id="suFeePreview" style="color:#e5c158;">€50</b>/mese — addebitato automaticamente ogni mese tramite autorizzazione di pagamento, da attivare dal tuo pannello dopo l'approvazione.</div>
               <div style="display:flex; gap:10px;">
                 <button class="btn btn-ghost" id="suBack1" style="flex:1">← Indietro</button>
                 <button class="btn btn-main" id="suNext1" style="flex:1">Avanti →</button>
@@ -1168,6 +1161,6 @@
      own "Save as PDF" print target produces a clean report. -->
 <div id="printableStats"></div>
 
-<script src="/js/app.min.js?v=20260715_0005"></script>
+<script src="/js/app.min.js?v=20260715_0006"></script>
 </body>
 </html>
