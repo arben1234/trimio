@@ -260,7 +260,12 @@ async function handleSignupSalon(body, kvUrl, kvToken, req) {
     return { status: 400, json: { success: false, error: 'disposable_email' } };
   }
   if (city.length < 2) return { status: 400, json: { success: false, error: 'invalid_city' } };
-  if (address.length < 3) return { status: 400, json: { success: false, error: 'invalid_address' } };
+  // No real geocoding/format validation exists (or is planned) for this
+  // field — it's accepted as free text. This is a light sanity check only:
+  // a real street address is essentially never a single word ("Via Roma 12"
+  // vs "asdf"), so requiring a space catches obvious garbage without
+  // rejecting legitimate addresses this can't actually verify.
+  if (address.length < 5 || !/\s/.test(address)) return { status: 400, json: { success: false, error: 'invalid_address' } };
   if (!body.contractAccepted || contractSignedName.length < 2) {
     return { status: 400, json: { success: false, error: 'contract_not_accepted' } };
   }
@@ -726,7 +731,8 @@ function isValidNewSalon(s, existingSalonsMap) {
   // existed at all against a direct API call bypassing the client.
   if (typeof s.ownerPassword !== 'string' || s.ownerPassword.length < 6) return false;
   if (typeof s.phone !== 'string' || !toE164(s.phone)) return false;
-  if (typeof s.address !== 'string' || s.address.trim().length < 3) return false;
+  // Same light "not a single word" sanity check as handleSignupSalon.
+  if (typeof s.address !== 'string' || s.address.trim().length < 5 || !/\s/.test(s.address.trim())) return false;
   for (const other of existingSalonsMap.values()) {
     if (other.id === s.id) continue;
     if (other.slug === s.slug) return false;
@@ -1152,6 +1158,7 @@ export default async function handler(req, res) {
             for (const id of lockIds) {
               if (await acquireBillingLock(kvUrl, kvToken, id)) heldLocks.push(id);
             }
+            const heldLocksSet = new Set(heldLocks);
             try {
             // Merge by id (upsert) instead of overwriting the whole array.
             // saveState() sends the client's ENTIRE local salons snapshot on
@@ -1166,6 +1173,18 @@ export default async function handler(req, res) {
             const salonMap = new Map(currentSalons.map(s => [s.id, s]));
             for (const incoming of newData.salons) {
               const existing = salonMap.get(incoming.id);
+              // lockIds above only includes ids this session is actually
+              // authorized to touch — if acquiring THIS one's lock failed
+              // within budget (contention with a webhook or another save),
+              // the write must be skipped entirely rather than proceeding
+              // unprotected: writing here without the lock would silently
+              // reintroduce the exact lost-update race it exists to close.
+              // Rare (needs sustained contention on one specific salon), but
+              // a real gap the lock-skip loop above used to leave open.
+              if (typeof incoming.id === 'string' && lockIds.includes(incoming.id) && !heldLocksSet.has(incoming.id)) {
+                console.warn('[SYNC] Skipping salon save, could not acquire lock:', incoming.id);
+                continue;
+              }
               // Only an admin (any salon) or that salon's own owner may
               // create/edit it through this generic bulk path — a caller with
               // no session, or a valid session for a DIFFERENT salon, used to

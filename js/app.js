@@ -2328,7 +2328,7 @@ function renderSalonModalWorkers(s) {
       <div style="display:flex; gap:6px;">
         <button type="button" class="btn btn-ghost" data-smwedit="${w.id}" style="padding:4px 8px; font-size:11px; border:1px solid #ccc; border-radius:6px; background:#fff;">Modifica</button>
         <button type="button" class="btn btn-ghost" data-smwbreak="${w.id}" style="padding:4px 8px; font-size:11px; border:1px solid #ccc; border-radius:6px; background:#fff;">🕐 Pause</button>
-        <button type="button" class="btn btn-ghost" data-smwdel="${w.id}" style="padding:4px 8px; font-size:11px; color:#ef4444; border:1px solid #fecaca; border-radius:6px; background:#fff;">Elimina</button>
+        ${SESSION.role==='admin'?`<button type="button" class="btn btn-ghost" data-smwdel="${w.id}" style="padding:4px 8px; font-size:11px; color:#ef4444; border:1px solid #fecaca; border-radius:6px; background:#fff;">Elimina</button>`:''}
       </div>
     </div>
   `).join('');
@@ -4195,7 +4195,7 @@ function suNext1(){
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return showErr('suErr','Inserisci un indirizzo email valido');
   if(email.toLowerCase()!==emailConfirm.toLowerCase())return showErr('suErr','Le due email inserite non coincidono');
   if($('suCity').value.trim().length<2)return showErr('suErr','Inserisci la città del salone');
-  if($('suAddress').value.trim().length<3)return showErr('suErr','Inserisci l\'indirizzo del salone');
+  if(!/\s/.test($('suAddress').value.trim())||$('suAddress').value.trim().length<5)return showErr('suErr','Inserisci l\'indirizzo completo del salone (via e numero civico)');
   const formattedPhone=formatItalianPhone($('suPhone').value.trim());
   if(!isValidItalianPhone(formattedPhone))return showErr('suErr','Inserisci un numero di telefono del salone valido');
   $('suPhone').value=formattedPhone;
@@ -4350,7 +4350,7 @@ async function saveSalon(){
   if(!slug)return showErr('smErr','Inserisci lo slug');
   if(!phone)return showErr('smErr','Il numero di telefono è obbligatorio');
   if(!isValidItalianPhone(phone))return showErr('smErr','Inserisci un numero di telefono italiano valido (es. +39 035 123 4567)');
-  if(address.length<3)return showErr('smErr','Inserisci l\'indirizzo del salone');
+  if(address.length<5||!/\s/.test(address))return showErr('smErr','Inserisci l\'indirizzo completo del salone (via e numero civico)');
 
   if(salonEditId==='new'){
     if(!oUser||!oPwd)return showErr('smErr','Username e password proprietario obbligatori');

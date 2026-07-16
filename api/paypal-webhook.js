@@ -239,6 +239,13 @@ export default async function handler(req, res) {
             const s = salons.find(x => x.id === salon.id);
             if (!s || !s.billing) return false;
             s.billing.autopay = false;
+            // Also clear the id, not just autopay — matches
+            // handleCancelBillingSubscription's own owner-initiated cancel
+            // path (api/sync.js), which does this specifically so a
+            // delayed/redelivered webhook event for this now-dead
+            // subscription can no longer re-correlate to this salon via
+            // findSalonByPaypalIds' subscriptionId fallback.
+            s.billing.paypalSubscriptionId = null;
             return true;
           });
         }

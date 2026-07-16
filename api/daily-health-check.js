@@ -73,6 +73,16 @@ export default async function handler(req, res) {
   try {
     const bookings = Array.from((await getAllBookings(kvUrl, kvToken)).values());
     report.bookings = bookings.length;
+    // The "bookings" KV hash has no pagination/archiving — every GET (every
+    // 6s per open client tab) and POST does a full HGETALL across ALL
+    // salons' entire booking history (lib/kv.js getAllBookings), with cost
+    // scaling with total platform volume, not per-salon. Currently
+    // negligible; this is an early-warning tripwire so growth into a real
+    // performance problem gets noticed proactively instead of silently,
+    // long before it's large enough to matter.
+    if (bookings.length > 8000) {
+      problems.push(`La tabella prenotazioni ha ${bookings.length} righe, senza archiviazione automatica — le performance di sincronizzazione potrebbero iniziare a risentirne; valuta di archiviare le prenotazioni più vecchie.`);
+    }
     const yISO = romeYesterdayISO();
     const missedReminders = bookings.filter(b => {
       if (b.status !== 'confirmed' || b.dateISO !== yISO || b.reminderSent || b.sameDayReminderSent) return false;
