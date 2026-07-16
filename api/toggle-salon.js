@@ -1,6 +1,7 @@
 import { getSalonsDb, setSalonsDb, ensureMigratedV2, acquireBillingLock, releaseBillingLock } from '../lib/kv.js';
 import { verifyAdminPassword } from '../lib/auth.js';
 import { cancelPaypalSubscription } from '../lib/paypal.js';
+import { sendEmail } from '../lib/email.js';
 
 export default async function handler(req, res) {
   // CORS
@@ -60,6 +61,15 @@ export default async function handler(req, res) {
       if (!salon) {
         return res.status(404).json({ error: 'Salon not found', salonId });
       }
+      // A pending self-signup salon approved from here (the main "Saloni"
+      // list's Attiva button — pending salons sort to the top of that same
+      // list) instead of the dedicated "Nuove Richieste" tab used to go
+      // live with ZERO notification to the owner: they'd already set their
+      // own username/password at signup, but had no way to discover their
+      // salon was actually approved, live, or find their booking link/QR —
+      // only handleApproveSalon (api/sync.js) sent that email. Both paths
+      // now do, whichever one an admin happens to use.
+      const wasPendingApproval = !!(salon.billing && salon.billing.pendingApproval);
       salon.inactive = !!setInactive;
       // Reactivating (this is also the "approve a pending self-signup" action)
       // clears any billing-driven pending/suspended flags too — Attiva is the
@@ -83,6 +93,24 @@ export default async function handler(req, res) {
       console.log(`[TOGGLE] Found salon "${salon.name}", set inactive=${salon.inactive}`);
 
       await setSalonsDb(kvUrl, kvToken, salons);
+
+      if (wasPendingApproval && !salon.inactive) {
+        const link = `https://trimio.org/s/${encodeURIComponent(salon.slug)}`;
+        const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(link)}`;
+        // Best-effort (sendEmail never throws, just returns false): the
+        // salon is already approved/live regardless of whether this email
+        // actually reaches the owner — same as handleApproveSalon in
+        // api/sync.js, which this mirrors.
+        await sendEmail(salon.email, '🎉 TRIMIO — Il tuo salone è stato approvato!',
+          `<p>Ciao ${salon.ownerName || ''},</p>
+           <p>Il tuo salone <b>${salon.name}</b> è stato approvato ed è ora attivo su TRIMIO!</p>
+           <p><b>Le tue credenziali di accesso proprietario:</b><br>
+           Username: ${salon.ownerUsername}<br>
+           Password: ${salon.ownerPassword}</p>
+           <p><b>Link di prenotazione del tuo salone:</b><br><a href="${link}">${link}</a></p>
+           <p>I tuoi clienti possono anche scansionare questo QR code per prenotare direttamente:</p>
+           <img src="${qrUrl}" alt="QR Code" width="200" height="200">`);
+      }
     } finally {
       await releaseBillingLock(kvUrl, kvToken, salonId);
     }

@@ -4231,6 +4231,7 @@ async function suSubmit(){
         invalid_email:'Indirizzo email non valido.',
         disposable_email:'Usa un indirizzo email permanente, non temporaneo.',
         phone_not_verified:'Devi prima verificare il tuo numero di telefono.',
+        otp_not_requested:'Devi prima richiedere il codice di verifica per il tuo numero di telefono.',
         rate_limited:'Troppi tentativi, riprova più tardi.',
         invalid_owner_name:'Inserisci il tuo nome e cognome.',
         invalid_salon_name:'Inserisci il nome del salone.',

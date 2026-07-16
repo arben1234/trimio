@@ -41,7 +41,16 @@ const DEFAULT_SERVICES = [
 // other salon's staff — could read every customer's contact info across the
 // whole platform. This is the one gate all of that goes through:
 //   - admin session -> everything, unchanged.
-//   - owner/barber session -> only their own salon's bookings, unchanged.
+//   - owner session -> their own salon's bookings (every worker) — the
+//     dashboard's cross-barber "Stato salone" widget and stats need this.
+//   - barber session -> only THEIR OWN bookings within their own salon. The
+//     client already only ever renders a barber's own calendar/stats
+//     (SESSION.workerId filters throughout js/app.js) — this used to ship
+//     every OTHER barber's bookings (including customer name/phone) to a
+//     barber's client too, just relying on the UI not to show them; a
+//     barber with devtools open could read (and, before the
+//     isStaffForThisBooking fix below, cancel or mark-complete) any
+//     colleague's appointments.
 //   - no/invalid session (anonymous, or a customer's own device) -> only the
 //     one salon the client is actually viewing (?salonId=... — the client
 //     resolves this from the current #SLUG/#/s/SLUG before fetching), with
@@ -54,8 +63,11 @@ const DEFAULT_SERVICES = [
 //     later once the salon is known.
 function scopeBookingsForSession(bookings, session, requestedSalonId) {
   if (session && session.role === 'admin') return bookings;
-  if (session && (session.role === 'owner' || session.role === 'barber')) {
+  if (session && session.role === 'owner') {
     return bookings.filter(b => b.salonId === session.salonId);
+  }
+  if (session && session.role === 'barber') {
+    return bookings.filter(b => b.salonId === session.salonId && b.workerId === session.workerId);
   }
   if (typeof requestedSalonId !== 'string' || !requestedSalonId) return [];
   return bookings
@@ -173,6 +185,14 @@ async function handleRequestSignupOtp(body, kvUrl, kvToken, req) {
   const rlPhone = await checkRateLimit(kvUrl, kvToken, `ratelimit:otp_phone:${phone}`, 4, 3600);
   if (!rlPhone.allowed) return { status: 429, json: { success: false, error: 'rate_limited' } };
 
+  // Marks that a real request reached this endpoint for this phone, whether
+  // or not Twilio actually manages to deliver the code — this is what
+  // closes handleSignupSalon's "just never call this endpoint" bypass below,
+  // without reintroducing the trial-account lockout signup_otp_sent (below)
+  // was designed to avoid: a number Twilio genuinely can't reach still lets
+  // the signup through, but only after a real attempt was made for it.
+  await kvCmd(kvUrl, kvToken, ['SET', `signup_otp_attempted:${phone}`, '1', 'EX', '700']);
+
   const code = String(Math.floor(100000 + Math.random() * 900000));
   await kvCmd(kvUrl, kvToken, ['SET', `signup_otp:${phone}`, code, 'EX', '600']);
   const sent = await sendCustomerText(phone, `Il tuo codice di verifica TRIMIO è: ${code}`);
@@ -272,6 +292,18 @@ async function handleSignupSalon(body, kvUrl, kvToken, req) {
   if (otpWasSent) {
     const verified = await kvCmd(kvUrl, kvToken, ['GET', `signup_otp_verified:${ownerPhone}`]);
     if (!verified) return { status: 403, json: { success: false, error: 'phone_not_verified' } };
+  } else if (twilioConfigured()) {
+    // Twilio IS available in this deployment, so every genuine signer has
+    // the means to prove their number — require they at least WENT THROUGH
+    // request_signup_otp for this phone (even if delivery itself then
+    // failed, e.g. a Twilio trial account's verified-numbers-only
+    // restriction — the documented reason this whole gate doesn't hard-
+    // require signup_otp_sent by itself, preserved above). A caller who
+    // never calls request_signup_otp at all — simply skipping the endpoint
+    // rather than fighting the gate — used to sail through with a
+    // completely unverified/fabricated phone number; now rejected here.
+    const attempted = await kvCmd(kvUrl, kvToken, ['GET', `signup_otp_attempted:${ownerPhone}`]);
+    if (!attempted) return { status: 403, json: { success: false, error: 'otp_not_requested' } };
   }
 
   const salons = await getSalonsDb(kvUrl, kvToken);
@@ -917,9 +949,20 @@ export default async function handler(req, res) {
             }
 
             if (!existing) {
+              const salonForVac = salonsForDur.find(s => s.id === nb.salonId);
+              // A pending self-signup salon (not yet admin-approved) or one
+              // deactivated/suspended by admin/billing must never actually
+              // become bookable — until now this was enforced ONLY by the
+              // client UI's inactive-salon alert; a direct POST bypassing it
+              // (the salon id/workerId are both visible in the anonymous
+              // GET response, needed for slot-availability rendering) could
+              // create a real booking against a salon nobody is watching.
+              if (!salonForVac || salonForVac.inactive) {
+                conflicts.push({ id: nb.id, salonId: nb.salonId, workerId: nb.workerId, dateISO: nb.dateISO, time: nb.time, error: 'salon_inactive' });
+                continue;
+              }
               if (nb.status !== 'cancelled') {
-                const salonForVac = salonsForDur.find(s => s.id === nb.salonId);
-                const worker = salonForVac && (salonForVac.workers || []).find(w => w.id === nb.workerId);
+                const worker = (salonForVac.workers || []).find(w => w.id === nb.workerId);
                 if (worker && (isOnVacation(worker, nb.dateISO) || isWeeklyOff(worker, nb.dateISO) || overlapsBreak(worker, nb, salonForVac))) {
                   conflicts.push({ id: nb.id, salonId: nb.salonId, workerId: nb.workerId, dateISO: nb.dateISO, time: nb.time });
                   continue;
@@ -978,16 +1021,22 @@ export default async function handler(req, res) {
             } else {
               // Update to an existing booking (e.g. status change) — no lock
               // needed, but this must never let a caller touch a booking
-              // outside their own salon. Two legitimate callers reach this
-              // branch: staff (admin, or owner/barber scoped to THIS
-              // booking's salon) making any change, and a customer — who has
-              // no session at all — cancelling their OWN booking (the only
-              // self-service action customers have, identified purely by
-              // knowing the booking id). Anyone else's request is dropped as
-              // a conflict instead of silently no-op'ing, so the client
-              // knows the change didn't take.
+              // outside their own salon (or, for a barber, outside their own
+              // calendar — a barber session used to be able to cancel or
+              // mark-complete any OTHER barber's booking in the same salon,
+              // since only salonId was checked here; the UI never offered
+              // that action, but a direct POST could). Legitimate callers:
+              // admin (any booking); owner (any booking in their salon);
+              // barber (only bookings assigned to their OWN workerId); and a
+              // customer — who has no session at all — cancelling their OWN
+              // booking (the only self-service action customers have,
+              // gated further below by a phone-number match, not just the
+              // booking id). Anyone else's request is dropped as a conflict
+              // instead of silently no-op'ing, so the client knows the
+              // change didn't take.
               const isStaffForThisBooking = session && (session.role === 'admin'
-                || ((session.role === 'owner' || session.role === 'barber') && session.salonId === existing.salonId));
+                || (session.role === 'owner' && session.salonId === existing.salonId)
+                || (session.role === 'barber' && session.salonId === existing.salonId && session.workerId === existing.workerId));
               let merged;
               if (isStaffForThisBooking) {
                 merged = { ...existing, ...nb };
