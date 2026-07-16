@@ -96,6 +96,14 @@ const server = http.createServer(async (req, res) => {
 
   const filePath = path.join(__dirname, pathname === '/' ? 'index.html' : pathname);
   if (!filePath.startsWith(__dirname)) { res.statusCode = 403; res.end('Forbidden'); return; }
+  // .env.local holds live production KV/VAPID/PayPal secrets (see header
+  // comment above) — this static fallback must never be able to serve it,
+  // or any other dotfile/dir not meant for the browser.
+  const relPath = path.relative(__dirname, filePath);
+  const segments = relPath.split(path.sep);
+  if (segments.some(seg => seg.startsWith('.')) || segments[0] === 'node_modules' || segments[0] === 'api' || segments[0] === 'lib') {
+    res.statusCode = 403; res.end('Forbidden'); return;
+  }
   fs.readFile(filePath, (err, content) => {
     if (err) { res.statusCode = 404; res.end('Not found'); return; }
     res.setHeader('Content-Type', MIME[path.extname(filePath)] || 'application/octet-stream');
@@ -103,7 +111,10 @@ const server = http.createServer(async (req, res) => {
   });
 });
 
-server.listen(PORT, () => {
+// Bind to loopback only — this process talks to the live production KV
+// database and reads secrets from .env.local, so it must never be reachable
+// from other devices on the same network (e.g. shared/public WiFi).
+server.listen(PORT, '127.0.0.1', () => {
   console.log(`Trimio dev server running at http://localhost:${PORT}`);
   console.log(`KV configured: ${process.env.KV_REST_API_URL ? 'yes (from .env.local)' : 'NO — /api/* will return database_suspended'}`);
 });

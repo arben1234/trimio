@@ -7,8 +7,13 @@
 export default function handler(req, res) {
   let start = typeof req.query.start === 'string' ? req.query.start : '/';
   // Same-origin absolute paths only — reject anything protocol-relative or
-  // not rooted at /, falling back to the homepage.
-  if (!start.startsWith('/') || start.startsWith('//')) start = '/';
+  // not rooted at /, falling back to the homepage. Backslashes are rejected
+  // too: browsers normalize a leading "/\" to "//" for URL purposes (per the
+  // WHATWG URL spec), so "/\evil.com" would otherwise slip past the "//"
+  // check above and still resolve to a scheme-relative, off-origin
+  // start_url — a crafted /api/manifest?start=... link could then get a
+  // victim's "Add to Home Screen" PWA icon pointed at an attacker's site.
+  if (!start.startsWith('/') || start.startsWith('//') || start.includes('\\')) start = '/';
 
   res.setHeader('Content-Type', 'application/manifest+json');
   res.setHeader('Cache-Control', 'no-store');

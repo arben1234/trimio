@@ -1,4 +1,4 @@
-import { getSalonsDb, setSalonsDb, getAllBookings, releaseSlotLock, kvCmd, ensureMigratedV2 } from '../lib/kv.js';
+import { getSalonsDb, setSalonsDb, getAllBookings, releaseSlotLock, kvCmd, ensureMigratedV2, acquireBillingLock, releaseBillingLock } from '../lib/kv.js';
 import { verifyAdminPassword } from '../lib/auth.js';
 import { cancelPaypalSubscription } from '../lib/paypal.js';
 
@@ -44,23 +44,37 @@ export default async function handler(req, res) {
     // Read the CURRENT server-side salon list directly — this is an
     // explicit, targeted delete (like toggle-salon.js), not a whole-array
     // overwrite from a client's possibly-stale local snapshot.
-    const salons = await getSalonsDb(kvUrl, kvToken);
-    const salon = salons.find(s => s.id === salonId);
-    if (!salon) {
-      return res.status(404).json({ error: 'Salon not found', salonId });
+    //
+    // Same per-salon lock the webhook and the other billing actions use —
+    // without it, a concurrent webhook event for this salon's subscription
+    // could read-modify-write salons_db in between this handler's own read
+    // and write and have its update silently discarded.
+    const locked = await acquireBillingLock(kvUrl, kvToken, salonId);
+    if (!locked) {
+      return res.status(503).json({ error: 'busy', message: 'Salone occupato da un\'altra operazione, riprova.' });
     }
+    let salon;
+    try {
+      const salons = await getSalonsDb(kvUrl, kvToken);
+      salon = salons.find(s => s.id === salonId);
+      if (!salon) {
+        return res.status(404).json({ error: 'Salon not found', salonId });
+      }
 
-    // Deleting a salon that still has a live PayPal subscription must stop
-    // it from continuing to charge the customer every month for a service
-    // that no longer exists — this used to be a pure gap, nothing here ever
-    // told PayPal the salon was gone. Best-effort: the delete proceeds
-    // either way even if this call fails.
-    if (salon.billing && salon.billing.autopay && salon.billing.paypalSubscriptionId) {
-      await cancelPaypalSubscription(salon.billing.paypalSubscriptionId, 'Salone eliminato su TRIMIO');
+      // Deleting a salon that still has a live PayPal subscription must stop
+      // it from continuing to charge the customer every month for a service
+      // that no longer exists — this used to be a pure gap, nothing here ever
+      // told PayPal the salon was gone. Best-effort: the delete proceeds
+      // either way even if this call fails.
+      if (salon.billing && salon.billing.autopay && salon.billing.paypalSubscriptionId) {
+        await cancelPaypalSubscription(salon.billing.paypalSubscriptionId, 'Salone eliminato su TRIMIO');
+      }
+
+      const remaining = salons.filter(s => s.id !== salonId);
+      await setSalonsDb(kvUrl, kvToken, remaining);
+    } finally {
+      await releaseBillingLock(kvUrl, kvToken, salonId);
     }
-
-    const remaining = salons.filter(s => s.id !== salonId);
-    await setSalonsDb(kvUrl, kvToken, remaining);
 
     // Clean up bookings + slot locks that belonged to this salon.
     const bookingsMap = await getAllBookings(kvUrl, kvToken);

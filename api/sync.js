@@ -42,17 +42,25 @@ const DEFAULT_SERVICES = [
 // whole platform. This is the one gate all of that goes through:
 //   - admin session -> everything, unchanged.
 //   - owner/barber session -> only their own salon's bookings, unchanged.
-//   - no/invalid session (anonymous, or a customer's own device) -> every
-//     booking is still needed for slot-availability rendering, but with
-//     name/phone stripped — the customer-facing UI never displays those for
-//     anyone (including its own "my bookings" list, which never re-shows the
-//     name/phone the customer themselves typed in).
-function scopeBookingsForSession(bookings, session) {
+//   - no/invalid session (anonymous, or a customer's own device) -> only the
+//     one salon the client is actually viewing (?salonId=... — the client
+//     resolves this from the current #SLUG/#/s/SLUG before fetching), with
+//     name/phone stripped. This used to ship EVERY salon's full booking
+//     calendar (dates, times, services, prices, worker assignments) to any
+//     anonymous caller regardless of which salon they were looking at — a
+//     real cross-tenant business-data leak, not just a PII one. A caller
+//     with no salonId hint (first paint before the salon is resolved locally)
+//     gets nothing rather than everything; the 6s poll picks it up moments
+//     later once the salon is known.
+function scopeBookingsForSession(bookings, session, requestedSalonId) {
   if (session && session.role === 'admin') return bookings;
   if (session && (session.role === 'owner' || session.role === 'barber')) {
     return bookings.filter(b => b.salonId === session.salonId);
   }
-  return bookings.map(({ name, phone, ...rest }) => rest);
+  if (typeof requestedSalonId !== 'string' || !requestedSalonId) return [];
+  return bookings
+    .filter(b => b.salonId === requestedSalonId)
+    .map(({ name, phone, ...rest }) => rest);
 }
 
 // VAPID public key is safe to keep in source — it's meant to be shipped to
@@ -389,18 +397,27 @@ async function handleMarkSalonPaid(body, kvUrl, kvToken, req) {
   if (!session || session.role !== 'admin') return { status: 403, json: { success: false, error: 'forbidden' } };
   if (!body.salonId) return { status: 400, json: { success: false, error: 'missing_fields' } };
 
-  const salons = await getSalonsDb(kvUrl, kvToken);
-  const salon = salons.find(s => s.id === body.salonId);
-  if (!salon) return { status: 404, json: { success: false, error: 'salon_not_found' } };
+  // Same per-salon lock every other billing-mutating path uses — an admin
+  // marking a salon paid at the same moment a PayPal webhook updates that
+  // salon's billing object could otherwise lose one side's write.
+  const locked = await acquireBillingLock(kvUrl, kvToken, body.salonId);
+  if (!locked) return { status: 503, json: { success: false, error: 'busy' } };
+  try {
+    const salons = await getSalonsDb(kvUrl, kvToken);
+    const salon = salons.find(s => s.id === body.salonId);
+    if (!salon) return { status: 404, json: { success: false, error: 'salon_not_found' } };
 
-  salon.billing = salon.billing || {};
-  salon.billing.paidThroughMonth = romeYearMonth();
-  if (salon.billing.suspendedByBilling) {
-    salon.billing.suspendedByBilling = false;
-    salon.inactive = false;
+    salon.billing = salon.billing || {};
+    salon.billing.paidThroughMonth = romeYearMonth();
+    if (salon.billing.suspendedByBilling) {
+      salon.billing.suspendedByBilling = false;
+      salon.inactive = false;
+    }
+    await setSalonsDb(kvUrl, kvToken, salons);
+    return { status: 200, json: { success: true, paidThroughMonth: salon.billing.paidThroughMonth } };
+  } finally {
+    await releaseBillingLock(kvUrl, kvToken, body.salonId);
   }
-  await setSalonsDb(kvUrl, kvToken, salons);
-  return { status: 200, json: { success: true, paidThroughMonth: salon.billing.paidThroughMonth } };
 }
 
 // Admin-only: opts an admin-created salon (which has no billing object at
@@ -518,7 +535,9 @@ async function handleCreateBillingCheckoutSession(body, kvUrl, kvToken, req) {
     return { status: 200, json: { success: false, error: 'not_configured' } };
   }
 
-  const locked = await acquireBillingLock(kvUrl, kvToken, body.salonId);
+  // Longer TTL than the default 10s — this critical section makes multiple
+  // real PayPal network calls below (see acquireBillingLock's comment).
+  const locked = await acquireBillingLock(kvUrl, kvToken, body.salonId, 25);
   if (!locked) return { status: 503, json: { success: false, error: 'busy' } };
   try {
     const salons = await getSalonsDb(kvUrl, kvToken);
@@ -786,8 +805,9 @@ export default async function handler(req, res) {
           if (isOwnSalonOwner) return { ...base, billing };
           return base;
         });
+        const requestedSalonId = req.query && typeof req.query.salonId === 'string' ? req.query.salonId : null;
         return res.status(200).json({
-          bookings: scopeBookingsForSession(Array.from(bookingsMap.values()), session),
+          bookings: scopeBookingsForSession(Array.from(bookingsMap.values()), session, requestedSalonId),
           salons: sanitizedSalons,
           admin: { username: admin.username, homepagePhotos: admin.homepagePhotos || [], homepageAd: admin.homepageAd || null }
         });
@@ -1007,6 +1027,26 @@ export default async function handler(req, res) {
 
         if (Array.isArray(newData.salons) && newData.salons.length > 0) {
           if (isValidSalonsArray(newData.salons)) {
+            // getSalonsDb/setSalonsDb below is a full-blob read-modify-write,
+            // not a compare-and-swap — two concurrent saves for the SAME
+            // salon (two tabs/devices, or a save racing a billing webhook)
+            // could otherwise both read the same pre-write snapshot and the
+            // second writer's setSalonsDb silently clobbers the first
+            // writer's change (a new worker, a service edit...). Lock every
+            // salon id this request is actually authorized to touch first —
+            // reuses the same per-salon lock the billing actions already
+            // take, so a generic save and a billing mutation for the same
+            // salon can't interleave either.
+            const lockIds = Array.from(new Set(newData.salons
+              .map(s => s && s.id)
+              .filter(id => typeof id === 'string' && session &&
+                (session.role === 'admin' || session.salonId === id))
+            )).sort();
+            const heldLocks = [];
+            for (const id of lockIds) {
+              if (await acquireBillingLock(kvUrl, kvToken, id)) heldLocks.push(id);
+            }
+            try {
             // Merge by id (upsert) instead of overwriting the whole array.
             // saveState() sends the client's ENTIRE local salons snapshot on
             // every save, even for unrelated actions (confirming a booking,
@@ -1103,6 +1143,15 @@ export default async function handler(req, res) {
                 // submitted in the meantime (last-write-wins on the whole
                 // worker object).
                 const existingWorkersById = new Map((existing.workers || []).map(w => [w.id, w]));
+                // A non-array/missing incoming.workers (stale client, or a
+                // tampered request with `workers: null`/omitted) used to skip
+                // this whole block and fall through to salonMap.set() with no
+                // workers array at all, wiping every worker on the salon for
+                // a non-admin save. Coerce to [] first so the restore loop
+                // below still runs and puts every existing worker back.
+                if (session.role !== 'admin' && !Array.isArray(incoming.workers)) {
+                  incoming.workers = [];
+                }
                 if (Array.isArray(incoming.workers)) {
                   incoming.workers = incoming.workers.map(w => {
                     const ew = existingWorkersById.get(w.id);
@@ -1123,6 +1172,9 @@ export default async function handler(req, res) {
               salonMap.set(incoming.id, incoming);
             }
             await setSalonsDb(kvUrl, kvToken, Array.from(salonMap.values()));
+            } finally {
+              for (const id of heldLocks) await releaseBillingLock(kvUrl, kvToken, id);
+            }
           } else {
             console.warn('[SYNC] Ignoring malformed salons payload (not written to salons_db)');
           }
@@ -1161,7 +1213,8 @@ export default async function handler(req, res) {
           }
         }
 
-        return res.status(200).json({ success: true, bookings: scopeBookingsForSession(Array.from(bookingsMap.values()), session), conflicts });
+        const postRequestedSalonId = req.query && typeof req.query.salonId === 'string' ? req.query.salonId : null;
+        return res.status(200).json({ success: true, bookings: scopeBookingsForSession(Array.from(bookingsMap.values()), session, postRequestedSalonId), conflicts });
       }
     } catch (kvErr) {
       console.error('[SYNC] KV Database Error:', kvErr);

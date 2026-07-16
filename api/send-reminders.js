@@ -1,5 +1,5 @@
 import webPush from 'web-push';
-import { getAllBookings, hsetBooking, getSalonsDb, claimReminderOnce } from '../lib/kv.js';
+import { getAllBookings, hsetBooking, getSalonsDb, claimReminderOnce, acquirePushSubsLock, releasePushSubsLock } from '../lib/kv.js';
 import { sendCustomerText, twilioConfigured } from '../lib/sms.js';
 import { romeNow } from '../lib/time.js';
 
@@ -99,7 +99,13 @@ export default async function handler(req, res) {
 
     let sent = 0;
     let smsSent = 0;
-    let subsChanged = false;
+    // Endpoints found dead during this run — pruned from KV in one locked
+    // pass at the end (see below) against a FRESH read of the blob, rather
+    // than mutating the `subscriptions` array read at the top of this
+    // request and writing that whole snapshot back; a concurrent
+    // api/subscribe.js write in between could otherwise be silently
+    // discarded by this request's stale copy.
+    const deadEndpoints = new Set();
 
     // Push to every opted-in device; when none succeeds (customer never
     // tapped "Attiva", or the subscription died) fall back to SMS/WhatsApp on
@@ -115,8 +121,7 @@ export default async function handler(req, res) {
           sent++; delivered++;
         } catch (err) {
           if (err.statusCode === 410 || err.statusCode === 404) {
-            const idx = subscriptions.findIndex(s => s.subscription.endpoint === target.subscription.endpoint);
-            if (idx !== -1) { subscriptions.splice(idx, 1); subsChanged = true; }
+            deadEndpoints.add(target.subscription.endpoint);
           } else {
             console.error('[REMINDER] Failed to send to customer:', err.message);
           }
@@ -153,12 +158,32 @@ export default async function handler(req, res) {
       await hsetBooking(kvUrl, kvToken, bk);
     }
 
-    if (subsChanged) {
-      await fetch(`${kvUrl}/set/push_subscriptions`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${kvToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(JSON.stringify(subscriptions))
-      });
+    if (deadEndpoints.size > 0) {
+      const locked = await acquirePushSubsLock(kvUrl, kvToken);
+      if (locked) {
+        try {
+          const freshResp = await fetch(`${kvUrl}/get/push_subscriptions`, { headers: { Authorization: `Bearer ${kvToken}` } });
+          let fresh = [];
+          if (freshResp.ok) {
+            const freshData = await freshResp.json();
+            if (freshData.result) {
+              let val = JSON.parse(freshData.result);
+              if (typeof val === 'string') val = JSON.parse(val);
+              if (Array.isArray(val)) fresh = val;
+            }
+          }
+          const pruned = fresh.filter(s => !deadEndpoints.has(s.subscription.endpoint));
+          if (pruned.length !== fresh.length) {
+            await fetch(`${kvUrl}/set/push_subscriptions`, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${kvToken}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify(JSON.stringify(pruned))
+            });
+          }
+        } finally {
+          await releasePushSubsLock(kvUrl, kvToken);
+        }
+      }
     }
 
     return res.status(200).json({ checked: dueTomorrow.length + dueToday.length, sent, smsSent, smsConfigured: twilioConfigured() });

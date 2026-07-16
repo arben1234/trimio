@@ -1,4 +1,4 @@
-import { getSalonsDb, setSalonsDb, ensureMigratedV2 } from '../lib/kv.js';
+import { getSalonsDb, setSalonsDb, ensureMigratedV2, acquireBillingLock, releaseBillingLock } from '../lib/kv.js';
 import { verifyAdminPassword } from '../lib/auth.js';
 import { cancelPaypalSubscription } from '../lib/paypal.js';
 
@@ -43,35 +43,49 @@ export default async function handler(req, res) {
     console.log(`[TOGGLE] salonId=${salonId}, inactive=${setInactive}`);
 
     await ensureMigratedV2(kvUrl, kvToken);
-    const salons = await getSalonsDb(kvUrl, kvToken);
 
-    const salon = salons.find(s => s.id === salonId);
-    if (!salon) {
-      return res.status(404).json({ error: 'Salon not found', salonId });
+    // Same per-salon lock the webhook and the other billing actions use —
+    // this handler both reads then writes the whole salons_db blob AND can
+    // cancel a PayPal subscription, so it must not interleave with a
+    // concurrent webhook event (or another billing action) for the same
+    // salon and silently clobber each other's write.
+    const locked = await acquireBillingLock(kvUrl, kvToken, salonId);
+    if (!locked) {
+      return res.status(503).json({ error: 'busy', message: 'Salone occupato da un\'altra operazione, riprova.' });
     }
-    salon.inactive = !!setInactive;
-    // Reactivating (this is also the "approve a pending self-signup" action)
-    // clears any billing-driven pending/suspended flags too — Attiva is the
-    // one place admin approval/reactivation happens, whatever the reason the
-    // salon was inactive. Deactivating for an unrelated reason leaves billing
-    // fields untouched.
-    if (!salon.inactive && salon.billing) {
-      salon.billing.pendingApproval = false;
-      salon.billing.suspendedByBilling = false;
-    }
-    // Deactivating a salon that still has a live PayPal subscription must
-    // stop it from continuing to charge the customer every month for a
-    // service that's no longer being provided — this used to be a pure gap,
-    // nothing here ever told PayPal the salon went away. Best-effort: if the
-    // cancel call fails, the salon still gets deactivated either way.
-    if (salon.inactive && salon.billing && salon.billing.autopay && salon.billing.paypalSubscriptionId) {
-      await cancelPaypalSubscription(salon.billing.paypalSubscriptionId, 'Salone disattivato su TRIMIO');
-      salon.billing.autopay = false;
-      salon.billing.paypalSubscriptionId = null;
-    }
-    console.log(`[TOGGLE] Found salon "${salon.name}", set inactive=${salon.inactive}`);
+    try {
+      const salons = await getSalonsDb(kvUrl, kvToken);
 
-    await setSalonsDb(kvUrl, kvToken, salons);
+      const salon = salons.find(s => s.id === salonId);
+      if (!salon) {
+        return res.status(404).json({ error: 'Salon not found', salonId });
+      }
+      salon.inactive = !!setInactive;
+      // Reactivating (this is also the "approve a pending self-signup" action)
+      // clears any billing-driven pending/suspended flags too — Attiva is the
+      // one place admin approval/reactivation happens, whatever the reason the
+      // salon was inactive. Deactivating for an unrelated reason leaves billing
+      // fields untouched.
+      if (!salon.inactive && salon.billing) {
+        salon.billing.pendingApproval = false;
+        salon.billing.suspendedByBilling = false;
+      }
+      // Deactivating a salon that still has a live PayPal subscription must
+      // stop it from continuing to charge the customer every month for a
+      // service that's no longer being provided — this used to be a pure gap,
+      // nothing here ever told PayPal the salon went away. Best-effort: if the
+      // cancel call fails, the salon still gets deactivated either way.
+      if (salon.inactive && salon.billing && salon.billing.autopay && salon.billing.paypalSubscriptionId) {
+        await cancelPaypalSubscription(salon.billing.paypalSubscriptionId, 'Salone disattivato su TRIMIO');
+        salon.billing.autopay = false;
+        salon.billing.paypalSubscriptionId = null;
+      }
+      console.log(`[TOGGLE] Found salon "${salon.name}", set inactive=${salon.inactive}`);
+
+      await setSalonsDb(kvUrl, kvToken, salons);
+    } finally {
+      await releaseBillingLock(kvUrl, kvToken, salonId);
+    }
 
     return res.status(200).json({ success: true, salonId, inactive: setInactive });
   } catch (error) {

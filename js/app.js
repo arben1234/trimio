@@ -16,12 +16,32 @@ const initials=n=>{n=(n||'?').trim();const p=n.split(/\s+/);return(((p[0]||'')[0
 const escapeHtml=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const dayLabel=iso=>{const d=new Date(iso+'T00:00:00');return`${DOW[d.getDay()]} ${d.getDate()} ${MON[d.getMonth()]}`;};
 const isoOf=(y,m,d)=>`${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-const todayISO=()=>{
-  const d = new Date();
-  const offset = d.getTimezoneOffset();
-  const localDate = new Date(d.getTime() - (offset * 60 * 1000));
-  return localDate.toISOString().split('T')[0];
-};
+// The salon's own calendar day/time (Italy), not the browser device's — a
+// customer booking while traveling abroad has their device's timezone
+// auto-adjusted, so using local time here would show the wrong day's
+// availability and get "already passed" slot filtering off by however many
+// hours separate the two zones. Falls back to device-local time only if
+// Intl/timeZone support is somehow unavailable (very old browsers).
+function romeNowParts(){
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Europe/Rome', year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hour12: false
+    }).formatToParts(new Date());
+    const get = t => (parts.find(p => p.type === t) || {}).value;
+    let hour = get('hour');
+    if (hour === '24') hour = '00'; // some engines format midnight as "24:00" with hour12:false
+    return { year: get('year'), month: get('month'), day: get('day'), hour, minute: get('minute') };
+  } catch (e) {
+    const d = new Date();
+    return {
+      year: String(d.getFullYear()), month: String(d.getMonth() + 1).padStart(2, '0'), day: String(d.getDate()).padStart(2, '0'),
+      hour: String(d.getHours()).padStart(2, '0'), minute: String(d.getMinutes()).padStart(2, '0')
+    };
+  }
+}
+const todayISO=()=>{const p=romeNowParts();return`${p.year}-${p.month}-${p.day}`;};
+const nowHHMM=()=>{const p=romeNowParts();return`${p.hour}:${p.minute}`;};
 function relDay(iso){
   if(!iso)return'—';
   const t=new Date();t.setHours(0,0,0,0);
@@ -686,6 +706,27 @@ function authHeaders(){
     : {};
 }
 
+// Server-side, an anonymous/customer caller only gets bookings back for a
+// salon it explicitly names (see scopeBookingsForSession in api/sync.js) —
+// this resolves that hint from whatever we already know locally (the salon
+// currently open, or the #SLUG in the URL matched against the locally
+// cached salons list) without waiting on a network round trip.
+function currentSalonIdHint(){
+  if (typeof custSalon !== 'undefined' && custSalon && custSalon.id) return custSalon.id;
+  try {
+    const h = (location.hash || '').replace('#', '').toUpperCase().trim();
+    if (h && typeof STATE !== 'undefined' && STATE.salons) {
+      const s = STATE.salons.find(x => x.slug === h);
+      if (s) return s.id;
+    }
+  } catch (e) {}
+  return null;
+}
+function syncUrl(base){
+  const hint = currentSalonIdHint();
+  return base + (hint ? (base.includes('?') ? '&' : '?') + 'salonId=' + encodeURIComponent(hint) : '');
+}
+
 async function saveState(){
   isSaving = true;
   lastSaveStartedAt = Date.now();
@@ -706,7 +747,7 @@ async function saveState(){
 
   // Upload to Vercel Cloud Blob for cross-device sync
   try {
-    const syncResp = await fetch('/api/sync', {
+    const syncResp = await fetch(syncUrl('/api/sync'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -777,7 +818,7 @@ function initCloudSync() {
   updateUIStatus(true);
 
   // Initial load from Vercel Cloud Blob with cache-busting to bypass browser cache
-  initialCloudSync = fetch('/api/sync?t=' + Date.now(), { cache: 'no-store', headers: authHeaders() })
+  initialCloudSync = fetch(syncUrl('/api/sync?t=' + Date.now()), { cache: 'no-store', headers: authHeaders() })
     .then(r => {
       if (!r.ok) {
         updateUIStatus(false);
@@ -889,7 +930,7 @@ function initCloudSync() {
     if (isSaving) return; // Skip polling updates while we are actively saving to prevent overwrites
     const pollStartedAt = Date.now();
     try {
-      const response = await fetch('/api/sync?t=' + Date.now(), { cache: 'no-store', headers: authHeaders() });
+      const response = await fetch(syncUrl('/api/sync?t=' + Date.now()), { cache: 'no-store', headers: authHeaders() });
       if (response.ok) {
         updateUIStatus(true);
         const data = await response.json();
@@ -1576,13 +1617,19 @@ function bookingDurMin(booking,salon){
   const own=parseInt(booking.dur,10);
   return Number.isFinite(own)&&own>0?own:serviceDurMin(salon,booking.service);
 }
-// End time of a booking given its salon/service/start — shown alongside the
-// start time so the client/barber/owner see at a glance when the service
-// actually finishes, not just when it starts.
-function bookingEndTime(salon,serviceName,startTime){
-  const startMin=timeToMin(startTime);
+// End time of an EXISTING booking — shown alongside the start time so the
+// client/barber/owner see at a glance when the service actually finishes.
+// Uses the booking's own snapshotted duration (bookingDurMin, same as the
+// scheduling/conflict engine) rather than a live service-name lookup: a
+// service's duration can be edited after bookings against it already exist,
+// and this used to look it up live, so an old booking's displayed end time
+// would silently change (and could show as overlapping the next appointment)
+// even though the actual blocked interval — governed by bookingDurMin
+// elsewhere — never did.
+function bookingEndTime(booking,salon){
+  const startMin=timeToMin(booking.time);
   if(startMin===null)return null;
-  return minToTime(startMin+serviceDurMin(salon,serviceName));
+  return minToTime(startMin+bookingDurMin(booking,salon));
 }
 function busyIntervalsFor(salonId,iso,workerId){
   const salon=getSalonById(salonId);
@@ -1903,7 +1950,7 @@ function renderCustMyBookingBanner(){
   // instead of hiding it — the point of this banner is that "my bookings"
   // stays reachable at any time without a menu, not just while something's
   // still upcoming.
-  const upcomingEnd=upcoming?bookingEndTime(custSalon,upcoming.service,upcoming.time):null;
+  const upcomingEnd=upcoming?bookingEndTime(upcoming,custSalon):null;
   $('custMyBookingBannerText').textContent=upcoming
     ?`${upcoming.dateLabel} alle ${upcoming.time}${upcomingEnd?'-'+upcomingEnd:''} · ${upcoming.workerName}`
     :'Vedi lo storico delle tue prenotazioni';
@@ -1914,7 +1961,7 @@ function renderMyBookingsModal(){
   if(!custSalon)return;
   const mine=getMyBookingsForSalon(custSalon.id);
   $('myBookingsList').innerHTML=mine.length?mine.map(b=>{
-    const end=bookingEndTime(custSalon,b.service,b.time);
+    const end=bookingEndTime(b,custSalon);
     return`
     <div class="acard ${b.status==='completed'?'completed':b.status==='cancelled'?'cancelled':''}">
       <div class="acard-main">
@@ -1974,15 +2021,15 @@ function renderBarberGrid(){
     const starsHtml=count ? `★ ${avg} (${count})` : '★ Nuova scheda';
     
     // First name only
-    const firstName = w.name.split(' ')[0];
-    
+    const firstName = escapeHtml(w.name.split(' ')[0]);
+
     return`<div class="barber-card${vac?' on-vacation':''}" data-id="${w.id}">
       <div class="bc-img-container">
-        <img src="${w.img || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face'}" alt="${firstName}" class="bc-img">
+        <img src="${escapeHtml(w.img || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face')}" alt="${firstName}" class="bc-img">
       </div>
       <div class="bc-name">${firstName}</div>
-      <div class="bc-role">${w.role || 'Senior Barber'}</div>
-      <div class="bc-desc">${w.desc || 'Specialista in taglio e rasatura.'}</div>
+      <div class="bc-role">${escapeHtml(w.role || 'Senior Barber')}</div>
+      <div class="bc-desc">${escapeHtml(w.desc || 'Specialista in taglio e rasatura.')}</div>
       <div class="bc-stars" onclick="event.stopPropagation(); showBarberReviews('${w.id}')">${starsHtml}</div>
       <div class="bc-status">${vac?'In ferie 🌴':'Disponibile'}</div>
       ${vac&&w.vacTo?`<div class="bc-vac">Fino al ${w.vacTo}</div>`:''}
@@ -2012,9 +2059,7 @@ function renderCustTimes(){
   let times=freeGridTimesFor(custSalon,custData.barberId,custData.dateISO,dur);
 
   if(custData.dateISO===todayISO()){
-    const now=new Date();
-    const nowStr=`${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-    times=times.filter(t=>t>=nowStr);
+    times=times.filter(t=>t>=nowHHMM());
   }
 
   if(!times.length){
@@ -2106,9 +2151,7 @@ function validateCust(){
     if(!custData.dateISO)return showErr('cErr','Seleziona un giorno');
     if(!custData.time)return showErr('cErr','Seleziona un orario');
     if(custData.dateISO === todayISO()){
-      const now = new Date();
-      const currentTimeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-      if(custData.time < currentTimeStr) {
+      if(custData.time < nowHHMM()) {
         return showErr('cErr','Questo orario è già passato. Seleziona un altro orario.');
       }
     }
@@ -2256,8 +2299,8 @@ function renderSalonModalWorkers(s) {
           ${initials(w.name)}
         </div>
         <div>
-          <div style="font-weight:700; color:#18181b;">${w.name}</div>
-          <div style="font-size:11px; color:#71717a;">@${w.username}</div>
+          <div style="font-weight:700; color:#18181b;">${escapeHtml(w.name)}</div>
+          <div style="font-size:11px; color:#71717a;">@${escapeHtml(w.username)}</div>
         </div>
       </div>
       <div style="display:flex; gap:6px;">
@@ -3154,7 +3197,7 @@ function renderOggi(){
 
 /* LIVELLO 2: vede il barbiere nella card; LIVELLO 3: non lo vede */
 function apptCard(b,showActs){
-  const endTime=bookingEndTime(getSalonById(b.salonId),b.service,b.time);
+  const endTime=bookingEndTime(b,getSalonById(b.salonId));
   // "Fatto" (mark service as completed/arrived): barber + admin.
   // "Annulla" (cancel): barber + owner. Admin does not cancel bookings.
   const canMarkDone = showActs && SESSION && (SESSION.role === 'admin' || SESSION.role === 'barber');
@@ -3190,9 +3233,7 @@ function isBookingInFuture(b){
   const today=todayISO();
   if(b.dateISO>today)return true;
   if(b.dateISO<today)return false;
-  const now=new Date();
-  const nowStr=`${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-  return b.time>nowStr;
+  return b.time>nowHHMM();
 }
 async function dashAction(act,id){
   const b=STATE.bookings.find(x=>x.id===id);if(!b)return;
@@ -3438,7 +3479,7 @@ function renderDipendenti(){
     const showBreak = r==='admin'||r==='owner'; // Pause e riposo: gestibili da admin e proprietario (o dal barbiere stesso dal proprio menu)
     html+=`<div class="worker-card${w.vacFrom?' on-vac':''}">
       <div class="av">${initials(w.name)}</div>
-      <div class="wc-info"><div class="wc-name">${w.name}${vacLabel}</div><div class="wc-meta">@${w.username}</div></div>
+      <div class="wc-info"><div class="wc-name">${escapeHtml(w.name)}${vacLabel}</div><div class="wc-meta">@${escapeHtml(w.username)}</div></div>
       ${canEdit?`<div class="wc-btns"><button class="iconbtn" data-wedit="${w.id}">✏️</button>${showBreak?`<button class="iconbtn" title="Pause e riposo" data-wbreak="${w.id}">🕐</button>`:''}${showDel?`<button class="iconbtn del" data-wdel="${w.id}">🗑️</button>`:''}</div>`:''}
     </div>`;
   });
@@ -3474,6 +3515,14 @@ function getOffDaysUI(boxId){
   const box=$(boxId);if(!box)return[];
   return[...box.querySelectorAll('input:checked')].map(i=>Number(i.value));
 }
+// Snapshot of the vacation dates as loaded when the "Dipendente" modal
+// opened — the same two fields are also editable from the separate "Pause"
+// modal (openBreakModal/saveBreak below), so if that modal saves a NEW
+// vacation range while this one still sits open, saveWorker() must not blindly
+// write back its now-stale captured input values and clobber it. Compared
+// against the live input values at save time; only actually applied if the
+// admin/owner edited them in THIS modal.
+let workerModalVacSnapshot=null;
 function openWorkerModal(wid,salon){
   // Store the salon's id, not the object itself: a background sync poll can
   // replace STATE.salons with a brand-new array/objects while this modal
@@ -3490,6 +3539,7 @@ function openWorkerModal(wid,salon){
     ['wName','wUser','wPwd','wImg','wPhone','wRole','wDesc','wVacFrom','wVacTo'].forEach(id=>$(id).value='');
     $('wImgPreview').style.display='none';
     $('wDelete').style.display='none';editWorker='new';
+    workerModalVacSnapshot=null;
   } else {
     const w=salon.workers.find(x=>x.id===wid);if(!w)return;
     $('workerModalH').textContent='Modifica · '+w.name;
@@ -3499,6 +3549,7 @@ function openWorkerModal(wid,salon){
     if(w.img){$('wImgPreview').src=w.img;$('wImgPreview').style.display='block';}
     else{$('wImgPreview').style.display='none';}
     $('wVacFrom').value=w.vacFrom||'';$('wVacTo').value=w.vacTo||'';
+    workerModalVacSnapshot={from:w.vacFrom||'',to:w.vacTo||''};
     // Hide delete button inside modal for owners
     $('wDelete').style.display=isOwner?'none':'block';
     editWorker=wid;
@@ -3524,7 +3575,14 @@ async function saveWorker(){
   } else {
     const w=salon.workers.find(x=>x.id===editWorker);if(!w)return;
     w.name=name;w.username=usr;
-    w.img=img;w.phone=phone;w.role=role;w.desc=desc;w.vacFrom=vacFrom;w.vacTo=vacTo;
+    w.img=img;w.phone=phone;w.role=role;w.desc=desc;
+    // Only touch vacation dates if they were actually edited in THIS modal
+    // (see workerModalVacSnapshot's comment) — otherwise this field is left
+    // as whatever is currently live on `w` (freshly looked up above), which
+    // may have been changed since this modal opened via the separate
+    // "Pause" modal (same fields, saveBreak()).
+    const vacTouched = !workerModalVacSnapshot || vacFrom!==workerModalVacSnapshot.from || vacTo!==workerModalVacSnapshot.to;
+    if (vacTouched) { w.vacFrom=vacFrom; w.vacTo=vacTo; }
     // Password lives only server-side now — a change here must go through
     // a verified endpoint, never through the generic bulk save. Owner proves
     // identity via their own session token (they don't know the admin
@@ -3555,6 +3613,9 @@ async function saveWorker(){
    settimanale e le date di ferie.
 ================================================================ */
 let breakEditSalonId=null,breakEditWorkerId=null;
+// Same cross-modal staleness guard as workerModalVacSnapshot above, mirrored
+// here since vacFrom/vacTo are editable from both modals.
+let breakModalVacSnapshot=null;
 // Riempie una <select> con orari in formato 24h (ogni 15 min, 08:00–21:00):
 // un <input type="time"> mostra AM/PM in alcuni dispositivi e "12:00" veniva
 // salvato come 00:00 (mezzanotte). La select con etichette 24h è inequivocabile.
@@ -3576,6 +3637,7 @@ function openBreakModal(wid,salon){
   setOffDaysUI('bkOffDays',w.offDays,false);
   $('bkVacFrom').value=w.vacFrom||'';
   $('bkVacTo').value=w.vacTo||'';
+  breakModalVacSnapshot={from:w.vacFrom||'',to:w.vacTo||''};
   $('breakModal').classList.add('show');
 }
 async function saveBreak(){
@@ -3595,7 +3657,11 @@ async function saveBreak(){
   if(vacFrom&&vacTo&&vacTo<vacFrom)return showErr('bkErr','La fine delle ferie deve essere dopo l\'inizio');
   w.breakFrom=from;w.breakTo=to;
   w.offDays=getOffDaysUI('bkOffDays');
-  w.vacFrom=vacFrom;w.vacTo=vacTo;
+  // Same guard as saveWorker(): only overwrite vacation dates if they were
+  // actually edited here, so a stale snapshot in this modal can't clobber a
+  // newer edit made meanwhile from the separate "Dipendente" modal.
+  const vacTouched = !breakModalVacSnapshot || vacFrom!==breakModalVacSnapshot.from || vacTo!==breakModalVacSnapshot.to;
+  if (vacTouched) { w.vacFrom=vacFrom; w.vacTo=vacTo; }
   await saveState();
   closeModal('breakModal');
   // L'admin vede la lista dipendenti: aggiornala (il barbiere non ce l'ha).
@@ -3914,7 +3980,7 @@ function renderSaloni(){
     }
     html+=`<div class="salon-item">
       <div style="width:40px;height:40px;border-radius:12px;background:#000;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px;flex-shrink:0">${initials(s.name)}</div>
-      <div class="si-info"><div class="si-name">${s.name}${pendingBadge}</div><div class="si-slug">${locationString}</div><div class="si-stats">${s.workers.length} barbieri · ${tot} prenotazioni ${billingPill}</div></div>
+      <div class="si-info"><div class="si-name">${escapeHtml(s.name)}${pendingBadge}</div><div class="si-slug">${locationString}</div><div class="si-stats">${s.workers.length} barbieri · ${tot} prenotazioni ${billingPill}</div></div>
       <div class="si-btns" style="display:flex; align-items:center; gap:8px;">
         ${statusBtn}
         <button class="iconbtn" data-sedit="${s.id}">✏️</button>
@@ -4324,7 +4390,7 @@ function renderUtenti(){
   STATE.salons.forEach(s=>{
     html+=`<div class="worker-card">
       <div class="av">${initials(s.ownerUsername)}</div>
-      <div class="wc-info"><div class="wc-name">${s.name}</div><div class="wc-meta">@${s.ownerUsername} · Proprietario (Liv. 2)</div></div>
+      <div class="wc-info"><div class="wc-name">${escapeHtml(s.name)}</div><div class="wc-meta">@${escapeHtml(s.ownerUsername)} · Proprietario (Liv. 2)</div></div>
       <div class="wc-btns">
         <button class="iconbtn" data-utype="owner" data-usid="${s.id}" title="Reset password">🔑</button>
       </div>
@@ -4335,7 +4401,7 @@ function renderUtenti(){
     s.workers.forEach(w=>{
       html+=`<div class="worker-card">
         <div class="av">${initials(w.name)}</div>
-        <div class="wc-info"><div class="wc-name">${w.name}</div><div class="wc-meta">@${w.username} · ${s.name} · Barbiere (Liv. 3)</div></div>
+        <div class="wc-info"><div class="wc-name">${escapeHtml(w.name)}</div><div class="wc-meta">@${escapeHtml(w.username)} · ${escapeHtml(s.name)} · Barbiere (Liv. 3)</div></div>
         <div class="wc-btns">
           <button class="iconbtn" data-utype="barber" data-usid="${s.id}" data-uwid="${w.id}" title="Reset password">🔑</button>
         </div>
@@ -4606,9 +4672,9 @@ function renderHomepage(){
       </div>` : '';
       
     const promoDisplay = s.promo ? `
-      <div class="hsc-ad" onclick="event.stopPropagation(); alert('${s.promo.replace(/'/g, "\\'")}');">
+      <div class="hsc-ad" onclick="event.stopPropagation(); alert('${s.promo.replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;')}');">
         <span class="hsc-ad-tag">PROMO</span>
-        <span class="hsc-ad-text">${s.promo}</span>
+        <span class="hsc-ad-text">${escapeHtml(s.promo)}</span>
       </div>` : '';
       
     const distanceDisplay = s.distance !== undefined ? `
@@ -4619,8 +4685,8 @@ function renderHomepage(){
     return`<div class="hp-salon-card" data-slug="${s.slug}">
       <div class="hsc-image" style="height: 130px; background-image: url('${s.bgImage || 'https://images.unsplash.com/photo-1503951914875-452162b0f3f1?w=500&q=70&fit=crop'}'); background-size: cover; background-position: center; border-radius: 18px 18px 0 0; position: relative;">
         <div style="position: absolute; bottom: 0; left: 0; right: 0; padding: 12px; background: linear-gradient(to top, rgba(0,0,0,0.85), transparent); display: flex; align-items: center; gap: 10px;">
-          <div class="hsc-av" style="width:36px; height:36px; font-size:14px; border-radius:8px; border:1.5px solid #e5c158; background:rgba(0,0,0,0.9);">${s.name.slice(0,2).toUpperCase()}</div>
-          <div class="hsc-name" style="color:#fff; font-size:17px; text-shadow: 0 2px 4px rgba(0,0,0,0.5);">${s.name}</div>
+          <div class="hsc-av" style="width:36px; height:36px; font-size:14px; border-radius:8px; border:1.5px solid #e5c158; background:rgba(0,0,0,0.9);">${escapeHtml(s.name.slice(0,2).toUpperCase())}</div>
+          <div class="hsc-name" style="color:#fff; font-size:17px; text-shadow: 0 2px 4px rgba(0,0,0,0.5);">${escapeHtml(s.name)}</div>
         </div>
       </div>
       <div style="padding:14px 16px 8px;">

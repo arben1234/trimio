@@ -92,6 +92,13 @@ export default async function handler(req, res) {
   try {
     const resource = event.resource || {};
     switch (event.event_type) {
+      // Also the reactivation event: PayPal's webhook catalog has no distinct
+      // "resumed after suspension" event type (confirmed against PayPal's
+      // own event-names docs — BILLING.SUBSCRIPTION.* is only CREATED/
+      // ACTIVATED/UPDATED/EXPIRED/CANCELLED/SUSPENDED/PAYMENT.FAILED), so a
+      // customer fixing their card and PayPal resuming a SUSPENDED
+      // subscription re-fires this same event for the same subscription id —
+      // the suspendedByBilling clear-out below already handles that case.
       case 'BILLING.SUBSCRIPTION.ACTIVATED': {
         const salonId = resource.custom_id;
         if (salonId) {
@@ -146,6 +153,35 @@ export default async function handler(req, res) {
               return true;
             });
           }
+        }
+        break;
+      }
+
+      case 'PAYMENT.SALE.REFUNDED':
+      case 'PAYMENT.CAPTURE.REFUNDED': {
+        // A refund/chargeback on a subscription's charge used to be a pure
+        // no-op here — paidThroughMonth stayed set from the original
+        // PAYMENT.*.COMPLETED event, so the salon kept full service for a
+        // month TRIMIO was never actually paid for, with nothing else ever
+        // re-checking it (the daily cron skips every autopay salon
+        // unconditionally). Flag it the same way a failed charge is flagged
+        // so admin/owner see the ⚠️ warning and can follow up — same
+        // best-effort field lookup as PAYMENT.*.COMPLETED above, since a
+        // refund resource doesn't reliably carry custom_id either.
+        const subscriptionId = resource.billing_agreement_id
+          || resource.supplementary_data?.related_ids?.subscription_id
+          || null;
+        const probe = await getSalonsDb(kvUrl, kvToken);
+        const salon = await findSalonByPaypalIds(probe, { customId: resource.custom_id, subscriptionId });
+        if (salon) {
+          await withSalonLock(kvUrl, kvToken, salon.id, async (salons) => {
+            const s = salons.find(x => x.id === salon.id);
+            if (!s || !s.billing) return false;
+            s.billing.paymentFailing = true;
+            return true;
+          });
+        } else {
+          console.error('[PAYPAL-WEBHOOK] Could not correlate refund event to a salon', event.id);
         }
         break;
       }
