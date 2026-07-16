@@ -9,7 +9,7 @@ import {
 import { sendCustomerText, toE164, twilioConfigured } from '../lib/sms.js';
 import { sendEmail } from '../lib/email.js';
 import { handleLogin, handleChangePassword, getVerifiedSession, getClientIp, verifyAdminPassword } from '../lib/auth.js';
-import { isQuietHours, romeYearMonth } from '../lib/time.js';
+import { isQuietHours, romeYearMonth, romeNow } from '../lib/time.js';
 import { feeForWorkerCount } from '../lib/billing.js';
 import { paypalFetch, paypalConfigured, cancelPaypalSubscription } from '../lib/paypal.js';
 
@@ -718,7 +718,15 @@ function isValidNewSalon(s, existingSalonsMap) {
   if (typeof s.name !== 'string' || s.name.trim().length < 2) return false;
   if (typeof s.slug !== 'string' || !/^[A-Z0-9_]{2,50}$/.test(s.slug)) return false;
   if (typeof s.ownerUsername !== 'string' || !/^[a-zA-Z0-9._-]{3,30}$/.test(s.ownerUsername)) return false;
-  if (typeof s.ownerPassword !== 'string' || s.ownerPassword.length < 4) return false;
+  // Matches handleSignupSalon's own rules (password length, real phone
+  // format via toE164, minimum address length) — this path (an admin's
+  // "Nuovo salone" panel) used to accept a 4-character password and skip
+  // phone/address validation entirely server-side; the client UI already
+  // checks phone but not password length or address, and neither check
+  // existed at all against a direct API call bypassing the client.
+  if (typeof s.ownerPassword !== 'string' || s.ownerPassword.length < 6) return false;
+  if (typeof s.phone !== 'string' || !toE164(s.phone)) return false;
+  if (typeof s.address !== 'string' || s.address.trim().length < 3) return false;
   for (const other of existingSalonsMap.values()) {
     if (other.id === s.id) continue;
     if (other.slug === s.slug) return false;
@@ -976,7 +984,17 @@ export default async function handler(req, res) {
               // identical start times, not different-but-overlapping ones).
               const dayLocked = await acquireBarberDayLock(kvUrl, kvToken, nb.salonId, nb.workerId, nb.dateISO);
               if (!dayLocked) {
-                conflicts.push({ id: nb.id, salonId: nb.salonId, workerId: nb.workerId, dateISO: nb.dateISO, time: nb.time });
+                // This means contention, not necessarily a real double-
+                // booking — a burst of simultaneous requests for the same
+                // popular barber+day can exhaust acquireBarberDayLock's wait
+                // budget before this request's own turn, even though the
+                // slot itself may still be genuinely free. Tagged distinctly
+                // from a real overlap/slot-taken conflict below so the
+                // client can tell the customer "riprova" instead of
+                // "orario già occupato" (misleading — simply retrying the
+                // SAME slot moments later would likely succeed here, unlike
+                // a genuine conflict where it never would).
+                conflicts.push({ id: nb.id, salonId: nb.salonId, workerId: nb.workerId, dateISO: nb.dateISO, time: nb.time, error: 'busy_retry' });
                 continue;
               }
               try {
@@ -1039,7 +1057,32 @@ export default async function handler(req, res) {
                 || (session.role === 'barber' && session.salonId === existing.salonId && session.workerId === existing.workerId));
               let merged;
               if (isStaffForThisBooking) {
-                merged = { ...existing, ...nb };
+                // A staff update must never let the caller move a booking
+                // onto a different day/time/barber/salon by resending those
+                // fields differently — there's no "reschedule" feature today
+                // (dashAction() in js/app.js only ever changes status/
+                // cancelledBy), and allowing it here would completely bypass
+                // every safety check (vacation/day-off/break, day-lock,
+                // overlap) that only the NEW-booking branch above actually
+                // runs. Keep the server's own values for anything that
+                // would otherwise silently relocate the booking.
+                merged = { ...existing, ...nb, salonId: existing.salonId, workerId: existing.workerId, dateISO: existing.dateISO, time: existing.time };
+                // "Fatto"/completed must only ever apply to an appointment
+                // that has actually happened — js/app.js's
+                // isBookingInFuture() is the only thing stopping this
+                // client-side; a direct POST could otherwise mark a future
+                // appointment as served, inflating revenue/stats before the
+                // client has even shown up.
+                if (merged.status === 'completed' && existing.status !== 'completed') {
+                  const now = romeNow();
+                  const bookingMin = timeToMin(merged.time);
+                  const isFuture = merged.dateISO > now.todayISO
+                    || (merged.dateISO === now.todayISO && bookingMin !== null && bookingMin > now.minutes);
+                  if (isFuture) {
+                    conflicts.push({ id: nb.id, error: 'booking_in_future' });
+                    continue;
+                  }
+                }
               } else if (existing.status === 'confirmed' && nb.status === 'cancelled' && nb.cancelledBy !== 'staff'
                   // A booking id alone proves nothing — the anonymous GET
                   // response hands every id out to anyone viewing this

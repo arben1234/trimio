@@ -152,6 +152,12 @@ export default async function handler(req, res) {
               }
               return true;
             });
+            // A recurring autopay charge succeeding was previously invisible
+            // to the owner — only a FAILED/suspended payment ever emailed
+            // them. Best-effort (sendEmail never throws): the payment is
+            // already recorded above regardless of whether this reaches them.
+            await sendEmail(salon.email, 'TRIMIO — Pagamento ricevuto',
+              `<p>Ciao,</p><p>Abbiamo ricevuto correttamente il pagamento automatico del canone mensile TRIMIO per <b>${salon.name}</b>. Grazie!</p>`);
           }
         }
         break;

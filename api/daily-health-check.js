@@ -207,11 +207,28 @@ export default async function handler(req, res) {
     let billingChanged = false;
     for (const salon of salons) {
       if (!salon.billing || salon.billing.pendingApproval) continue;
-      // Autopay salons are fully handled by api/paypal-webhook.js (payment
-      // confirmation, active suspension on final retry failure) — this
-      // manual warning/suspend track is only for salons still paying by
-      // bank transfer.
-      if (salon.billing.autopay) continue;
+      // Autopay salons' suspend/reactivate lifecycle is fully handled by
+      // api/paypal-webhook.js (payment confirmation, active suspension on
+      // final retry failure) — this manual warning/suspend track stays
+      // bank-transfer-only. But that leaves admin with ZERO automated
+      // visibility into whether an autopay salon's recurring charge is
+      // actually landing at all: a missed/undelivered webhook event (network
+      // blip, PayPal outage, a bug) would leave paidThroughMonth silently
+      // stale forever, with nothing else ever re-checking it. Surface it as
+      // a regular health-check problem (admin already gets pushed once/day
+      // when problems.length > 0) instead of full silence — this doesn't
+      // touch inactive/billing state, purely a visibility flag. Gated to the
+      // last week of the month: a subscription's billing anchor is its
+      // signup day, not the 1st, so paidThroughMonth legitimately still
+      // shows last month for most of this one — checking only once nearly
+      // every anchor day should have already fired avoids a daily false
+      // alarm for every autopay salon that didn't sign up on the 1st.
+      if (salon.billing.autopay) {
+        if (!salon.inactive && dayOfMonth >= 25 && salon.billing.paidThroughMonth < currentMonth) {
+          problems.push(`Salone "${salon.name}": pagamento automatico non confermato per ${currentMonth} (ultimo mese pagato: ${salon.billing.paidThroughMonth || 'mai'})`);
+        }
+        continue;
+      }
       if (salon.billing.paidThroughMonth >= currentMonth) continue; // paid up
 
       if (dayOfMonth >= 2 && dayOfMonth <= 5) {

@@ -2217,17 +2217,26 @@ async function doSubmit(){
     STATE.bookings.push(bk);
     const r=await saveState();
 
-    if(r.conflicts.some(c=>c.id===bk.id)){
-      // Un altro cliente ha preso questo slot nel frattempo (rilevato dal server)
+    const conflict=r.conflicts.find(c=>c.id===bk.id);
+    if(conflict){
       STATE.bookings=STATE.bookings.filter(x=>x.id!==bk.id);
+      nextBtn.disabled=false;
+      nextBtn.textContent='✓ Conferma';
+      if(conflict.error==='busy_retry'){
+        // Contention (many people booking this same barber+day at once),
+        // not necessarily a real double-booking — the slot itself may
+        // still be free, so don't tell the customer it's taken or send
+        // them hunting for a different barber; just ask them to retry.
+        showErr('cErr','Il sistema è momentaneamente molto richiesto per questo orario. Riprova tra qualche secondo.');
+        return;
+      }
+      // Un altro cliente ha preso questo slot nel frattempo (rilevato dal server)
       const free=custSalon.workers.filter(w=>{
         if(w.id===custData.barberId)return false;
         if(isOnVacation(w,custData.dateISO))return false;
         if(isWeeklyOff(w,custData.dateISO))return false;
         return!slotConflicts(custSalon.id,w.id,custData.dateISO,custData.time,durMin);
       });
-      nextBtn.disabled=false;
-      nextBtn.textContent='✓ Conferma';
       showAltModal(custData.barberName,custData.time,free);
       return;
     }
@@ -4341,9 +4350,11 @@ async function saveSalon(){
   if(!slug)return showErr('smErr','Inserisci lo slug');
   if(!phone)return showErr('smErr','Il numero di telefono è obbligatorio');
   if(!isValidItalianPhone(phone))return showErr('smErr','Inserisci un numero di telefono italiano valido (es. +39 035 123 4567)');
+  if(address.length<3)return showErr('smErr','Inserisci l\'indirizzo del salone');
 
   if(salonEditId==='new'){
     if(!oUser||!oPwd)return showErr('smErr','Username e password proprietario obbligatori');
+    if(oPwd.length<6)return showErr('smErr','La password deve avere almeno 6 caratteri');
     STATE.salons.push({
       id:'salon'+Date.now(),name,slug,city,address,phone,promo,bgImage:bgImg,gallery:smGalleryTemp.slice(),themeColor:smThemeColor,closedDays:[],bookingDays:30,
       services:DEFAULT_SERVICES.map(s=>({...s})),workers:[],ownerUsername:oUser,ownerPassword:oPwd
@@ -4356,6 +4367,7 @@ async function saveSalon(){
     // Owner password lives only server-side now — changing it goes through
     // the verified admin_set endpoint, never the generic bulk save.
     if(oPwd){
+      if(oPwd.length<6)return showErr('smErr','La password deve avere almeno 6 caratteri');
       const r = await adminSetPassword({ targetType: 'owner', salonId: s.id, newPassword: oPwd });
       if (!r || !r.success) return; // adminSetPassword already alerted the reason
     }
@@ -4602,10 +4614,14 @@ async function saveManualAppt(){
     STATE.bookings.push(bk);
     const r=await saveState();
 
-    if(r.conflicts.some(c=>c.id===bk.id)||!r.ok){
+    const mConflict=r.conflicts.find(c=>c.id===bk.id);
+    if(mConflict||!r.ok){
       STATE.bookings=STATE.bookings.filter(x=>x.id!==bk.id);
       fillModalTimes();
-      return showErr('mErr', r.conflicts.length ? 'Questo orario è appena stato occupato, scegli un altro orario.' : 'Impossibile salvare la prenotazione, riprova.');
+      const msg=mConflict?.error==='busy_retry'
+        ?'Il sistema è momentaneamente molto richiesto per questo orario. Riprova tra qualche secondo.'
+        :(r.conflicts.length ? 'Questo orario è appena stato occupato, scegli un altro orario.' : 'Impossibile salvare la prenotazione, riprova.');
+      return showErr('mErr', msg);
     }
 
     closeModal('modal');
