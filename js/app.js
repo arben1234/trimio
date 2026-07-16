@@ -1520,8 +1520,13 @@ function renderMapMarkers() {
   
   // Add salon markers
   STATE.salons.forEach(s => {
-    if (!s.lat || !s.lng) return;
-    
+    // A pending self-signup salon (not yet admin-approved) must never be
+    // visible/bookable from the public homepage map — it can already have
+    // lat/lng auto-assigned from its city at signup time, before any admin
+    // review (setupSalonCoordinates), so this check can't be folded into
+    // the lat/lng presence check above it.
+    if (!s.lat || !s.lng || s.inactive) return;
+
     // Custom premium golden pin icon for salons!
     const salonIcon = L.divIcon({
       className: 'salon-marker-icon',
@@ -1534,11 +1539,11 @@ function renderMapMarkers() {
     
     const popupContent = `
       <div style="font-family: 'Inter', sans-serif; color: #fff; padding: 4px; min-width: 160px;">
-        <b style="font-size:13px; color:#e5c158;">${s.name}</b>
-        <div style="font-size:11px; margin-top:3px; color:#ccc;">📍 ${s.address || s.city}</div>
+        <b style="font-size:13px; color:#e5c158;">${escapeHtml(s.name)}</b>
+        <div style="font-size:11px; margin-top:3px; color:#ccc;">📍 ${escapeHtml(s.address || s.city)}</div>
         ${distanceText}
         <div style="margin-top:8px; display:flex; gap:6px;">
-          <a href="#${s.slug}" style="background:#e5c158; color:#000; padding:4px 8px; border-radius:4px; font-size:10px; font-weight:700; text-decoration:none; display:inline-block;">Prenota</a>
+          <a href="#${encodeURIComponent(s.slug)}" style="background:#e5c158; color:#000; padding:4px 8px; border-radius:4px; font-size:10px; font-weight:700; text-decoration:none; display:inline-block;">Prenota</a>
           <a href="https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}" target="_blank" style="background:#333; color:#fff; padding:4px 8px; border-radius:4px; font-size:10px; font-weight:700; text-decoration:none; display:inline-block;">Indicazioni 🗺️</a>
         </div>
       </div>
@@ -1991,15 +1996,23 @@ async function customerCancelBooking(id,btn){
   const b=(STATE.bookings||[]).find(x=>x.id===id);
   if(!b||b.status!=='confirmed')return;
   if(!confirm(`Annullare la prenotazione del ${b.dateLabel} alle ${b.time}?`))return;
+  // A booking's id alone is not a secret — anyone who opens this salon's page
+  // learns every id (needed for slot-availability rendering). Requiring the
+  // phone number used at booking time here, verified server-side against
+  // the booking's own record (api/sync.js), stops a stranger who just knows/
+  // enumerates an id from cancelling someone else's appointment.
+  const phone=prompt('Per confermare l\'annullamento, inserisci il numero di telefono usato per la prenotazione:');
+  if(!phone||!phone.trim())return;
   custCancelling=true;
   const original=btn.textContent;
   btn.disabled=true;btn.textContent='...';
-  b.status='cancelled';b.cancelledBy='customer';
+  b.status='cancelled';b.cancelledBy='customer';b.phone=phone.trim();
   try{
     const r=await saveState();
-    if(!r.ok){
+    const rejected=r.conflicts&&r.conflicts.some(c=>c.id===id);
+    if(!r.ok||rejected){
       b.status='confirmed';delete b.cancelledBy;
-      alert('Impossibile annullare la prenotazione, riprova.');
+      alert(rejected?'Numero di telefono non corretto. Riprova.':'Impossibile annullare la prenotazione, riprova.');
     }
   }catch(e){
     b.status='confirmed';delete b.cancelledBy;
@@ -2087,8 +2100,8 @@ function renderCustTimes(){
 
 function renderCustServices(){
   const svcs=custSalon.services||DEFAULT_SERVICES;
-  $('svc').innerHTML=svcs.map(s=>`<div class="svc-item" data-name="${s.name}" data-price="${s.price}">
-    <div><div class="svc-name">${s.name}</div><div class="svc-meta">${s.dur}</div></div>
+  $('svc').innerHTML=svcs.map(s=>`<div class="svc-item" data-name="${escapeHtml(s.name)}" data-price="${s.price}">
+    <div><div class="svc-name">${escapeHtml(s.name)}</div><div class="svc-meta">${escapeHtml(s.dur)}</div></div>
     <div class="svc-price">€${s.price}</div></div>`).join('');
   $('svc').querySelectorAll('.svc-item').forEach(el=>el.addEventListener('click',()=>{
     $('svc').querySelectorAll('.svc-item').forEach(x=>x.classList.remove('sel'));
@@ -2252,9 +2265,9 @@ function showAltModal(busyName,time,freeB){
   $('altSub').textContent=`${busyName} è occupato alle ${time}. Liberi in questo orario:`;
   $('altList').innerHTML=freeB.length===0
     ?`<div style="padding:14px 0;color:#888;font-size:13px">Nessun altro barbiere libero in questo orario.</div>`
-    :freeB.map(w=>`<div class="alt-item" data-id="${w.id}" data-name="${w.name}">
-      <div class="alt-av">${initials(w.name)}</div>
-      <div><div class="alt-name">${w.name}</div><div style="font-size:12px;color:#888;margin-top:2px">Libero alle ${time}</div></div>
+    :freeB.map(w=>`<div class="alt-item" data-id="${w.id}" data-name="${escapeHtml(w.name)}">
+      <div class="alt-av">${escapeHtml(initials(w.name))}</div>
+      <div><div class="alt-name">${escapeHtml(w.name)}</div><div style="font-size:12px;color:#888;margin-top:2px">Libero alle ${time}</div></div>
     </div>`).join('');
   $('altList').querySelectorAll('.alt-item').forEach(el=>el.addEventListener('click',()=>{
     custData.barberId=el.dataset.id;custData.barberName=el.dataset.name;
@@ -3176,11 +3189,11 @@ function renderOggi(){
     const busyW=salon.workers.filter(w=>nowServing.some(b=>b.workerId===w.id));
     const freeW=salon.workers.filter(w=>!nowServing.some(b=>b.workerId===w.id));
 
-    const perW=(bkArr)=>salon.workers.map(w=>`${w.name}: ${bkArr.filter(b=>b.workerId===w.id).length}`).join(' · ');
+    const perW=(bkArr)=>salon.workers.map(w=>`${escapeHtml(w.name)}: ${bkArr.filter(b=>b.workerId===w.id).length}`).join(' · ');
 
     let html=`<div class="notif-label">Stato salone</div>`;
-    if(busyW.length)html+=`<div class="notif-line">🔵 In servizio: <span class="nb-busy">${busyW.map(w=>w.name).join(', ')}</span></div>`;
-    if(freeW.length)html+=`<div class="notif-line">🟢 Liberi: <span class="nb-free">${freeW.map(w=>w.name).join(', ')}</span></div>`;
+    if(busyW.length)html+=`<div class="notif-line">🔵 In servizio: <span class="nb-busy">${busyW.map(w=>escapeHtml(w.name)).join(', ')}</span></div>`;
+    if(freeW.length)html+=`<div class="notif-line">🟢 Liberi: <span class="nb-free">${freeW.map(w=>escapeHtml(w.name)).join(', ')}</span></div>`;
     html+=`<div class="notif-line" style="margin-top:8px">📅 Oggi: <b>${todayBks.length}</b> prenotazioni — ${perW(todayBks)}</div>`;
     html+=`<div class="notif-line">📅 Domani: <b>${tmBks.length}</b> prenotazioni — ${perW(tmBks)}</div>`;
     $('notifBanner').innerHTML=html;$('notifBanner').style.display='block';
@@ -3393,7 +3406,7 @@ function renderServizi(){
     targetSalon=getSalonById(editSrvSalonId);
     // build salon selector
     let selHtml=`<div class="barber-filter" style="margin-bottom:16px">`;
-    STATE.salons.forEach(s=>{selHtml+=`<button class="bf-btn${s.id===editSrvSalonId?' active':''}" data-sid="${s.id}">${s.name}</button>`;});
+    STATE.salons.forEach(s=>{selHtml+=`<button class="bf-btn${s.id===editSrvSalonId?' active':''}" data-sid="${s.id}">${escapeHtml(s.name)}</button>`;});
     selHtml+=`</div>`;
     $('serviziList').innerHTML=selHtml;
     $('serviziList').querySelectorAll('[data-sid]').forEach(b=>b.addEventListener('click',()=>{editSrvSalonId=b.dataset.sid;editSrv=null;renderServizi();}));
@@ -3418,7 +3431,7 @@ function renderServizi(){
       </div></div>`;
     } else {
       html+=`<div class="srv"><div class="srv-row">
-        <div class="srv-info"><div class="srv-nm">${s.name}</div><div class="srv-du">${s.dur}</div></div>
+        <div class="srv-info"><div class="srv-nm">${escapeHtml(s.name)}</div><div class="srv-du">${escapeHtml(s.dur)}</div></div>
         <div class="srv-pr">€${s.price}</div>
         ${canEdit?`<div class="srv-btns"><button class="iconbtn" data-edit="${s.id}">✏️</button><button class="iconbtn del" data-del="${s.id}">🗑️</button></div>`:''}
       </div></div>`;
@@ -3464,7 +3477,7 @@ function renderDipendenti(){
     if(!dipSalonId&&STATE.salons.length>0)dipSalonId=STATE.salons[0].id;
     targetSalon=getSalonById(dipSalonId);
     let selHtml=`<div class="barber-filter">`;
-    STATE.salons.forEach(s=>{selHtml+=`<button class="bf-btn${s.id===dipSalonId?' active':''}" data-dipsid="${s.id}">${s.name}</button>`;});
+    STATE.salons.forEach(s=>{selHtml+=`<button class="bf-btn${s.id===dipSalonId?' active':''}" data-dipsid="${s.id}">${escapeHtml(s.name)}</button>`;});
     selHtml+=`</div>`;
     $('dipendentiList').innerHTML=selHtml;
     $('dipendentiList').querySelectorAll('[data-dipsid]').forEach(b=>b.addEventListener('click',()=>{dipSalonId=b.dataset.dipsid;renderDipendenti();}));
@@ -3952,7 +3965,7 @@ function renderSaloni(){
   });
   sorted.forEach(s=>{
     const tot=STATE.bookings.filter(b=>b.salonId===s.id&&b.status!=='cancelled').length;
-    const locationString = s.address ? `#${s.slug} · ${s.city||'—'} (${s.address})` : `#${s.slug} · ${s.city||'—'}`;
+    const locationString = s.address ? `#${escapeHtml(s.slug)} · ${escapeHtml(s.city||'—')} (${escapeHtml(s.address)})` : `#${escapeHtml(s.slug)} · ${escapeHtml(s.city||'—')}`;
     const statusBtn = `
       <button class="status-toggle-btn" data-stoggle="${s.id}" style="padding:6px 12px; border-radius:10px; border:none; font-size:11px; font-weight:800; cursor:pointer; background:${s.inactive ? '#ef4444' : '#10b981'}; color:#fff; transition:all .15s;">
         ${s.inactive ? 'Inattivo' : 'Attivo'}
@@ -4539,12 +4552,12 @@ function openNewApptModal(){
   const isOwner=SESSION.role==='owner';
   $('mBarberWrap').style.display=isOwner?'block':'none';
   if(isOwner){
-    $('mBarber').innerHTML=salon.workers.map(w=>`<option value="${w.id}">${w.name}</option>`).join('');
+    $('mBarber').innerHTML=salon.workers.map(w=>`<option value="${w.id}">${escapeHtml(w.name)}</option>`).join('');
   } else {
-    $('mBarber').innerHTML=`<option value="${SESSION.workerId}">${SESSION.name}</option>`;
+    $('mBarber').innerHTML=`<option value="${SESSION.workerId}">${escapeHtml(SESSION.name)}</option>`;
   }
   $('mDate').innerHTML=openDays(salon).map(d=>`<option value="${d.iso}">${d.isToday?'Oggi · ':''}${d.label}</option>`).join('');
-  $('mSrv').innerHTML=(salon.services||DEFAULT_SERVICES).map(s=>`<option value="${s.id}">${s.name} · €${s.price}</option>`).join('');
+  $('mSrv').innerHTML=(salon.services||DEFAULT_SERVICES).map(s=>`<option value="${s.id}">${escapeHtml(s.name)} · €${s.price}</option>`).join('');
   fillModalTimes();
   $('modal').classList.add('show');
 }
@@ -4665,7 +4678,7 @@ function renderHomepage(){
     const totBks=STATE.bookings.filter(b=>b.salonId===s.id&&b.status!=='cancelled').length;
     
     // Build address and contact display
-    const addressDisplay = s.address ? `📍 ${s.address}, ${s.city || '—'}` : `📍 ${s.city || '—'}`;
+    const addressDisplay = s.address ? `📍 ${escapeHtml(s.address)}, ${escapeHtml(s.city || '—')}` : `📍 ${escapeHtml(s.city || '—')}`;
     const phoneDisplay = s.phone ? `
       <div style="font-size:12.5px; color:#444; margin-top:5px; display:flex; align-items:center; gap:5px;" onclick="event.stopPropagation();">
         📞 <a href="tel:${s.phone}" style="color:#4f46e5; text-decoration:none; font-weight:700;">${s.phone}</a>

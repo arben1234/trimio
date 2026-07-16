@@ -991,7 +991,21 @@ export default async function handler(req, res) {
               let merged;
               if (isStaffForThisBooking) {
                 merged = { ...existing, ...nb };
-              } else if (existing.status === 'confirmed' && nb.status === 'cancelled' && nb.cancelledBy !== 'staff') {
+              } else if (existing.status === 'confirmed' && nb.status === 'cancelled' && nb.cancelledBy !== 'staff'
+                  // A booking id alone proves nothing — the anonymous GET
+                  // response hands every id out to anyone viewing this
+                  // salon's page (needed for slot-availability rendering),
+                  // with name/phone stripped. Without this check, anyone who
+                  // learned/enumerated an id could cancel a stranger's
+                  // appointment: no staff notification would even fire
+                  // (cancelledBy is forced to 'customer', not 'staff'), and
+                  // it would silently vanish from the real customer's own
+                  // "my bookings" list too (that view hides anything
+                  // cancelledBy:'customer'). Require the phone number used
+                  // at booking time — never shipped by the anonymous GET —
+                  // to prove the caller is actually the customer.
+                  && existing.phone && typeof nb.phone === 'string' && nb.phone.trim()
+                  && toE164(nb.phone) && toE164(nb.phone) === toE164(existing.phone)) {
                 // Customer self-cancellation — only status/cancelledBy change,
                 // everything else on the booking (price, time, name...) is
                 // taken from the server's own record, never from the caller.
