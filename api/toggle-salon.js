@@ -1,7 +1,7 @@
 import { getSalonsDb, setSalonsDb, ensureMigratedV2, acquireBillingLock, releaseBillingLock } from '../lib/kv.js';
 import { verifyAdminPassword } from '../lib/auth.js';
 import { cancelPaypalSubscription } from '../lib/paypal.js';
-import { sendEmail } from '../lib/email.js';
+import { sendEmail, escapeHtml } from '../lib/email.js';
 
 export default async function handler(req, res) {
   // CORS
@@ -102,11 +102,11 @@ export default async function handler(req, res) {
         // actually reaches the owner — same as handleApproveSalon in
         // api/sync.js, which this mirrors.
         await sendEmail(salon.email, '🎉 TRIMIO — Il tuo salone è stato approvato!',
-          `<p>Ciao ${salon.ownerName || ''},</p>
-           <p>Il tuo salone <b>${salon.name}</b> è stato approvato ed è ora attivo su TRIMIO!</p>
+          `<p>Ciao ${escapeHtml(salon.ownerName || '')},</p>
+           <p>Il tuo salone <b>${escapeHtml(salon.name)}</b> è stato approvato ed è ora attivo su TRIMIO!</p>
            <p><b>Le tue credenziali di accesso proprietario:</b><br>
-           Username: ${salon.ownerUsername}<br>
-           Password: ${salon.ownerPassword}</p>
+           Username: ${escapeHtml(salon.ownerUsername)}<br>
+           Password: ${escapeHtml(salon.ownerPassword)}</p>
            <p><b>Link di prenotazione del tuo salone:</b><br><a href="${link}">${link}</a></p>
            <p>I tuoi clienti possono anche scansionare questo QR code per prenotare direttamente:</p>
            <img src="${qrUrl}" alt="QR Code" width="200" height="200">`);

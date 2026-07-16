@@ -1,7 +1,7 @@
 import { getSalonsDb, setSalonsDb, acquireBillingLock, releaseBillingLock, claimWebhookEventOnce } from '../lib/kv.js';
 import { paypalFetch, paypalConfigured } from '../lib/paypal.js';
 import { romeYearMonth } from '../lib/time.js';
-import { sendEmail } from '../lib/email.js';
+import { sendEmail, escapeHtml } from '../lib/email.js';
 
 // Unlike Stripe, PayPal's webhook signing is asymmetric/certificate-based,
 // not an HMAC over the raw body — verification works by posting the
@@ -157,7 +157,7 @@ export default async function handler(req, res) {
             // them. Best-effort (sendEmail never throws): the payment is
             // already recorded above regardless of whether this reaches them.
             await sendEmail(salon.email, 'TRIMIO — Pagamento ricevuto',
-              `<p>Ciao,</p><p>Abbiamo ricevuto correttamente il pagamento automatico del canone mensile TRIMIO per <b>${salon.name}</b>. Grazie!</p>`);
+              `<p>Ciao,</p><p>Abbiamo ricevuto correttamente il pagamento automatico del canone mensile TRIMIO per <b>${escapeHtml(salon.name)}</b>. Grazie!</p>`);
           }
         }
         break;
@@ -225,7 +225,7 @@ export default async function handler(req, res) {
             return true;
           });
           await sendEmail(salon.email, 'TRIMIO — Servizio sospeso per mancato pagamento',
-            `<p>Ciao,</p><p>Il servizio TRIMIO per <b>${salon.name}</b> è stato sospeso: il pagamento automatico con carta non è andato a buon fine dopo diversi tentativi. ` +
+            `<p>Ciao,</p><p>Il servizio TRIMIO per <b>${escapeHtml(salon.name)}</b> è stato sospeso: il pagamento automatico con carta non è andato a buon fine dopo diversi tentativi. ` +
             `Accedi alla gestione del pagamento dal tuo pannello per riattivare il servizio.</p>`);
         }
         break;
@@ -238,6 +238,18 @@ export default async function handler(req, res) {
           await withSalonLock(kvUrl, kvToken, salon.id, async (salons) => {
             const s = salons.find(x => x.id === salon.id);
             if (!s || !s.billing) return false;
+            // `custom_id` always correlates to the right SALON regardless of
+            // which subscription generated the event — but says nothing
+            // about which SUBSCRIPTION. If the owner already cancelled this
+            // subscription and started a NEW one (ACTIVATED already updated
+            // paypalSubscriptionId to the new id), a delayed/out-of-order
+            // CANCELLED event for the OLD subscription must not clear the
+            // id that's now pointing at the live one — that would sever the
+            // only correlation PAYMENT.*.COMPLETED has for future charges
+            // (it keys off paypalSubscriptionId alone, not custom_id), and
+            // the salon would eventually be wrongly flagged/suspended
+            // despite the customer actually still paying.
+            if (s.billing.paypalSubscriptionId !== resource.id) return false;
             s.billing.autopay = false;
             // Also clear the id, not just autopay — matches
             // handleCancelBillingSubscription's own owner-initiated cancel

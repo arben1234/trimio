@@ -4,10 +4,11 @@ import {
   tryAcquireSlotLock, promoteLock, releaseSlotLock, hsetBooking,
   acquireBarberDayLock, releaseBarberDayLock, checkRateLimit,
   ensureMigratedV2, getAdminDb, setAdminDb,
-  acquireBillingLock, releaseBillingLock, claimCancellationNotifyOnce
+  acquireBillingLock, releaseBillingLock, claimCancellationNotifyOnce,
+  acquirePushSubsLock, releasePushSubsLock
 } from '../lib/kv.js';
-import { sendCustomerText, toE164, twilioConfigured } from '../lib/sms.js';
-import { sendEmail } from '../lib/email.js';
+import { sendCustomerText, toE164, twilioConfigured, isValidItalianPhone } from '../lib/sms.js';
+import { sendEmail, escapeHtml } from '../lib/email.js';
 import { handleLogin, handleChangePassword, getVerifiedSession, getClientIp, verifyAdminPassword } from '../lib/auth.js';
 import { isQuietHours, romeYearMonth, romeNow } from '../lib/time.js';
 import { feeForWorkerCount } from '../lib/billing.js';
@@ -266,17 +267,25 @@ async function handleSignupSalon(body, kvUrl, kvToken, req) {
   // vs "asdf"), so requiring a space catches obvious garbage without
   // rejecting legitimate addresses this can't actually verify.
   if (address.length < 5 || !/\s/.test(address)) return { status: 400, json: { success: false, error: 'invalid_address' } };
-  if (!body.contractAccepted || contractSignedName.length < 2) {
+  // The client (suSubmit, js/app.js) also requires the typed signature to
+  // match the declared owner name — this is the one server-side check that
+  // was missing it, only verifying a bare length minimum. A direct API call
+  // could otherwise persist a "signed" contract whose name has nothing to
+  // do with the declared owner, undermining the one thing admin's "Nuove
+  // Richieste" review actually relies on this field for.
+  if (!body.contractAccepted || contractSignedName.length < 2
+      || contractSignedName.toLowerCase() !== ownerName.toLowerCase()) {
     return { status: 400, json: { success: false, error: 'contract_not_accepted' } };
   }
 
+  if (!isValidItalianPhone(body.ownerPhone)) return { status: 400, json: { success: false, error: 'invalid_phone' } };
   const ownerPhone = toE164(body.ownerPhone);
-  if (!ownerPhone) return { status: 400, json: { success: false, error: 'invalid_phone' } };
   // Kept as the human-formatted string the client sent (matches how
   // admin-created salons store their public contact phone), just required
-  // to at least look like a real number — toE164 only used to validate.
+  // to at least look like a real number — toE164/isValidItalianPhone only
+  // used to validate.
   const salonPhone = typeof body.phone === 'string' ? body.phone.trim() : '';
-  if (!toE164(salonPhone)) return { status: 400, json: { success: false, error: 'invalid_salon_phone' } };
+  if (!isValidItalianPhone(salonPhone)) return { status: 400, json: { success: false, error: 'invalid_salon_phone' } };
 
   const workerCountNum = Number(body.declaredWorkerCount);
   if (!Number.isFinite(workerCountNum) || workerCountNum < 1) {
@@ -295,8 +304,16 @@ async function handleSignupSalon(body, kvUrl, kvToken, req) {
   // with phone_not_verified despite no code ever having reached anyone.
   const otpWasSent = await kvCmd(kvUrl, kvToken, ['GET', `signup_otp_sent:${ownerPhone}`]);
   if (otpWasSent) {
-    const verified = await kvCmd(kvUrl, kvToken, ['GET', `signup_otp_verified:${ownerPhone}`]);
-    if (!verified) return { status: 403, json: { success: false, error: 'phone_not_verified' } };
+    // Atomic claim-and-consume: DEL returns how many keys it actually
+    // removed, so exactly one concurrent request can ever get a truthy
+    // result here — this used to be a plain GET (non-consuming), with the
+    // flag only deleted much later after the whole salon was successfully
+    // created. Two requests sharing one phone's verification (a real
+    // scenario: a double-tapped submit, or two tabs) could both read
+    // "verified" before either consumed it, and both create a pending
+    // salon from the same single OTP proof.
+    const claimed = await kvCmd(kvUrl, kvToken, ['DEL', `signup_otp_verified:${ownerPhone}`]);
+    if (!claimed) return { status: 403, json: { success: false, error: 'phone_not_verified' } };
   } else if (twilioConfigured()) {
     // Twilio IS available in this deployment, so every genuine signer has
     // the means to prove their number — require they at least WENT THROUGH
@@ -311,40 +328,59 @@ async function handleSignupSalon(body, kvUrl, kvToken, req) {
     if (!attempted) return { status: 403, json: { success: false, error: 'otp_not_requested' } };
   }
 
-  const salons = await getSalonsDb(kvUrl, kvToken);
-  if (salons.some(s => s.ownerUsername === username)) {
-    return { status: 409, json: { success: false, error: 'username_taken' } };
-  }
-
-  const baseSlug = salonName.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'SALONE';
-  let slug = baseSlug, n = 2;
-  while (salons.some(s => s.slug === slug)) slug = `${baseSlug}_${n++}`;
-
-  const declaredWorkerCount = Math.max(1, Math.min(200, Math.round(workerCountNum)));
-
-  salons.push({
-    id: 'salon' + Date.now(),
-    name: salonName, slug,
-    city, address, phone: salonPhone, promo: '',
-    bgImage: '', gallery: [], themeColor: '#e5c158',
-    closedDays: [], bookingDays: 30,
-    services: DEFAULT_SERVICES.map(s => ({ ...s })),
-    workers: [],
-    ownerUsername: username, ownerPassword: password,
-    ownerName, ownerPhone, email,
-    inactive: true,
-    billing: {
-      declaredWorkerCount,
-      paidThroughMonth: romeYearMonth(), // first partial month is free
-      pendingApproval: true,
-      contractSignedAt: new Date().toISOString(),
-      contractSignedName,
-      signupIp: getClientIp(req) // fraud-review signal for admin, not enforcement
-    }
-  });
-  await setSalonsDb(kvUrl, kvToken, salons);
+  // A brand-new salon has no id yet to lock on individually (unlike editing
+  // an existing one) — serialize ALL new-salon creation behind one fixed
+  // global key instead, reusing the same per-id lock primitive with a
+  // pseudo-id that can never collide with a real salon id (those are always
+  // 'salon'+Date.now()/'salon<N>'). Without this, two people self-
+  // registering within the same read-modify-write window (a marketing push,
+  // a shared referral link) could both read the same pre-write salons_db
+  // snapshot, both pass their own username/slug uniqueness check against
+  // that stale snapshot, and the second setSalonsDb call — a raw overwrite,
+  // not a merge — would silently erase the first signup, which had already
+  // returned {success:true} to that owner.
+  const signupLocked = await acquireBillingLock(kvUrl, kvToken, 'new_salon_creation');
+  if (!signupLocked) return { status: 503, json: { success: false, error: 'busy' } };
+  let declaredWorkerCount;
   try {
-    await kvCmd(kvUrl, kvToken, ['DEL', `signup_otp_verified:${ownerPhone}`]);
+    const salons = await getSalonsDb(kvUrl, kvToken);
+    if (salons.some(s => s.ownerUsername === username)) {
+      return { status: 409, json: { success: false, error: 'username_taken' } };
+    }
+
+    const baseSlug = salonName.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'SALONE';
+    let slug = baseSlug, n = 2;
+    while (salons.some(s => s.slug === slug)) slug = `${baseSlug}_${n++}`;
+
+    declaredWorkerCount = Math.max(1, Math.min(200, Math.round(workerCountNum)));
+
+    salons.push({
+      id: 'salon' + Date.now(),
+      name: salonName, slug,
+      city, address, phone: salonPhone, promo: '',
+      bgImage: '', gallery: [], themeColor: '#e5c158',
+      closedDays: [], bookingDays: 30,
+      services: DEFAULT_SERVICES.map(s => ({ ...s })),
+      workers: [],
+      ownerUsername: username, ownerPassword: password,
+      ownerName, ownerPhone, email,
+      inactive: true,
+      billing: {
+        declaredWorkerCount,
+        paidThroughMonth: romeYearMonth(), // first partial month is free
+        pendingApproval: true,
+        contractSignedAt: new Date().toISOString(),
+        contractSignedName,
+        signupIp: getClientIp(req) // fraud-review signal for admin, not enforcement
+      }
+    });
+    await setSalonsDb(kvUrl, kvToken, salons);
+  } finally {
+    await releaseBillingLock(kvUrl, kvToken, 'new_salon_creation');
+  }
+  // signup_otp_verified was already atomically claimed (deleted) above;
+  // only signup_otp_sent still needs cleanup here.
+  try {
     await kvCmd(kvUrl, kvToken, ['DEL', `signup_otp_sent:${ownerPhone}`]);
   } catch { /* best-effort cleanup */ }
   // Must be awaited (not fire-and-forget) — Vercel can freeze the function
@@ -354,10 +390,10 @@ async function handleSignupSalon(body, kvUrl, kvToken, req) {
   await sendEmail(ADMIN_NOTIFY_EMAIL, '🆕 TRIMIO — Nuovo salone in attesa di approvazione',
     `<p>Un nuovo salone si è registrato e attende la tua conferma:</p>
      <ul>
-       <li><b>Salone:</b> ${salonName}</li>
-       <li><b>Proprietario:</b> ${ownerName} (${username}, ${ownerPhone})</li>
-       <li><b>Email:</b> ${email}</li>
-       <li><b>Indirizzo:</b> ${address}, ${city}</li>
+       <li><b>Salone:</b> ${escapeHtml(salonName)}</li>
+       <li><b>Proprietario:</b> ${escapeHtml(ownerName)} (${escapeHtml(username)}, ${escapeHtml(ownerPhone)})</li>
+       <li><b>Email:</b> ${escapeHtml(email)}</li>
+       <li><b>Indirizzo:</b> ${escapeHtml(address)}, ${escapeHtml(city)}</li>
        <li><b>Barbieri dichiarati:</b> ${declaredWorkerCount}</li>
      </ul>
      <p>Vai su TRIMIO → <b>Nuove Richieste</b> per esaminare e approvare la richiesta.</p>`);
@@ -501,25 +537,37 @@ async function handleApproveSalon(body, kvUrl, kvToken, req) {
   if (!session || session.role !== 'admin') return { status: 403, json: { success: false, error: 'forbidden' } };
   if (!body.salonId) return { status: 400, json: { success: false, error: 'missing_fields' } };
 
-  const salons = await getSalonsDb(kvUrl, kvToken);
-  const salon = salons.find(s => s.id === body.salonId);
-  if (!salon) return { status: 404, json: { success: false, error: 'salon_not_found' } };
-  if (!salon.billing || !salon.billing.pendingApproval) {
-    return { status: 409, json: { success: false, error: 'not_pending' } };
-  }
+  // Same per-salon lock every other billing-mutating path uses (the
+  // sibling toggle-salon.js Attiva path already had it) — this was the one
+  // salons_db read-modify-write in this file still missing it, closing a
+  // race against a concurrent webhook event or another admin action for
+  // the same salon.
+  const locked = await acquireBillingLock(kvUrl, kvToken, body.salonId);
+  if (!locked) return { status: 503, json: { success: false, error: 'busy' } };
+  let salon;
+  try {
+    const salons = await getSalonsDb(kvUrl, kvToken);
+    salon = salons.find(s => s.id === body.salonId);
+    if (!salon) return { status: 404, json: { success: false, error: 'salon_not_found' } };
+    if (!salon.billing || !salon.billing.pendingApproval) {
+      return { status: 409, json: { success: false, error: 'not_pending' } };
+    }
 
-  salon.inactive = false;
-  salon.billing.pendingApproval = false;
-  await setSalonsDb(kvUrl, kvToken, salons);
+    salon.inactive = false;
+    salon.billing.pendingApproval = false;
+    await setSalonsDb(kvUrl, kvToken, salons);
+  } finally {
+    await releaseBillingLock(kvUrl, kvToken, body.salonId);
+  }
 
   const link = `https://trimio.org/s/${encodeURIComponent(salon.slug)}`;
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(link)}`;
   await sendEmail(salon.email, '🎉 TRIMIO — Il tuo salone è stato approvato!',
-    `<p>Ciao ${salon.ownerName || ''},</p>
-     <p>Il tuo salone <b>${salon.name}</b> è stato approvato ed è ora attivo su TRIMIO!</p>
+    `<p>Ciao ${escapeHtml(salon.ownerName || '')},</p>
+     <p>Il tuo salone <b>${escapeHtml(salon.name)}</b> è stato approvato ed è ora attivo su TRIMIO!</p>
      <p><b>Le tue credenziali di accesso proprietario:</b><br>
-     Username: ${salon.ownerUsername}<br>
-     Password: ${salon.ownerPassword}</p>
+     Username: ${escapeHtml(salon.ownerUsername)}<br>
+     Password: ${escapeHtml(salon.ownerPassword)}</p>
      <p><b>Link di prenotazione del tuo salone:</b><br><a href="${link}">${link}</a></p>
      <p>I tuoi clienti possono anche scansionare questo QR code per prenotare direttamente:</p>
      <img src="${qrUrl}" alt="QR Code" width="200" height="200">`);
@@ -730,9 +778,12 @@ function isValidNewSalon(s, existingSalonsMap) {
   // checks phone but not password length or address, and neither check
   // existed at all against a direct API call bypassing the client.
   if (typeof s.ownerPassword !== 'string' || s.ownerPassword.length < 6) return false;
-  if (typeof s.phone !== 'string' || !toE164(s.phone)) return false;
+  if (typeof s.phone !== 'string' || !isValidItalianPhone(s.phone)) return false;
   // Same light "not a single word" sanity check as handleSignupSalon.
   if (typeof s.address !== 'string' || s.address.trim().length < 5 || !/\s/.test(s.address.trim())) return false;
+  // handleSignupSalon requires city.length>=2 — this path (admin-created
+  // salon) had no check on it at all, a parity gap versus self-signup.
+  if (typeof s.city !== 'string' || s.city.trim().length < 2) return false;
   for (const other of existingSalonsMap.values()) {
     if (other.id === s.id) continue;
     if (other.slug === s.slug) return false;
@@ -844,8 +895,34 @@ export default async function handler(req, res) {
         // the owner's own "Fatturazione" dashboard section (fee tier, paid
         // status, autopay state) — so a salon's own owner needs it back for
         // their own salon specifically, never for any other salon.
-        const sanitizedSalons = salons.map(({ ownerPassword, workers, billing, email, ownerName, ownerPhone, ownerUsername, ...rest }) => {
-          const base = { ...rest, workers: (workers || []).map(({ password, ...w }) => w) };
+        // A pending self-signup salon (not yet admin-approved) or one
+        // deactivated by admin/billing must not even be VISIBLE to a caller
+        // who isn't admin or that salon's own staff — booking creation was
+        // already blocked server-side for one, but the raw record (name,
+        // slug, workers...) was still shipped to every anonymous caller via
+        // this GET, only ever hidden by client-side UI filters (the public
+        // map, the homepage list...). A direct API call bypassed all of
+        // that. Own staff can still see their own salon regardless of its
+        // state (e.g. an owner checking why their salon shows inactive).
+        const visibleSalons = salons.filter(s => !s.inactive || isAdminCaller
+          || (session && (session.role === 'owner' || session.role === 'barber') && session.salonId === s.id));
+        const sanitizedSalons = visibleSalons.map(({ ownerPassword, workers, billing, email, ownerName, ownerPhone, ownerUsername, ...rest }) => {
+          // Every worker's own login username and personal phone number used
+          // to ship to ANY caller for EVERY salon on the platform — only the
+          // password itself was ever stripped. An anonymous visitor (or any
+          // other salon's staff) could read every barber's login username
+          // (half of their credentials) and phone number platform-wide by
+          // simply calling this endpoint. Name/photo/role/description/
+          // reviews/vacation-and-break windows stay public — the anonymous
+          // customer booking UI genuinely needs those (worker cards,
+          // slot-availability computation) — only username/phone are
+          // staff-only now.
+          const isOwnSalonStaff = session && (session.role === 'owner' || session.role === 'barber') && session.salonId === rest.id;
+          const canSeeWorkerContact = isAdminCaller || isOwnSalonStaff;
+          const base = {
+            ...rest,
+            workers: (workers || []).map(({ password, username, phone, ...w }) => canSeeWorkerContact ? { ...w, username, phone } : w)
+          };
           if (isAdminCaller) return { ...base, billing, email, ownerName, ownerPhone, ownerUsername };
           const isOwnSalonOwner = session && session.role === 'owner' && session.salonId === rest.id;
           if (isOwnSalonOwner) return { ...base, billing };
@@ -973,6 +1050,33 @@ export default async function handler(req, res) {
               // create a real booking against a salon nobody is watching.
               if (!salonForVac || salonForVac.inactive) {
                 conflicts.push({ id: nb.id, salonId: nb.salonId, workerId: nb.workerId, dateISO: nb.dateISO, time: nb.time, error: 'salon_inactive' });
+                continue;
+              }
+              // "Fatto"/completed must only ever be reached by first
+              // creating a booking normally (status 'confirmed') and later
+              // transitioning it via the existing-booking update branch
+              // below, which already rejects marking a future appointment
+              // completed. A brand-new booking submitted directly with
+              // status:'completed' skipped that check entirely — no
+              // legitimate client ever does this (manual staff bookings and
+              // customer bookings both always create as 'confirmed'), so
+              // this is rejected outright rather than re-implementing the
+              // future-date check a second time here.
+              if (nb.status === 'completed') {
+                conflicts.push({ id: nb.id, error: 'invalid_booking' });
+                continue;
+              }
+              // Defense-in-depth: a new booking for a date already gone in
+              // Italy should never be accepted regardless of what the
+              // client thinks "today" is (e.g. a customer whose device
+              // clock/timezone disagrees with Europe/Rome — the actual gap
+              // that motivated moving todayISO()/openDays() onto
+              // romeNowParts() client-side). Only the DATE is checked, not
+              // the exact time-of-day, so a legitimate walk-in booking
+              // entered for "right now" by staff can't be falsely rejected
+              // by a few seconds/minutes of request latency.
+              if (nb.status !== 'cancelled' && nb.dateISO < romeNow().todayISO) {
+                conflicts.push({ id: nb.id, error: 'invalid_booking' });
                 continue;
               }
               if (nb.status !== 'cancelled') {
@@ -1108,6 +1212,15 @@ export default async function handler(req, res) {
                 // everything else on the booking (price, time, name...) is
                 // taken from the server's own record, never from the caller.
                 merged = { ...existing, status: 'cancelled', cancelledBy: 'customer' };
+              } else if (nb.status === 'cancelled' && existing.status !== 'confirmed') {
+                // Not a phone-mismatch case — the booking was already
+                // resolved (staff already cancelled it, or it's already
+                // completed) by the time this request landed. Distinct from
+                // 'forbidden' so the client doesn't wrongly tell the
+                // customer their phone number was incorrect when the real
+                // reason is simply that there's nothing left to cancel.
+                conflicts.push({ id: nb.id, error: 'already_resolved' });
+                continue;
               } else {
                 conflicts.push({ id: nb.id, error: 'forbidden' });
                 continue;
@@ -1149,15 +1262,25 @@ export default async function handler(req, res) {
             // reuses the same per-salon lock the billing actions already
             // take, so a generic save and a billing mutation for the same
             // salon can't interleave either.
+            // For an admin session this is every salon id in the payload —
+            // and saveState() always sends the client's ENTIRE local
+            // snapshot, so an admin's payload holds every salon on the
+            // platform on every single save, unrelated actions included.
+            // Acquiring (and later releasing) these one at a time used to
+            // mean N sequential Redis round-trips — each potentially
+            // waiting out its own contention — for a write that almost
+            // always touches at most one or two of them. Parallelized: the
+            // total wait is now bounded by the single slowest acquisition,
+            // not their sum.
             const lockIds = Array.from(new Set(newData.salons
               .map(s => s && s.id)
               .filter(id => typeof id === 'string' && session &&
                 (session.role === 'admin' || session.salonId === id))
             )).sort();
-            const heldLocks = [];
-            for (const id of lockIds) {
-              if (await acquireBillingLock(kvUrl, kvToken, id)) heldLocks.push(id);
-            }
+            const lockResults = await Promise.all(lockIds.map(id =>
+              acquireBillingLock(kvUrl, kvToken, id).then(ok => ({ id, ok }))
+            ));
+            const heldLocks = lockResults.filter(r => r.ok).map(r => r.id);
             const heldLocksSet = new Set(heldLocks);
             try {
             // Merge by id (upsert) instead of overwriting the whole array.
@@ -1260,6 +1383,19 @@ export default async function handler(req, res) {
                   incoming.ownerPhone = existing.ownerPhone;
                   incoming.ownerUsername = existing.ownerUsername;
                   incoming.inactive = existing.inactive;
+                } else {
+                  // Admin sessions still can't flip inactive/pendingApproval
+                  // through this generic path — the normal admin UI
+                  // (saveSalon() in js/app.js) never touches these fields
+                  // here anyway, activation always goes through the
+                  // dedicated approve_salon action or toggle-salon.js, both
+                  // of which email the owner their credentials/link/QR on
+                  // first activation. Without this, a crafted admin-session
+                  // POST through this generic bulk save could silently flip
+                  // a pending self-signup salon live with NEITHER approval
+                  // email ever firing — a third, unintended activation path.
+                  incoming.inactive = existing.inactive;
+                  incoming.billing = existing.billing;
                 }
                 // Reviews only ever change through action=submit_review (see
                 // handleSubmitReview below) now — never through this bulk
@@ -1298,7 +1434,7 @@ export default async function handler(req, res) {
             }
             await setSalonsDb(kvUrl, kvToken, Array.from(salonMap.values()));
             } finally {
-              for (const id of heldLocks) await releaseBillingLock(kvUrl, kvToken, id);
+              await Promise.all(heldLocks.map(id => releaseBillingLock(kvUrl, kvToken, id)));
             }
           } else {
             console.warn('[SYNC] Ignoring malformed salons payload (not written to salons_db)');
@@ -1378,7 +1514,13 @@ async function sendPushNotifications(newBookings, salons, kvUrl, kvToken) {
     if (typeof subscriptions === 'string') subscriptions = JSON.parse(subscriptions);
     if (!Array.isArray(subscriptions) || subscriptions.length === 0) return;
 
-    let subListChanged = false;
+    // Endpoints found dead during this run — pruned from KV in one locked
+    // pass at the end (see below) against a FRESH read of the blob, rather
+    // than writing back the `subscriptions` snapshot read at the top of
+    // this function unlocked: a concurrent api/subscribe.js registration
+    // (or api/send-reminders.js's own pruning pass) landing in between used
+    // to be silently discarded by this function's stale, unlocked write.
+    const deadEndpoints = new Set();
     const activeSubs = [...subscriptions];
 
     for (const bk of newBookings) {
@@ -1414,11 +1556,7 @@ async function sendPushNotifications(newBookings, salons, kvUrl, kvToken) {
           // If subscription is invalid/expired (410 Gone or 404 Not Found), remove it
           if (err.statusCode === 410 || err.statusCode === 404) {
             console.log(`[PUSH] Removing expired subscription for ${target.role}`);
-            const idx = subscriptions.findIndex(s => s.subscription.endpoint === target.subscription.endpoint);
-            if (idx !== -1) {
-              subscriptions.splice(idx, 1);
-              subListChanged = true;
-            }
+            deadEndpoints.add(target.subscription.endpoint);
           } else {
             console.error('[PUSH] Failed to send to target:', err.message);
           }
@@ -1443,16 +1581,34 @@ async function sendPushNotifications(newBookings, salons, kvUrl, kvToken) {
       }
     }
 
-    // 2. Save cleaned subscription list back to KV if changed
-    if (subListChanged) {
-      await fetch(`${kvUrl}/set/push_subscriptions`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${kvToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(JSON.stringify(subscriptions))
-      });
+    // 2. Save cleaned subscription list back to KV if changed — locked,
+    // against a fresh re-read, same pattern as api/send-reminders.js.
+    if (deadEndpoints.size > 0) {
+      const locked = await acquirePushSubsLock(kvUrl, kvToken);
+      if (locked) {
+        try {
+          const freshResp = await fetch(`${kvUrl}/get/push_subscriptions`, { headers: { Authorization: `Bearer ${kvToken}` } });
+          let fresh = [];
+          if (freshResp.ok) {
+            const freshData = await freshResp.json();
+            if (freshData.result) {
+              let val = JSON.parse(freshData.result);
+              if (typeof val === 'string') val = JSON.parse(val);
+              if (Array.isArray(val)) fresh = val;
+            }
+          }
+          const pruned = fresh.filter(s => !deadEndpoints.has(s.subscription.endpoint));
+          if (pruned.length !== fresh.length) {
+            await fetch(`${kvUrl}/set/push_subscriptions`, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${kvToken}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify(JSON.stringify(pruned))
+            });
+          }
+        } finally {
+          await releasePushSubsLock(kvUrl, kvToken);
+        }
+      }
     }
   } catch (err) {
     console.error('[PUSH] error:', err);

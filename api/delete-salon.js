@@ -1,4 +1,4 @@
-import { getSalonsDb, setSalonsDb, getAllBookings, releaseSlotLock, kvCmd, ensureMigratedV2, acquireBillingLock, releaseBillingLock } from '../lib/kv.js';
+import { getSalonsDb, setSalonsDb, getAllBookings, releaseSlotLock, kvCmd, ensureMigratedV2, acquireBillingLock, releaseBillingLock, acquirePushSubsLock, releasePushSubsLock } from '../lib/kv.js';
 import { verifyAdminPassword } from '../lib/auth.js';
 import { cancelPaypalSubscription } from '../lib/paypal.js';
 
@@ -95,24 +95,31 @@ export default async function handler(req, res) {
     // bookings are cleaned up here too. Best-effort: a failure here doesn't
     // undo the delete, which has already happened above.
     try {
-      const subResp = await fetch(`${kvUrl}/get/push_subscriptions`, { headers: { Authorization: `Bearer ${kvToken}` } });
-      if (subResp.ok) {
-        const subData = await subResp.json();
-        if (subData.result) {
-          let subs = JSON.parse(subData.result);
-          if (typeof subs === 'string') subs = JSON.parse(subs);
-          if (Array.isArray(subs)) {
-            const filtered = subs.filter(sub =>
-              sub.salonId !== salonId && !(sub.bookingId && removedBookingIds.has(sub.bookingId))
-            );
-            if (filtered.length !== subs.length) {
-              await fetch(`${kvUrl}/set/push_subscriptions`, {
-                method: 'POST',
-                headers: { Authorization: `Bearer ${kvToken}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify(JSON.stringify(filtered))
-              });
+      const subsLocked = await acquirePushSubsLock(kvUrl, kvToken);
+      if (subsLocked) {
+        try {
+          const subResp = await fetch(`${kvUrl}/get/push_subscriptions`, { headers: { Authorization: `Bearer ${kvToken}` } });
+          if (subResp.ok) {
+            const subData = await subResp.json();
+            if (subData.result) {
+              let subs = JSON.parse(subData.result);
+              if (typeof subs === 'string') subs = JSON.parse(subs);
+              if (Array.isArray(subs)) {
+                const filtered = subs.filter(sub =>
+                  sub.salonId !== salonId && !(sub.bookingId && removedBookingIds.has(sub.bookingId))
+                );
+                if (filtered.length !== subs.length) {
+                  await fetch(`${kvUrl}/set/push_subscriptions`, {
+                    method: 'POST',
+                    headers: { Authorization: `Bearer ${kvToken}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify(JSON.stringify(filtered))
+                  });
+                }
+              }
             }
           }
+        } finally {
+          await releasePushSubsLock(kvUrl, kvToken);
         }
       }
     } catch (err) {

@@ -1753,7 +1753,16 @@ function bookingsFor(salonId,workerId=null){
 
 /* ======== DAYS / CHIPS ======== */
 function openDays(salon){
-  const today=new Date();const out=[];let added=0,off=0;
+  // Rome's real calendar date, not the device's — same reasoning as
+  // todayISO()/nowHHMM() (romeNowParts()): a customer whose device
+  // clock/timezone disagrees with Italy used to get a first "Oggi" chip
+  // dated one day off from what todayISO() considers today, which silently
+  // broke the "already passed" time filter in renderCustTimes()/
+  // validateCust() (both compare against todayISO(), so the mismatch made
+  // that comparison always false, skipping the filter entirely).
+  const p=romeNowParts();
+  const today=new Date(Number(p.year),Number(p.month)-1,Number(p.day));
+  const out=[];let added=0,off=0;
   const cd=salon.closedDays||[];const bd=salon.bookingDays||30;
   while(added<bd&&off<90){
     const d=new Date(today);d.setDate(today.getDate()+off);off++;
@@ -2009,10 +2018,15 @@ async function customerCancelBooking(id,btn){
   b.status='cancelled';b.cancelledBy='customer';b.phone=phone.trim();
   try{
     const r=await saveState();
-    const rejected=r.conflicts&&r.conflicts.some(c=>c.id===id);
-    if(!r.ok||rejected){
+    const conflict=r.conflicts&&r.conflicts.find(c=>c.id===id);
+    if(!r.ok||conflict){
       b.status='confirmed';delete b.cancelledBy;
-      alert(rejected?'Numero di telefono non corretto. Riprova.':'Impossibile annullare la prenotazione, riprova.');
+      const msg=conflict?.error==='already_resolved'
+        ?'Questa prenotazione non è più disponibile per l\'annullamento (potrebbe essere già stata gestita dal salone).'
+        :conflict
+          ?'Numero di telefono non corretto. Riprova.'
+          :'Impossibile annullare la prenotazione, riprova.';
+      alert(msg);
     }
   }catch(e){
     b.status='confirmed';delete b.cancelledBy;
@@ -2797,9 +2811,13 @@ async function doLogin(){
    DASHBOARD
 ================================================================ */
 let curSec='oggi',dashDateISO=null,shopOpen=true;
-const _now=new Date();
-let calYear=_now.getFullYear(),calMonth=_now.getMonth(),calSelISO=todayISO();
-let cliYear=_now.getFullYear(),cliMonth=_now.getMonth();
+// Rome's real calendar month, not the device's — same reasoning as
+// todayISO()/openDays(). Staff-only (calendar/clienti views' initial
+// month), lower impact than the customer-facing date chips, but the same
+// inconsistency class.
+const _nowRome=romeNowParts();
+let calYear=Number(_nowRome.year),calMonth=Number(_nowRome.month)-1,calSelISO=todayISO();
+let cliYear=Number(_nowRome.year),cliMonth=Number(_nowRome.month)-1;
 let statsPeriod='oggi',statFrom='',statTo='';
 let editSrv=null,editWorker=null;
 let lastStatsExport=null;
@@ -4348,6 +4366,7 @@ async function saveSalon(){
   const bgImg=$('smBgImage').value.trim();
   if(name.length<2)return showErr('smErr','Inserisci il nome del salone');
   if(!slug)return showErr('smErr','Inserisci lo slug');
+  if(city.length<2)return showErr('smErr','Inserisci la città del salone');
   if(!phone)return showErr('smErr','Il numero di telefono è obbligatorio');
   if(!isValidItalianPhone(phone))return showErr('smErr','Inserisci un numero di telefono italiano valido (es. +39 035 123 4567)');
   if(address.length<5||!/\s/.test(address))return showErr('smErr','Inserisci l\'indirizzo completo del salone (via e numero civico)');

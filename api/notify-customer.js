@@ -49,7 +49,16 @@ export default async function handler(req, res) {
     const bk = bookingsMap.get(bookingId);
     if (!bk) return res.status(404).json({ error: 'Booking not found' });
 
-    if (session.role !== 'admin' && session.salonId !== bk.salonId) {
+    // A barber is scoped to their OWN bookings only, same as every other
+    // staff action on a booking (api/sync.js's isStaffForThisBooking) —
+    // this endpoint only checked salonId, missing the workerId check applied
+    // everywhere else, so a barber could trigger a real SMS/push send (and
+    // burn a colleague's booking's 2-minute cooldown) for an appointment
+    // that isn't theirs.
+    const isAuthorizedForBooking = session.role === 'admin'
+      || (session.role === 'owner' && session.salonId === bk.salonId)
+      || (session.role === 'barber' && session.salonId === bk.salonId && session.workerId === bk.workerId);
+    if (!isAuthorizedForBooking) {
       return res.status(403).json({ error: 'forbidden' });
     }
 

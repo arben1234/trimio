@@ -1,8 +1,8 @@
 import webPush from 'web-push';
 import { put, list, del } from '@vercel/blob';
-import { getAllBookings, getSalonsDb, setSalonsDb, getAdminDb, getBlob, setBlob } from '../lib/kv.js';
+import { getAllBookings, getSalonsDb, setSalonsDb, getAdminDb, getBlob, setBlob, acquireBillingLock, releaseBillingLock } from '../lib/kv.js';
 import { twilioConfigured } from '../lib/sms.js';
-import { sendEmail } from '../lib/email.js';
+import { sendEmail, escapeHtml } from '../lib/email.js';
 import { feeForWorkerCount } from '../lib/billing.js';
 
 const VAPID_PUBLIC_KEY = 'BLLKr1SroPRHybfSN2OunQUzy6yd5hggq2fmAmT90LL32Pgyaa_VkoESjUq3DGk0bgD2a5tb17bSZHc2heLJXGo';
@@ -214,7 +214,14 @@ export default async function handler(req, res) {
     const todayISO = romeTodayISO();
     const currentMonth = todayISO.slice(0, 7);
     const dayOfMonth = Number(todayISO.slice(8, 10));
-    let billingChanged = false;
+    // `salons` was fetched once, several awaited network calls (homepage
+    // fetch, manifest fetch, the daily Vercel Blob backup) ago — mutating
+    // that same stale in-memory array and writing it all back in one
+    // setSalonsDb call at the end (as this used to) could silently discard
+    // a webhook event that landed for any of these salons' billing in the
+    // meantime. Each salon that actually needs a change now gets its own
+    // locked, freshly-re-read write instead — more KV calls, but this is a
+    // once-a-day cron, not a hot path, so correctness wins over efficiency.
     for (const salon of salons) {
       if (!salon.billing || salon.billing.pendingApproval) continue;
       // Autopay salons' suspend/reactivate lifecycle is fully handled by
@@ -243,23 +250,47 @@ export default async function handler(req, res) {
 
       if (dayOfMonth >= 2 && dayOfMonth <= 5) {
         if (salon.billing.lastWarningEmailSentDate === todayISO) continue;
-        const fee = feeForWorkerCount(Math.max((salon.workers || []).length, salon.billing.declaredWorkerCount || 0));
-        await sendEmail(salon.email, 'TRIMIO — Pagamento canone mensile in sospeso',
-          `<p>Ciao,</p><p>Il canone mensile di €${fee} per <b>${salon.name}</b> risulta non ancora saldato per ${currentMonth}. ` +
-          `Il servizio verrà sospeso se il pagamento non risulta entro il giorno 5 del mese.</p>`);
-        salon.billing.lastWarningEmailSentDate = todayISO;
-        billingChanged = true;
+        const locked = await acquireBillingLock(kvUrl, kvToken, salon.id);
+        if (!locked) continue; // try again on tomorrow's run rather than write unprotected
+        try {
+          const freshSalons = await getSalonsDb(kvUrl, kvToken);
+          const freshSalon = freshSalons.find(s => s.id === salon.id);
+          // Re-check under lock — a webhook may have already resolved this
+          // (or already sent today's warning) in the time since the
+          // unlocked snapshot at the top of this function was read.
+          if (!freshSalon || !freshSalon.billing || freshSalon.billing.pendingApproval
+              || freshSalon.billing.autopay || freshSalon.billing.paidThroughMonth >= currentMonth
+              || freshSalon.billing.lastWarningEmailSentDate === todayISO) continue;
+          const fee = feeForWorkerCount(Math.max((freshSalon.workers || []).length, freshSalon.billing.declaredWorkerCount || 0));
+          await sendEmail(freshSalon.email, 'TRIMIO — Pagamento canone mensile in sospeso',
+            `<p>Ciao,</p><p>Il canone mensile di €${fee} per <b>${escapeHtml(freshSalon.name)}</b> risulta non ancora saldato per ${currentMonth}. ` +
+            `Il servizio verrà sospeso se il pagamento non risulta entro il giorno 5 del mese.</p>`);
+          freshSalon.billing.lastWarningEmailSentDate = todayISO;
+          await setSalonsDb(kvUrl, kvToken, freshSalons);
+        } finally {
+          await releaseBillingLock(kvUrl, kvToken, salon.id);
+        }
       } else if (dayOfMonth >= 6 && !salon.inactive) {
-        salon.inactive = true;
-        salon.billing.suspendedByBilling = true;
-        await sendEmail(salon.email, 'TRIMIO — Servizio sospeso per mancato pagamento',
-          `<p>Ciao,</p><p>Il servizio TRIMIO per <b>${salon.name}</b> è stato sospeso per mancato pagamento del canone di ${currentMonth}. ` +
-          `Contattaci non appena effettuato il pagamento per riattivarlo.</p>`);
-        billingChanged = true;
+        const locked = await acquireBillingLock(kvUrl, kvToken, salon.id);
+        if (!locked) continue;
+        try {
+          const freshSalons = await getSalonsDb(kvUrl, kvToken);
+          const freshSalon = freshSalons.find(s => s.id === salon.id);
+          if (!freshSalon || !freshSalon.billing || freshSalon.billing.pendingApproval
+              || freshSalon.billing.autopay || freshSalon.billing.paidThroughMonth >= currentMonth
+              || freshSalon.inactive) continue;
+          freshSalon.inactive = true;
+          freshSalon.billing.suspendedByBilling = true;
+          await sendEmail(freshSalon.email, 'TRIMIO — Servizio sospeso per mancato pagamento',
+            `<p>Ciao,</p><p>Il servizio TRIMIO per <b>${escapeHtml(freshSalon.name)}</b> è stato sospeso per mancato pagamento del canone di ${currentMonth}. ` +
+            `Contattaci non appena effettuato il pagamento per riattivarlo.</p>`);
+          await setSalonsDb(kvUrl, kvToken, freshSalons);
+        } finally {
+          await releaseBillingLock(kvUrl, kvToken, salon.id);
+        }
       }
     }
     report.billingChecked = salons.filter(s => s.billing && !s.billing.pendingApproval).length;
-    if (billingChanged) await setSalonsDb(kvUrl, kvToken, salons);
   } catch (e) {
     problems.push(`Controllo fatturazione fallito: ${e.message}`);
   }
