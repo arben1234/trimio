@@ -294,12 +294,18 @@ export default async function handler(req, res) {
     }
   } catch (err) {
     console.error('[PAYPAL-WEBHOOK] Handler error for event', event.event_type, err);
+    // Used to only unclaim on LockAcquisitionError specifically — but ANY
+    // exception here (a transient Upstash/KV network error inside
+    // withSalonLock or one of the unlocked `probe` reads above, a bug in a
+    // mutate callback, anything) leaves event.id claimed (48h TTL) with its
+    // side effects never actually applied. PayPal retries on the resulting
+    // non-2xx response, but that retry immediately hits claimWebhookEventOnce
+    // → false → "already_processed" → 200, permanently and silently dropping
+    // a real payment/suspension/cancellation event. Unclaim on every
+    // failure path, not just a lock timeout, so any retry can genuinely
+    // reprocess it.
+    await unclaimWebhookEvent(kvUrl, kvToken, event.id);
     if (err instanceof LockAcquisitionError) {
-      // Release the idempotency claim so PayPal's own redelivery (triggered
-      // by this non-2xx response) can actually go through and apply the
-      // event next time, instead of silently no-op'ing on "already
-      // processed" against an event that was never really processed.
-      await unclaimWebhookEvent(kvUrl, kvToken, event.id);
       return res.status(503).json({ error: 'busy' });
     }
     return res.status(500).json({ error: 'internal_error' });

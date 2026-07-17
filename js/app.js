@@ -5014,6 +5014,22 @@ async function boot(){
 
   await loadState();
 
+  // initCloudSync() fires its first /api/sync request synchronously below,
+  // and authHeaders() reads SESSION.token at that exact call time — but
+  // SESSION used to still be the uninitialized {role:null,...} default at
+  // this point, since loadSession() (restoring it from localStorage) only
+  // ran much later, inside checkInitialHash() at the very end of boot().
+  // That made every app reopen's first sync request go out unauthenticated
+  // regardless of a valid saved session: for an owner/barber whose OWN
+  // salon happens to be inactive (e.g. billing-suspended, a state they're
+  // specifically supposed to still be able to see), the anonymous-scoped
+  // GET response drops it entirely, tripping initDash()'s "salon not
+  // found" branch into a spurious forced logout — and for everyone else,
+  // worker credentials/billing were transiently blanked in STATE until the
+  // next 6s poll (which does carry the token) corrected it. Restoring the
+  // session before the first request fixes both.
+  loadSession();
+
   initCloudSync();
 
 

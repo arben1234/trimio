@@ -773,6 +773,65 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
   eq(rReuse.body.conflicts, [], 'after cancellation, the freed slot can be booked again without conflict');
 });
 
+section('api/sync.js — HARDENING: a staff update can never resurrect a cancelled booking or tamper with price/service/name/phone');
+await withFakeKv(makeFakeRedis(), async (fake) => {
+  const prevSecret = process.env.SESSION_SECRET;
+  process.env.SESSION_SECRET = 'test-only-secret-for-session-tokens';
+  try {
+    // A real services entry is needed — new-booking creation re-derives
+    // price/dur server-side from the salon's own service list (svcPrice/
+    // svcDurMin), ignoring whatever the client sent, so the tampering test
+    // below needs a genuine baseline to tamper away from.
+    fake.strings.set('salons_db', JSON.stringify([{ id: 'sY', name: 'Salon Y', workers: [], services: [{ name: 'Taglio', price: 20, dur: 30 }] }]));
+    const handler = await freshImport('api/sync.js');
+    const ownerToken = issueSessionToken({ role: 'owner', salonId: 'sY' });
+    const authHdr = { authorization: `Bearer ${ownerToken}` };
+
+    // --- Resurrection: cancelling a booking frees its slot lock for anyone
+    // else to take — sending status back to 'confirmed' must never just
+    // merge straight through without re-running the same checks a brand
+    // new booking would.
+    const bk = { id: 'resur-1', salonId: 'sY', workerId: 'wY', dateISO: '2030-07-07', time: '09:00', status: 'confirmed', name: 'Original', phone: '3339990000', service: 'Taglio', price: 20, dur: 30 };
+    await handler({ method: 'POST', headers: authHdr, body: { bookings: [bk], salons: [] } }, mkRes().obj);
+    await handler({ method: 'POST', headers: authHdr, body: { bookings: [{ ...bk, status: 'cancelled', cancelledBy: 'staff' }], salons: [] } }, mkRes().obj);
+
+    const rResurrect = mkRes();
+    await handler({ method: 'POST', headers: authHdr, body: { bookings: [{ ...bk, status: 'confirmed' }], salons: [] } }, rResurrect.obj);
+    ok(rResurrect.body.conflicts.some(c => c.id === 'resur-1' && c.error === 'cannot_reactivate_cancelled_booking'), 'sending a cancelled booking back to confirmed is rejected outright');
+
+    const rCheck = mkRes();
+    await handler({ method: 'GET', headers: authHdr }, rCheck.obj);
+    eq(rCheck.body.bookings.find(b => b.id === 'resur-1')?.status, 'cancelled', 'the booking is still cancelled server-side after the rejected resurrection attempt');
+
+    // Now prove the slot really is free for someone else — a genuine NEW
+    // booking (fresh id, goes through the real new-booking checks) at the
+    // exact same slot must succeed.
+    const rNewAtSameSlot = mkRes();
+    await handler({ method: 'POST', headers: authHdr, body: { bookings: [{ ...bk, id: 'resur-1-legit-rebook' }], salons: [] } }, rNewAtSameSlot.obj);
+    eq(rNewAtSameSlot.body.conflicts, [], 'a genuinely new booking for the same freed slot succeeds normally');
+
+    // --- Field tampering: a staff update must never let price/duration/
+    // service/name/phone be rewritten through the generic status-change path.
+    const bk2 = { id: 'tamper-1', salonId: 'sY', workerId: 'wY', dateISO: '2030-07-08', time: '10:00', status: 'confirmed', name: 'Real Name', phone: '3331112222', service: 'Taglio', price: 20, dur: 30 };
+    await handler({ method: 'POST', headers: authHdr, body: { bookings: [bk2], salons: [] } }, mkRes().obj);
+
+    const tampered = { ...bk2, status: 'cancelled', cancelledBy: 'staff', price: 1, dur: 999, service: 'FREE HAIRCUT', name: 'Hacked Name', phone: '0000000000' };
+    await handler({ method: 'POST', headers: authHdr, body: { bookings: [tampered], salons: [] } }, mkRes().obj);
+
+    const rFinal = mkRes();
+    await handler({ method: 'GET', headers: authHdr }, rFinal.obj);
+    const stored = rFinal.body.bookings.find(b => b.id === 'tamper-1');
+    eq(stored.status, 'cancelled', 'the legitimate status change (cancel) still goes through');
+    eq(stored.price, 20, "price can't be tampered via a staff update");
+    eq(stored.dur, 30, "duration can't be tampered via a staff update");
+    eq(stored.service, 'Taglio', "service name can't be tampered via a staff update");
+    eq(stored.name, 'Real Name', "customer name can't be tampered via a staff update");
+    eq(stored.phone, '3331112222', "customer phone can't be tampered via a staff update");
+  } finally {
+    restoreEnv('SESSION_SECRET', prevSecret);
+  }
+});
+
 section('api/sync.js — one-time migration from the legacy bookings_db blob');
 await withFakeKv(makeFakeRedis(), async (fake) => {
   const legacyBooking = { id: 'legacy-1', salonId: 'sLegacy', workerId: 'wLegacy', dateISO: '2030-04-04', time: '09:00', status: 'confirmed', name: 'Legacy Customer' };
@@ -1068,6 +1127,22 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
   const rBlocked = mkRes();
   await handler({ method: 'POST', body: { action: 'login', role: 'admin', username: 'admin', password: 'realSecret1' } }, rBlocked.obj);
   eq(rBlocked.status, 429, 'the 16th login attempt is rate-limited even with the CORRECT password — brute-force protection actually engages');
+});
+
+section('api/sync.js — signup OTP verification is rate-limited (a 6-digit code was previously brute-forceable with no limit at all)');
+await withFakeKv(makeFakeRedis(), async (fake) => {
+  const handler = await freshImport('api/sync.js');
+  const phone = '+393331234567';
+  fake.strings.set(`signup_otp:${phone}`, '999999');
+
+  for (let i = 1; i <= 8; i++) {
+    const r = mkRes();
+    await handler({ method: 'POST', body: { action: 'verify_signup_otp', phone, code: '000000' } }, r.obj);
+    eq(r.status, 401, `guess ${i}/8 with a wrong code is rejected normally (within budget)`);
+  }
+  const rBlocked = mkRes();
+  await handler({ method: 'POST', body: { action: 'verify_signup_otp', phone, code: '999999' } }, rBlocked.obj);
+  eq(rBlocked.status, 429, 'the 9th verify attempt is rate-limited even with the CORRECT code — brute-force protection actually engages');
 });
 
 section('api/sync.js — a new booking against an inactive/unknown salon is rejected server-side');

@@ -208,10 +208,21 @@ async function handleRequestSignupOtp(body, kvUrl, kvToken, req) {
   return { status: 200, json: { success: true } };
 }
 
-async function handleVerifySignupOtp(body, kvUrl, kvToken) {
+async function handleVerifySignupOtp(body, kvUrl, kvToken, req) {
   const phone = toE164(body.phone);
   const code = typeof body.code === 'string' ? body.code.trim() : '';
   if (!phone || !/^\d{4,6}$/.test(code)) return { status: 400, json: { success: false, error: 'missing_fields' } };
+
+  // The request side (above) was rate-limited from the start, but the
+  // VERIFY side — the actual guess against a 6-digit code, 1,000,000
+  // possibilities, valid for 10 minutes — had no limit at all. Requesting
+  // an OTP for a victim's real phone (one unwanted SMS, but the attacker
+  // never needs to read it) then flooding this endpoint with guesses was
+  // trivially fast enough to win within the code's lifetime.
+  const rlIp = await checkRateLimit(kvUrl, kvToken, `ratelimit:otpverify_ip:${getClientIp(req)}`, 15, 3600);
+  if (!rlIp.allowed) return { status: 429, json: { success: false, error: 'rate_limited' } };
+  const rlPhone = await checkRateLimit(kvUrl, kvToken, `ratelimit:otpverify_phone:${phone}`, 8, 3600);
+  if (!rlPhone.allowed) return { status: 429, json: { success: false, error: 'rate_limited' } };
 
   const stored = await kvCmd(kvUrl, kvToken, ['GET', `signup_otp:${phone}`]);
   if (!stored || stored !== code) return { status: 401, json: { success: false, error: 'invalid_code' } };
@@ -653,13 +664,48 @@ async function handleCreateBillingCheckoutSession(body, kvUrl, kvToken, req) {
     if (salon.billing.autopay) return { status: 200, json: { success: false, error: 'already_active' } };
 
     // A previous checkout was started but never approved (abandoned tab,
-    // owner clicked "Attiva" twice, etc.) — cancel that stale subscription
-    // before creating a new one, so it can't later be approved out-of-band
-    // (an old email, a duplicate tab) and leave two live subscriptions
-    // charging the same salon. Best-effort: a subscription that's already
-    // expired/gone at PayPal just fails harmlessly here.
+    // owner clicked "Attiva" twice, two tabs/devices racing) — this used to
+    // unconditionally best-effort cancelPaypalSubscription() the stale one
+    // and barrel ahead to create a fresh subscription regardless of whether
+    // that cancel actually succeeded. PayPal's /cancel endpoint only accepts
+    // ACTIVE/SUSPENDED subscriptions — a subscription still awaiting the
+    // owner's approval is APPROVAL_PENDING, which /cancel rejects, so the
+    // "stale" one was silently left alive and approvable while a SECOND
+    // subscription was created and returned as the new checkout link. If
+    // the owner then completed approval on both (plausible — they clicked
+    // "Attiva" twice because the first seemed to hang), two real PayPal
+    // subscriptions went active for one salon: genuine double-billing, with
+    // nothing in TRIMIO ever tracking or cancelling the orphaned one.
+    // Fetching the real current status first and branching on it closes
+    // this: an already-active one is never silently superseded, a still-
+    // pending one is reused (its own approve link handed back again)
+    // instead of creating a competing second subscription, and only a
+    // genuinely dead one (or a real cancel that actually succeeds) clears
+    // the way for a fresh subscription below.
     if (salon.billing.paypalSubscriptionId) {
-      await cancelPaypalSubscription(salon.billing.paypalSubscriptionId, 'Superseded by a new checkout attempt');
+      const staleId = salon.billing.paypalSubscriptionId;
+      const staleSub = await paypalFetch(`/v1/billing/subscriptions/${encodeURIComponent(staleId)}`).catch(() => null);
+      const staleStatus = staleSub && staleSub.status;
+      if (staleStatus === 'ACTIVE') {
+        // Shouldn't normally be reachable (the ACTIVATED webhook would
+        // already have flipped billing.autopay=true, caught above) — but a
+        // truly active subscription must never be superseded by a second
+        // one, which is exactly the double-billing scenario this exists to
+        // prevent.
+        return { status: 200, json: { success: false, error: 'already_active' } };
+      }
+      if (staleStatus === 'APPROVAL_PENDING') {
+        const approveLink = (staleSub.links || []).find(l => l.rel === 'approve');
+        if (approveLink) {
+          return { status: 200, json: { success: true, url: approveLink.href } };
+        }
+        // No approve link for some reason — fall through and create fresh.
+      } else if (staleStatus) {
+        // SUSPENDED or any other cancellable-but-not-pending/active state.
+        await cancelPaypalSubscription(staleId, 'Superseded by a new checkout attempt');
+      }
+      // staleStatus === null (fetch failed / subscription genuinely gone at
+      // PayPal, e.g. a 404) — nothing to reuse or cancel, proceed below.
     }
 
     const fee = feeForWorkerCount(Math.max((salon.workers || []).length, salon.billing.declaredWorkerCount || 0));
@@ -1046,7 +1092,7 @@ export default async function handler(req, res) {
           return res.status(r.status).json(r.json);
         }
         if (newData && newData.action === 'verify_signup_otp') {
-          const r = await handleVerifySignupOtp(newData, kvUrl, kvToken);
+          const r = await handleVerifySignupOtp(newData, kvUrl, kvToken, req);
           return res.status(r.status).json(r.json);
         }
         if (newData && newData.action === 'signup_salon') {
@@ -1259,6 +1305,22 @@ export default async function handler(req, res) {
                 || (session.role === 'barber' && session.salonId === existing.salonId && session.workerId === existing.workerId));
               let merged;
               if (isStaffForThisBooking) {
+                // A cancelled booking's slot lock is released the moment it's
+                // cancelled (below), freeing that exact time for anyone else
+                // to book — so "resurrecting" it later (status sent back to
+                // anything active) must never just merge straight through:
+                // whatever booking may have legitimately taken that slot
+                // since would be silently double-booked, with none of the
+                // new-booking branch's overlap/day-lock/slot-lock checks
+                // ever re-run. No client code path actually does this
+                // (dashAction() only ever moves status forward, to
+                // 'completed' or 'cancelled', never back), so it's rejected
+                // outright rather than re-implementing the full booking-
+                // creation safety pipeline a second time here.
+                if (existing.status === 'cancelled' && nb.status !== 'cancelled') {
+                  conflicts.push({ id: nb.id, error: 'cannot_reactivate_cancelled_booking' });
+                  continue;
+                }
                 // A staff update must never let the caller move a booking
                 // onto a different day/time/barber/salon by resending those
                 // fields differently — there's no "reschedule" feature today
@@ -1267,8 +1329,19 @@ export default async function handler(req, res) {
                 // every safety check (vacation/day-off/break, day-lock,
                 // overlap) that only the NEW-booking branch above actually
                 // runs. Keep the server's own values for anything that
-                // would otherwise silently relocate the booking.
-                merged = { ...existing, ...nb, salonId: existing.salonId, workerId: existing.workerId, dateISO: existing.dateISO, time: existing.time };
+                // would otherwise silently relocate the booking. Likewise
+                // price/dur/service/name/phone are never legitimately
+                // editable through this path either (the client always
+                // resends its own already-synced copy of these — trusting
+                // them instead of the server's record would let a crafted
+                // request quietly deflate a booking's price/duration, e.g.
+                // to under-report revenue or shrink the window the overlap
+                // check thinks it occupies).
+                merged = {
+                  ...existing, ...nb,
+                  salonId: existing.salonId, workerId: existing.workerId, dateISO: existing.dateISO, time: existing.time,
+                  price: existing.price, dur: existing.dur, service: existing.service, name: existing.name, phone: existing.phone
+                };
                 // "Fatto"/completed must only ever apply to an appointment
                 // that has actually happened — js/app.js's
                 // isBookingInFuture() is the only thing stopping this
