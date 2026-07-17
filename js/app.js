@@ -2381,14 +2381,14 @@ function renderSalonModalServices(s) {
   const svcs = s.services || DEFAULT_SERVICES;
   container.innerHTML = svcs.map(svc => `
     <div class="sm-svc-item" style="display:flex; align-items:center; gap:10px; margin-bottom:12px; padding-bottom:8px; border-bottom:1px solid #e4e4e7;">
-      <div style="flex:2; font-size:13px; font-weight:700; color:#18181b;">${svc.name}</div>
+      <div style="flex:2; font-size:13px; font-weight:700; color:#18181b;">${escapeHtml(svc.name)}</div>
       <div style="flex:1;">
         <label style="font-size:10px; color:#71717a; display:block; margin-bottom:2px;">Prezzo (€)</label>
-        <input type="number" class="minput sm-svc-price" data-name="${svc.name}" value="${svc.price}" style="margin-bottom:0; padding:6px 8px; font-size:12px; border-radius:6px; border:1px solid #ccc;">
+        <input type="number" class="minput sm-svc-price" data-name="${escapeHtml(svc.name)}" value="${escapeHtml(String(svc.price))}" style="margin-bottom:0; padding:6px 8px; font-size:12px; border-radius:6px; border:1px solid #ccc;">
       </div>
       <div style="flex:1;">
         <label style="font-size:10px; color:#71717a; display:block; margin-bottom:2px;">Durata</label>
-        <input type="text" class="minput sm-svc-dur" data-name="${svc.name}" value="${svc.dur}" style="margin-bottom:0; padding:6px 8px; font-size:12px; border-radius:6px; border:1px solid #ccc;">
+        <input type="text" class="minput sm-svc-dur" data-name="${escapeHtml(svc.name)}" value="${escapeHtml(String(svc.dur))}" style="margin-bottom:0; padding:6px 8px; font-size:12px; border-radius:6px; border:1px solid #ccc;">
       </div>
     </div>
   `).join('');

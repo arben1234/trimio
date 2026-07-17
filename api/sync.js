@@ -9,7 +9,7 @@ import {
 } from '../lib/kv.js';
 import { sendCustomerText, toE164, twilioConfigured, isValidItalianPhone } from '../lib/sms.js';
 import { sendEmail, escapeHtml } from '../lib/email.js';
-import { handleLogin, handleChangePassword, getVerifiedSession, getClientIp, verifyAdminPassword } from '../lib/auth.js';
+import { handleLogin, handleChangePassword, getVerifiedSession, getClientIp, verifyAdminPassword, hashPassword, isHashedPassword } from '../lib/auth.js';
 import { isQuietHours, romeYearMonth, romeNow } from '../lib/time.js';
 import { feeForWorkerCount } from '../lib/billing.js';
 import { paypalFetch, paypalConfigured, cancelPaypalSubscription } from '../lib/paypal.js';
@@ -362,7 +362,7 @@ async function handleSignupSalon(body, kvUrl, kvToken, req) {
       closedDays: [], bookingDays: 30,
       services: DEFAULT_SERVICES.map(s => ({ ...s })),
       workers: [],
-      ownerUsername: username, ownerPassword: password,
+      ownerUsername: username, ownerPassword: hashPassword(password),
       ownerName, ownerPhone, email,
       inactive: true,
       billing: {
@@ -1021,7 +1021,7 @@ export default async function handler(req, res) {
         // — Vercel's Hobby plan caps a deployment at 12 functions). They're
         // fully separate from the booking/salon sync logic below.
         if (newData && newData.action === 'login') {
-          const r = await handleLogin(newData, kvUrl, kvToken);
+          const r = await handleLogin(newData, kvUrl, kvToken, req);
           return res.status(r.status).json(r.json);
         }
         if (newData && newData.action === 'change_password') {
@@ -1474,6 +1474,17 @@ export default async function handler(req, res) {
                   console.warn('[SYNC] Rejected invalid new salon payload for', incoming.id);
                   continue;
                 }
+                // An admin creating a brand-new salon directly (as opposed to
+                // self-signup, which already hashes at handleSignupSalon) is
+                // the only other place a fresh ownerPassword/worker password
+                // is ever written — hash both here so nothing plaintext ever
+                // reaches salons_db.
+                if (!isHashedPassword(incoming.ownerPassword)) incoming.ownerPassword = hashPassword(incoming.ownerPassword);
+                if (Array.isArray(incoming.workers)) {
+                  incoming.workers = incoming.workers.map(w =>
+                    (w && typeof w.password === 'string' && !isHashedPassword(w.password))
+                      ? { ...w, password: hashPassword(w.password) } : w);
+                }
               }
               if (existing) {
                 // Credentials for anything that already exists must never be
@@ -1535,7 +1546,17 @@ export default async function handler(req, res) {
                 if (Array.isArray(incoming.workers)) {
                   incoming.workers = incoming.workers.map(w => {
                     const ew = existingWorkersById.get(w.id);
-                    return ew ? { ...w, password: ew.password, reviews: ew.reviews || [] } : w;
+                    // An EXISTING worker's password is always restored from
+                    // the stored record (real changes only go through
+                    // handleChangePassword) — but a genuinely NEW worker
+                    // being added here carries whatever password the client
+                    // just set for them, which must be hashed before it's
+                    // ever persisted.
+                    if (ew) return { ...w, password: ew.password, reviews: ew.reviews || [] };
+                    if (w && typeof w.password === 'string' && !isHashedPassword(w.password)) {
+                      return { ...w, password: hashPassword(w.password) };
+                    }
+                    return w;
                   });
                   // Only admin may actually remove a worker — an owner's
                   // payload that omits an existing worker (client bug, stale

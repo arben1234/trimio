@@ -995,6 +995,81 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
   }
 });
 
+section('lib/auth.js — passwords are hashed at rest, never plaintext (stored-credential-leak regression)');
+await withFakeKv(makeFakeRedis(), async (fake) => {
+  const prevSecret = process.env.SESSION_SECRET;
+  process.env.SESSION_SECRET = 'test-only-secret-for-session-tokens';
+  try {
+    const handler = await freshImport('api/sync.js');
+
+    // A brand-new self-signup's password must be a scrypt hash on disk, never
+    // the raw string a KV/backup compromise could read directly.
+    const rSignup = mkRes();
+    await handler({ method: 'POST', body: {
+      action: 'signup_salon', salonName: 'Test Salon HashCheck', city: 'Roma', address: 'Via Roma 12',
+      declaredWorkerCount: '2', username: 'hashtestowner', password: 'plainTextSecret1',
+      ownerName: 'Mario Rossi', ownerPhone: '+39 333 123 4567', phone: '+39 06 123 4567', email: 'owner@test.it',
+      contractAccepted: true, contractSignedName: 'Mario Rossi'
+    } }, rSignup.obj);
+    ok(rSignup.status === 200 && rSignup.body.success === true, 'signup_salon succeeds');
+    const storedSalons = JSON.parse(fake.strings.get('salons_db'));
+    const newSalon = storedSalons.find(s => s.ownerUsername === 'hashtestowner');
+    ok(newSalon, 'new salon was actually persisted');
+    ok(newSalon.ownerPassword !== 'plainTextSecret1', 'the raw password is never stored verbatim');
+    ok(newSalon.ownerPassword.startsWith('scrypt$'), 'the stored password is a scrypt hash');
+
+    // A fresh self-signup salon is created `inactive:true` pending admin
+    // approval — activate it here so the login check below tests hashing,
+    // not the separate (already-tested-elsewhere) salon_inactive gate.
+    newSalon.inactive = false;
+    fake.strings.set('salons_db', JSON.stringify(storedSalons));
+
+    // Login with the real password still works against the hash.
+    const rLogin = mkRes();
+    await handler({ method: 'POST', body: { action: 'login', role: 'owner', username: 'hashtestowner', password: 'plainTextSecret1' } }, rLogin.obj);
+    eq(rLogin.body.success, true, 'login succeeds against a hashed password');
+
+    const rWrong = mkRes();
+    await handler({ method: 'POST', body: { action: 'login', role: 'owner', username: 'hashtestowner', password: 'wrongGuess' } }, rWrong.obj);
+    eq(rWrong.body.success, false, 'login rejects a wrong password against a hashed one');
+
+    // A legacy account that predates hashing (raw plaintext still in KV)
+    // must keep working, AND get opportunistically upgraded to a hash on
+    // its first successful login — no disruptive one-time migration needed.
+    fake.strings.set('salons_db', JSON.stringify([
+      ...storedSalons,
+      { id: 'legacySalon', slug: 'legacy-salon', name: 'Legacy Salon', ownerUsername: 'legacyowner', ownerPassword: 'oldPlainPw1', workers: [] }
+    ]));
+    const rLegacyLogin = mkRes();
+    await handler({ method: 'POST', body: { action: 'login', role: 'owner', username: 'legacyowner', password: 'oldPlainPw1' } }, rLegacyLogin.obj);
+    eq(rLegacyLogin.body.success, true, 'a legacy plaintext-password account can still log in');
+    const afterMigration = JSON.parse(fake.strings.get('salons_db')).find(s => s.id === 'legacySalon');
+    ok(afterMigration.ownerPassword.startsWith('scrypt$'), 'the legacy account is opportunistically upgraded to a hash on successful login');
+    ok(afterMigration.ownerPassword !== 'oldPlainPw1', 'the plaintext value no longer exists in storage after migration');
+
+    const rLegacyReLogin = mkRes();
+    await handler({ method: 'POST', body: { action: 'login', role: 'owner', username: 'legacyowner', password: 'oldPlainPw1' } }, rLegacyReLogin.obj);
+    eq(rLegacyReLogin.body.success, true, 'login still succeeds with the same password after migration (now verified against the hash)');
+  } finally {
+    restoreEnv('SESSION_SECRET', prevSecret);
+  }
+});
+
+section('lib/auth.js — login is rate-limited (previously the one credential check with no limit at all)');
+await withFakeKv(makeFakeRedis(), async (fake) => {
+  fake.strings.set('admin_db', JSON.stringify({ username: 'admin', password: 'realSecret1' }));
+  const handler = await freshImport('api/sync.js');
+
+  for (let i = 1; i <= 15; i++) {
+    const r = mkRes();
+    await handler({ method: 'POST', body: { action: 'login', role: 'admin', username: 'admin', password: 'wrongGuess' } }, r.obj);
+    eq(r.status, 401, `login attempt ${i}/15 with a wrong password is rejected normally (within budget)`);
+  }
+  const rBlocked = mkRes();
+  await handler({ method: 'POST', body: { action: 'login', role: 'admin', username: 'admin', password: 'realSecret1' } }, rBlocked.obj);
+  eq(rBlocked.status, 429, 'the 16th login attempt is rate-limited even with the CORRECT password — brute-force protection actually engages');
+});
+
 section('api/sync.js — a new booking against an inactive/unknown salon is rejected server-side');
 await withFakeKv(makeFakeRedis(), async () => {
   // Bypassing the client UI's inactive-salon alert used to be possible with
