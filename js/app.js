@@ -1807,7 +1807,7 @@ function buildChips(el,salon,onPick){
    LIVELLO 4 — CLIENTE
 ================================================================ */
 let custStep=0;
-const custData={barberId:null,barberName:null,dateISO:null,dateLabel:null,time:null,service:null,price:null,name:null,phone:null};
+const custData={barberId:null,barberName:null,dateISO:null,dateLabel:null,time:null,service:null,price:null,name:null,phone:null,bookingId:null,bookingCreatedAt:null};
 let custSalon=null;
 let lastBookingId=null;
 
@@ -2229,12 +2229,34 @@ async function doSubmit(){
       showAltModal(custData.barberName,custData.time,free);
       return;
     }
+    // Reused across retries of the SAME attempt (a network drop where the
+    // POST actually succeeded server-side but the response never arrived)
+    // instead of generating a fresh id every call — a retry with a brand
+    // new id looked, from the server's perspective, like a completely
+    // different customer trying to grab a slot that was "already taken",
+    // popping the confusing "choose another barber" modal on top of a
+    // booking that had actually gone through. Resubmitting the identical
+    // booking under its ORIGINAL id instead lets the server's own no-op
+    // dedup (existing booking, byte-identical payload) recognize it as the
+    // same attempt and return success cleanly. custData.bookingId is only
+    // ever cleared when a genuinely NEW booking flow starts (custStep
+    // resets to 0), not between retries of this one.
+    if(!custData.bookingId)custData.bookingId='bk'+Date.now()+Math.random().toString(36).slice(2,6);
+    // Frozen alongside the id (not regenerated per retry) so a resubmission
+    // of an unchanged attempt is genuinely byte-identical to what may
+    // already be stored server-side — that's what lets api/sync.js's own
+    // no-op dedup (existing booking, identical payload) recognize a retry
+    // as the same attempt instead of a distinct, conflicting one. Also the
+    // more semantically correct value anyway: the booking's real creation
+    // moment is the customer's first attempt, not whichever retry happened
+    // to get a response back.
+    if(!custData.bookingCreatedAt)custData.bookingCreatedAt=new Date().toISOString();
     const bk={
-      id:'bk'+Date.now()+Math.random().toString(36).slice(2,6),
+      id:custData.bookingId,
       salonId:custSalon.id,workerId:custData.barberId,workerName:custData.barberName,
       name:custData.name.trim(),phone:(custData.phone||'').trim(),dateISO:custData.dateISO,dateLabel:custData.dateLabel,
       time:custData.time,service:custData.service,price:custData.price,dur:durMin,
-      status:'confirmed',source:'online',createdAt:new Date().toISOString()
+      status:'confirmed',source:'online',createdAt:custData.bookingCreatedAt
     };
     STATE.bookings.push(bk);
     const r=await saveState();
@@ -2937,7 +2959,15 @@ function initDash(){
     renderHpPhotosList();
   }
 
-  const firstSec=navItems()[0].sec;
+  // Restore whatever section was last active for this role (if it still
+  // exists in this role's nav — a stale value from before a role/plan
+  // change must never crash showSec), falling back to the first nav item.
+  let restoredSec=null;
+  if(canStore&&r){
+    try{restoredSec=localStorage.getItem('trimio_last_sec_'+r);}catch(e){}
+  }
+  const validSecs=navItems().map(it=>it.sec);
+  const firstSec=(restoredSec&&validSecs.includes(restoredSec))?restoredSec:validSecs[0];
   showSec(firstSec);
 
   renderPushNotifBanner();
@@ -3049,7 +3079,25 @@ function buildNav(){
 }
 
 function showSec(sec){
+  // Defense in depth: unlike showView() (which enforces its own role
+  // invariant internally), showSec() used to render whatever `sec` it was
+  // handed with no check at all — currently unreachable in practice (every
+  // real call site is already pre-gated: buildNav()'s own buttons only
+  // wire the current role's own navItems(), and the one hash-driven path
+  // re-checks SESSION.role==='admin' before ever calling this), but a
+  // future new call site — or a bug in one of those existing gates —
+  // would otherwise have nothing else stopping a section from the wrong
+  // role rendering. Falls back to the role's own first section instead of
+  // silently no-op'ing on an invalid one.
+  const allowedSecs=navItems().map(it=>it.sec);
+  if(!allowedSecs.includes(sec))sec=allowedSecs[0];
   curSec=sec;
+  // Persisted per-role so a reload/reopen returns to whatever section
+  // (Statistiche, Calendario...) the user was actually on, instead of
+  // initDash() always defaulting back to the role's first nav item.
+  if(canStore&&SESSION&&SESSION.role){
+    try{localStorage.setItem('trimio_last_sec_'+SESSION.role,sec);}catch(e){}
+  }
   ['secOggi','secCalendario','secProssimi','secClienti','secServizi','secDipendenti','secStats','secSaloni','secUtenti','secRecensioni','secPending','secFatturazione']
     .forEach(id=>$(id).classList.remove('on'));
   const map={oggi:'secOggi',calendario:'secCalendario',prossimi:'secProssimi',clienti:'secClienti',
@@ -4943,8 +4991,11 @@ function showBarberReviews(workerId) {
   $('reviewsModalH').textContent = `Recensioni di ${w.name}`;
   clearErr('revErr');
   
-  // Reset form inputs
-  $('revAuthor').value = '';
+  // Reset form inputs — prefill name/phone from the customer's own
+  // in-progress/just-completed booking data when available, since a review
+  // now requires proving a real booking with this worker anyway.
+  $('revAuthor').value = custData.name || '';
+  $('revPhone').value = custData.phone || '';
   $('revComment').value = '';
   selectReviewStar(5);
   
@@ -4973,10 +5024,15 @@ function showBarberReviews(workerId) {
 
 async function submitBarberReview() {
   const author = $('revAuthor').value.trim();
+  const phone = $('revPhone').value.trim();
   const comment = $('revComment').value.trim();
 
   if (author.length < 2) {
     showErr('revErr', 'Inserisci il tuo nome (almeno 2 caratteri)');
+    return;
+  }
+  if (!phone) {
+    showErr('revErr', 'Inserisci il numero di telefono usato per la prenotazione');
     return;
   }
   if (comment.length < 5) {
@@ -4990,7 +5046,11 @@ async function submitBarberReview() {
   // Reviews are written server-side only now (action=submit_review) — never
   // via the generic salons[] save, which any anonymous caller could
   // otherwise use to write anything, and which would race with another
-  // customer's review submitted around the same time.
+  // customer's review submitted around the same time. Now also requires
+  // proof of a real booking with this worker (phone match, same bar the
+  // customer self-cancel path already holds callers to) — reviews used to
+  // be postable by anyone who merely knew a public salon/worker id, with
+  // no proof they were ever actually a customer.
   let resData;
   try {
     const resp = await fetch('/api/sync', {
@@ -5000,7 +5060,7 @@ async function submitBarberReview() {
         action: 'submit_review',
         salonId: custSalon.id,
         workerId: activeReviewWorkerId,
-        author, comment,
+        author, phone, comment,
         rating: activeReviewStarVal
       })
     });
@@ -5009,7 +5069,9 @@ async function submitBarberReview() {
     return showErr('revErr', 'Errore di connessione al server.');
   }
   if (!resData.success) {
-    return showErr('revErr', resData.error === 'rate_limited' ? 'Troppe recensioni inviate, riprova più tardi.' : 'Errore durante l\'invio della recensione.');
+    if (resData.error === 'rate_limited') return showErr('revErr', 'Troppe recensioni inviate, riprova più tardi.');
+    if (resData.error === 'no_matching_booking') return showErr('revErr', 'Non troviamo una prenotazione con questo numero di telefono per questo professionista. Puoi lasciare una recensione solo dopo aver prenotato.');
+    return showErr('revErr', 'Errore durante l\'invio della recensione.');
   }
 
   // Optimistic local update so the list/grid reflect it immediately instead

@@ -3,8 +3,9 @@ import { getAllBookings, checkRateLimit, acquirePushSubsLock, releasePushSubsLoc
 import { toE164 } from '../lib/sms.js';
 
 export default async function handler(req, res) {
-  // CORS
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  // CORS. Allow-Credentials:true + a wildcard origin is a real (if inert)
+  // misconfiguration — this app never uses cookies for auth (Bearer-token
+  // only), so it served no purpose. See api/sync.js's handler for detail.
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,POST');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');

@@ -97,7 +97,7 @@ if (VAPID_PRIVATE_KEY) {
 // array, and it silently last-write-wins raced with any other concurrent
 // salon edit. This is now the only way a review is ever written.
 async function handleSubmitReview(body, kvUrl, kvToken, req) {
-  const { salonId, workerId, author, comment, rating } = body;
+  const { salonId, workerId, author, phone, comment, rating } = body;
   if (!salonId || !workerId) return { status: 400, json: { success: false, error: 'missing_fields' } };
 
   const rl = await checkRateLimit(kvUrl, kvToken, `ratelimit:review:${getClientIp(req)}`, 5, 3600);
@@ -111,6 +111,18 @@ async function handleSubmitReview(body, kvUrl, kvToken, req) {
   if (!Number.isInteger(ratingNum) || ratingNum < 1 || ratingNum > 5) {
     return { status: 400, json: { success: false, error: 'invalid_rating' } };
   }
+  // A review used to need nothing more than a public salon/worker id (both
+  // visible to any site visitor) — anyone could post fabricated reviews for
+  // any salon, with no proof they were ever actually a customer. Now
+  // requires the same proof-of-patronage the customer self-cancel path
+  // already holds callers to: a real booking with THIS worker, at THIS
+  // salon, under a matching phone number.
+  const reviewerPhone = toE164(phone);
+  if (!reviewerPhone) return { status: 400, json: { success: false, error: 'invalid_phone' } };
+  const bookingsMap = await getAllBookings(kvUrl, kvToken);
+  const hasRealBooking = Array.from(bookingsMap.values()).some(b =>
+    b.salonId === salonId && b.workerId === workerId && b.phone && toE164(b.phone) === reviewerPhone);
+  if (!hasRealBooking) return { status: 403, json: { success: false, error: 'no_matching_booking' } };
 
   const salons = await getSalonsDb(kvUrl, kvToken);
   const salon = salons.find(s => s.id === salonId);
@@ -416,6 +428,12 @@ async function handleSignupSalon(body, kvUrl, kvToken, req) {
 // push-subscription lookup sendPushNotifications() uses for new bookings,
 // just always targeted at admin-role subscriptions.
 async function notifyAdminsOfNewSignup(salonName, kvUrl, kvToken) {
+  // Every other push sender in this file respects Italy quiet hours
+  // (8:00-20:00) — this one didn't, so a self-signup submitted at 3am woke
+  // every admin device immediately. A new pending salon isn't so urgent it
+  // can't wait until morning; admin still sees it in "Nuove Richieste" the
+  // moment they next open the dashboard either way.
+  if (isQuietHours()) return;
   if (!VAPID_PRIVATE_KEY) return;
   try {
     const subResp = await fetch(`${kvUrl}/get/push_subscriptions`, { headers: { Authorization: `Bearer ${kvToken}` } });
@@ -944,8 +962,14 @@ function overlapsExisting(nb, bookingsMap, salon) {
 }
 
 export default async function handler(req, res) {
-  // CORS configuration
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  // CORS configuration. Access-Control-Allow-Credentials:true combined with
+  // a wildcard origin is a real (if currently inert) misconfiguration — the
+  // spec/browsers actually refuse to expose a credentialed response to a
+  // wildcard-origin request, and this app never uses cookies for auth
+  // anyway (every privileged action is Bearer-token-based, read from
+  // localStorage and attached manually), so the header served no purpose.
+  // Removed as defense in depth against it ever mattering if a cookie-based
+  // mechanism is added later.
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
   res.setHeader(
@@ -1597,9 +1621,11 @@ export default async function handler(req, res) {
                 // reaches salons_db.
                 if (!isHashedPassword(incoming.ownerPassword)) incoming.ownerPassword = hashPassword(incoming.ownerPassword);
                 if (Array.isArray(incoming.workers)) {
-                  incoming.workers = incoming.workers.map(w =>
-                    (w && typeof w.password === 'string' && !isHashedPassword(w.password))
-                      ? { ...w, password: hashPassword(w.password) } : w);
+                  incoming.workers = incoming.workers
+                    .filter(w => !(w && typeof w.password === 'string' && w.password.length < 6))
+                    .map(w =>
+                      (w && typeof w.password === 'string' && !isHashedPassword(w.password))
+                        ? { ...w, password: hashPassword(w.password) } : w);
                 }
               }
               if (existing) {
@@ -1690,13 +1716,23 @@ export default async function handler(req, res) {
                     // handleChangePassword) — but a genuinely NEW worker
                     // being added here carries whatever password the client
                     // just set for them, which must be hashed before it's
-                    // ever persisted.
+                    // ever persisted. A brand-new SALON's owner password
+                    // (isValidNewSalon) and a password CHANGE (lib/auth.js)
+                    // both already enforce a real minimum length — this was
+                    // the one remaining password-setting path with no floor
+                    // at all, silently accepting an empty/1-character
+                    // worker password from a direct API call bypassing the
+                    // (also unenforced) client UI check.
                     if (ew) return { ...w, password: ew.password, reviews: ew.reviews || [] };
+                    if (w && typeof w.password === 'string' && w.password.length < 6) {
+                      console.warn('[SYNC] Dropping new worker with too-short password:', w.id);
+                      return null;
+                    }
                     if (w && typeof w.password === 'string' && !isHashedPassword(w.password)) {
                       return { ...w, password: hashPassword(w.password) };
                     }
                     return w;
-                  });
+                  }).filter(Boolean);
                   // Only admin may actually remove a worker — an owner's
                   // payload that omits an existing worker (client bug, stale
                   // local copy, or a tampered request) must not silently

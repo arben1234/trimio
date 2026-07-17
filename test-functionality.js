@@ -1222,6 +1222,55 @@ await withFakeKv(makeFakeRedis(), async () => {
   eq(r2.body.bookings.filter(b => b.id === 'pending-1').length, 0, 'the rejected booking is never actually persisted');
 });
 
+section('api/sync.js — HARDENING: a review requires proof of a real booking with that worker (fake-review regression)');
+await withFakeKv(makeFakeRedis(), async (fake) => {
+  fake.strings.set('salons_db', JSON.stringify([{ id: 'salonR', name: 'Salon R', workers: [{ id: 'wR', name: 'Worker R', reviews: [] }] }]));
+  fake.hashes.set('bookings', new Map([
+    ['bk-real-r', JSON.stringify({ id: 'bk-real-r', salonId: 'salonR', workerId: 'wR', dateISO: '2030-01-01', time: '10:00', status: 'confirmed', phone: '3339990000' })]
+  ]));
+  const handler = await freshImport('api/sync.js');
+
+  const rNoBooking = mkRes();
+  await handler({ method: 'POST', body: { action: 'submit_review', salonId: 'salonR', workerId: 'wR', author: 'Stranger', phone: '0009998888', comment: 'Fake review, never booked', rating: 5 } }, rNoBooking.obj);
+  eq(rNoBooking.body.success, false, 'a review with no matching booking phone is rejected');
+  eq(rNoBooking.body.error, 'no_matching_booking', 'the rejection reason is specifically no_matching_booking');
+
+  const rReal = mkRes();
+  await handler({ method: 'POST', body: { action: 'submit_review', salonId: 'salonR', workerId: 'wR', author: 'Real Customer', phone: '333 999 0000', comment: 'Genuinely booked and had a great cut', rating: 5 } }, rReal.obj);
+  eq(rReal.body.success, true, "the real customer's phone (matching their actual booking) is accepted");
+
+  const salonsAfter = JSON.parse(fake.strings.get('salons_db'));
+  const worker = salonsAfter.find(s => s.id === 'salonR').workers.find(w => w.id === 'wR');
+  eq(worker.reviews.length, 1, 'exactly the one legitimate review was persisted');
+});
+
+section('api/sync.js — HARDENING: a new worker cannot be added with a too-short password');
+await withFakeKv(makeFakeRedis(), async (fake) => {
+  const prevSecret = process.env.SESSION_SECRET;
+  process.env.SESSION_SECRET = 'test-only-secret-for-session-tokens';
+  try {
+    fake.strings.set('salons_db', JSON.stringify([{ id: 'salonW', name: 'Salon W', slug: 'SALON_W', ownerUsername: 'ownerW', ownerPassword: 'realOwnerPw1', workers: [] }]));
+    const handler = await freshImport('api/sync.js');
+    const ownerToken = issueSessionToken({ role: 'owner', salonId: 'salonW' });
+
+    const weakWorker = { id: 'newWorker', name: 'New Barber', username: 'newbarber', password: '123' };
+    const r1 = mkRes();
+    await handler({ method: 'POST', headers: { authorization: `Bearer ${ownerToken}` }, body: { bookings: [], salons: [{ id: 'salonW', name: 'Salon W', slug: 'SALON_W', workers: [weakWorker] }] } }, r1.obj);
+    const afterWeak = JSON.parse(fake.strings.get('salons_db')).find(s => s.id === 'salonW');
+    ok(!(afterWeak.workers || []).some(w => w.id === 'newWorker'), 'a new worker with a too-short password is dropped, never persisted');
+
+    const strongWorker = { id: 'newWorker2', name: 'New Barber 2', username: 'newbarber2', password: 'realStrongPw1' };
+    const r2 = mkRes();
+    await handler({ method: 'POST', headers: { authorization: `Bearer ${ownerToken}` }, body: { bookings: [], salons: [{ id: 'salonW', name: 'Salon W', slug: 'SALON_W', workers: [strongWorker] }] } }, r2.obj);
+    const afterStrong = JSON.parse(fake.strings.get('salons_db')).find(s => s.id === 'salonW');
+    const added = (afterStrong.workers || []).find(w => w.id === 'newWorker2');
+    ok(added, 'a new worker with a valid-length password is persisted normally');
+    ok(added.password.startsWith('scrypt$'), "the new worker's password is hashed, not stored in plaintext");
+  } finally {
+    restoreEnv('SESSION_SECRET', prevSecret);
+  }
+});
+
 section('api/sync.js — HARDENING: a booking cannot pair a real salon with a workerId belonging to a DIFFERENT salon (cross-tenant push-spoofing regression)');
 await withFakeKv(makeFakeRedis(), async (fake) => {
   fake.strings.set('salons_db', JSON.stringify([

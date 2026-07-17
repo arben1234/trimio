@@ -340,6 +340,15 @@ export default async function handler(req, res) {
   // second cron tick, a manual curl, the health-check being polled) would
   // re-push the SAME already-known problem to every admin device every
   // single time — the endpoint itself has no other rate limit.
+  //
+  // Deliberately NOT gated by isQuietHours() like every customer/staff-
+  // facing push in api/sync.js is — this cron only ever runs once, at
+  // ~7:30 Italy time (before the 8:00 quiet-hours boundary), specifically
+  // so admin sees infra/billing problems (KV down, backup failed, payment
+  // issues) at the start of the day rather than losing hours to them
+  // silently. Gating this on quiet hours would suppress it every single
+  // run, since it never runs outside that window — an intentional
+  // exception, not an oversight.
   let notified = 0;
   let alreadyNotifiedToday = false;
   if (problems.length && VAPID_PRIVATE_KEY) {
