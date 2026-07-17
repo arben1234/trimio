@@ -10,6 +10,8 @@ import fs from 'fs';
 import path from 'path';
 import vm from 'vm';
 import { fileURLToPath, pathToFileURL } from 'url';
+import { isValidItalianPhone as isValidItalianPhoneServer } from './lib/sms.js';
+import { issueSessionToken } from './lib/auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -58,7 +60,9 @@ function makeElement(id) {
     querySelector: () => makeElement('__anon__'),
     querySelectorAll: () => [],
     click: () => {},
-    remove: () => {}
+    remove: () => {},
+    scrollIntoView: () => {},
+    focus: () => {}
   };
   return el;
 }
@@ -88,7 +92,9 @@ const sandbox = {
     storage: undefined,
     AudioContext: undefined,
     addEventListener: () => {},
-    atob: (s) => Buffer.from(s, 'base64').toString('binary')
+    atob: (s) => Buffer.from(s, 'base64').toString('binary'),
+    navigator: { standalone: false },
+    matchMedia: undefined
   },
   document: {
     getElementById,
@@ -190,6 +196,20 @@ ok(!X.isValidItalianPhone(''), 'isValidItalianPhone() rejects an empty string');
 ok(!X.isValidItalianPhone('abc'), 'isValidItalianPhone() rejects non-numeric input');
 ok(!X.isValidItalianPhone('123'), 'isValidItalianPhone() rejects an implausibly short number');
 
+// lib/sms.js's server-side isValidItalianPhone() mirrors the client check
+// above, but is the one actually gating what gets PERSISTED (signup_salon /
+// admin-created salon phone fields). A prior audit found it validated only
+// the digits toE164() extracts, not the raw string itself — a payload like
+// `+393331234567"><img src=x onerror=...>` normalized to a valid-looking
+// number while the malicious raw string still got stored/rendered
+// unescaped-adjacent. This is the regression test for that fix: the raw
+// input must be restricted to characters a real phone number would use.
+section('lib/sms.js — isValidItalianPhone() rejects unsafe raw characters (stored-XSS regression)');
+ok(isValidItalianPhoneServer('+39 333 123 4567'), 'server: accepts a normal formatted Italian mobile number');
+ok(!isValidItalianPhoneServer('+393331234567"><img src=x onerror=alert(1)>'), 'server: rejects real-looking digits smuggled inside an HTML-injection payload');
+ok(!isValidItalianPhoneServer('<script>3331234567</script>'), 'server: rejects a script tag wrapped around real digits');
+ok(!isValidItalianPhoneServer(123), 'server: rejects a non-string input outright');
+
 /* ================================================================
    MONTHLY BILLING FEE TIERS (self-signup salons)
 ================================================================ */
@@ -244,21 +264,24 @@ section('Customer booking flow validation (validateCust)');
   X.custData.barberId = 'w1';
   ok(X.validateCust() === true, 'step 0 passes once barber selected');
 
+  // Step order per validateCust() itself: 0=barber, 1=service, 2=date/time, 3=contact.
   custStepScript(1);
-  ok(X.validateCust() === false, 'step 1 rejected without date/time');
-  X.custData.dateISO = '2099-01-01'; X.custData.time = '10:00';
-  ok(X.validateCust() === true, 'step 1 passes with future date + time');
+  ok(X.validateCust() === false, 'step 1 rejected without a service');
+  X.custData.service = 'Taglio';
+  ok(X.validateCust() === true, 'step 1 passes once service selected');
 
   custStepScript(2);
-  ok(X.validateCust() === false, 'step 2 rejected without a service');
-  X.custData.service = 'Taglio';
-  ok(X.validateCust() === true, 'step 2 passes once service selected');
+  ok(X.validateCust() === false, 'step 2 rejected without date/time');
+  X.custData.dateISO = '2099-01-01'; X.custData.time = '10:00';
+  ok(X.validateCust() === true, 'step 2 passes with future date + time');
 
   custStepScript(3);
   X.custData.name = 'A';
   ok(X.validateCust() === false, 'step 3 rejected for a 1-character name');
   X.custData.name = 'Mario Rossi';
-  ok(X.validateCust() === true, 'step 3 passes with a valid name');
+  ok(X.validateCust() === false, 'step 3 still rejected with no phone number');
+  X.custData.phone = '3331234567';
+  ok(X.validateCust() === true, 'step 3 passes with a valid name and phone');
 }
 
 /* ================================================================
@@ -337,6 +360,44 @@ section('doSubmit() booking creation + conflict detection');
 ================================================================ */
 section('doLogin() across the 4 access levels');
 {
+  // Login moved from a synchronous local-STATE credential check to an async
+  // POST /api/sync (action:'login'), server-verified. Mirrors lib/auth.js's
+  // handleLogin matching rules against X.STATE
+  // (the same default salons/admin embedded in app.js) purely to drive
+  // doLogin()'s own client-side routing/gating logic under test here — the
+  // server-side credential matching itself is exercised separately by the
+  // KV-backed api/sync.js "login" tests further down.
+  const loginEchoFetch = async (url, opts) => {
+    // onLoginSuccess() also fires a GET refresh right after login (no
+    // request body) — only action:'login' POSTs are actually handled here.
+    const body = opts && opts.body ? JSON.parse(opts.body) : null;
+    if (!body || body.action !== 'login') return { ok: true, json: async () => ({ success: false }) };
+    const { role, salonId, username, password } = body;
+    if (role === 'admin') {
+      if (username === X.STATE.admin.username && password === X.STATE.admin.password) {
+        return { ok: true, json: async () => ({ success: true, role: 'admin', sessionToken: 'test-admin-token' }) };
+      }
+      return { ok: true, json: async () => ({ success: false, error: 'invalid_credentials' }) };
+    }
+    if (role === 'owner') {
+      const salon = salonId
+        ? X.STATE.salons.find(s => s.id === salonId)
+        : X.STATE.salons.find(s => s.ownerUsername === username && s.ownerPassword === password);
+      if (salon && username === salon.ownerUsername && password === salon.ownerPassword) {
+        return { ok: true, json: async () => ({ success: true, role: 'owner', salonId: salon.id, salonName: salon.name, sessionToken: 'test-owner-token' }) };
+      }
+      return { ok: true, json: async () => ({ success: false, error: 'invalid_credentials' }) };
+    }
+    if (role === 'barber') {
+      const salon = X.STATE.salons.find(s => s.id === salonId);
+      const w = salon && (salon.workers || []).find(x => x.username === username && x.password === password);
+      if (w) return { ok: true, json: async () => ({ success: true, role: 'barber', salonId: salon.id, workerId: w.id, name: w.name, sessionToken: 'test-barber-token' }) };
+      return { ok: true, json: async () => ({ success: false, error: 'invalid_credentials' }) };
+    }
+    return { ok: true, json: async () => ({ success: false, error: 'invalid_role' }) };
+  };
+  context.fetch = loginEchoFetch;
+
   const setLogin = (usr, pwd) => new vm.Script(
     `document.getElementById('lusr').value = ${JSON.stringify(usr)}; document.getElementById('lpw').value = ${JSON.stringify(pwd)};`,
     { filename: 'set-login.js' }
@@ -353,39 +414,39 @@ section('doLogin() across the 4 access levels');
   // Generic entry point (no salon context, e.g. the bare root URL) — admin only.
   setLoginSalonContext(null);
   setLogin('admin', 'admin123');
-  X.doLogin();
+  await X.doLogin();
   eq(X.getSession().role, 'admin', 'Level 1 — admin/admin123 authenticates as admin from the generic entry point');
 
   const salon0 = X.STATE.salons[0];
   setLoginSalonContext(null);
   setLogin(salon0.ownerUsername, salon0.ownerPassword);
-  X.doLogin();
+  await X.doLogin();
   let sess = X.getSession();
   ok(sess.role === 'admin', 'owner credentials are REJECTED from the generic entry point (still admin session from before)');
 
   const worker0 = salon0.workers[0];
   setLoginSalonContext(null);
   setLogin(worker0.username, worker0.password);
-  X.doLogin();
+  await X.doLogin();
   sess = X.getSession();
   ok(sess.role === 'admin', 'barber credentials are REJECTED from the generic entry point (still admin session from before)');
 
   // Salon-specific entry point (reached via that salon's own page) — owner/barber allowed.
   setLoginSalonContext(salon0.id);
   setLogin(salon0.ownerUsername, salon0.ownerPassword);
-  X.doLogin();
+  await X.doLogin();
   sess = X.getSession();
   ok(sess.role === 'owner' && sess.salonId === salon0.id, 'Level 2 — owner credentials authenticate when scoped to their own salon');
 
   setLoginSalonContext(salon0.id);
   setLogin(worker0.username, worker0.password);
-  X.doLogin();
+  await X.doLogin();
   sess = X.getSession();
   ok(sess.role === 'barber' && sess.workerId === worker0.id, 'Level 3 — barber credentials authenticate when scoped to their own salon');
 
   setLoginSalonContext(salon0.id);
   setLogin('nobody', 'wrongpass');
-  X.doLogin();
+  await X.doLogin();
   sess = X.getSession();
   ok(sess.role === 'barber', 'invalid credentials leave SESSION untouched (still previous barber session)');
 
@@ -394,7 +455,7 @@ section('doLogin() across the 4 access levels');
   setLoginSalonContext(salon0.id);
   setLoginRoleContext(null);
   setLogin(X.STATE.admin.username, X.STATE.admin.password);
-  X.doLogin();
+  await X.doLogin();
   sess = X.getSession();
   ok(sess.role === 'barber', 'admin credentials are REJECTED from a salon-scoped login (still previous barber session)');
 
@@ -403,32 +464,33 @@ section('doLogin() across the 4 access levels');
   setLoginSalonContext(salon0.id);
   setLoginRoleContext('owner');
   setLogin(worker0.username, worker0.password);
-  X.doLogin();
+  await X.doLogin();
   sess = X.getSession();
   ok(sess.role === 'barber', 'barber credentials are REJECTED from the "Login Proprietario" entry (still previous barber session)');
 
   setLoginSalonContext(salon0.id);
   setLoginRoleContext('owner');
   setLogin(salon0.ownerUsername, salon0.ownerPassword);
-  X.doLogin();
+  await X.doLogin();
   sess = X.getSession();
   ok(sess.role === 'owner' && sess.salonId === salon0.id, 'owner credentials still authenticate via the "Login Proprietario" entry');
 
   setLoginSalonContext(salon0.id);
   setLoginRoleContext('barber');
   setLogin(salon0.ownerUsername, salon0.ownerPassword);
-  X.doLogin();
+  await X.doLogin();
   sess = X.getSession();
   ok(sess.role === 'owner', 'owner credentials are REJECTED from the "Login Staf/Barbiere" entry (still previous owner session)');
 
   setLoginSalonContext(salon0.id);
   setLoginRoleContext('barber');
   setLogin(worker0.username, worker0.password);
-  X.doLogin();
+  await X.doLogin();
   sess = X.getSession();
   ok(sess.role === 'barber' && sess.workerId === worker0.id, 'barber credentials still authenticate via the "Login Staf/Barbiere" entry');
 
   setLoginRoleContext(null); // restore generic context so later suites are unaffected
+  context.fetch = fakeFetch; // restore the default network-disabled sandbox fetch
 
   ok(context.__uiCallCounts.showView >= 3, `successful logins triggered showView() (${context.__uiCallCounts.showView} times)`);
 }
@@ -554,6 +616,21 @@ function makeFakeRedis() {
         const matched = [...strings.keys()].filter(k => alive(k) && re.test(k));
         return okResult(matched);
       }
+      case 'INCR': {
+        // Mirrors real Redis: INCR on an absent/expired key starts at 1 and
+        // does not itself set a TTL (checkRateLimit in lib/kv.js issues a
+        // separate EXPIRE only on the first INCR of a window).
+        const [key] = rest;
+        const next = (alive(key) ? Number(strings.get(key)) : 0) + 1;
+        strings.set(key, String(next));
+        return okResult(next);
+      }
+      case 'EXPIRE': {
+        const [key, seconds] = rest;
+        if (!strings.has(key)) return okResult(0);
+        ttl.set(key, Date.now() + Number(seconds) * 1000);
+        return okResult(1);
+      }
       default:
         throw new Error('Unsupported fake redis command in test harness: ' + cmd);
     }
@@ -583,32 +660,46 @@ async function freshImport(relPath) {
   return mod.default;
 }
 function mkRes() {
-  const r = { body: null, status: null };
-  r.obj = { setHeader() {}, status(c) { r.status = c; return r.obj; }, json(b) { r.body = b; return r.obj; }, end() {} };
+  const r = { body: null, status: null, headers: {}, endArg: undefined };
+  r.obj = {
+    setHeader(k, v) { r.headers[k] = v; return r.obj; },
+    status(c) { r.status = c; return r.obj; },
+    json(b) { r.body = b; return r.obj; },
+    end(b) { r.endArg = b; return r.obj; }
+  };
   return r;
 }
 
 section('api/sync.js — booking sync + merge logic (fake KV, no live network)');
-await withFakeKv(makeFakeRedis(), async () => {
+await withFakeKv(makeFakeRedis(), async (fake) => {
+  // A new booking is only ever accepted against a real, active salon (see
+  // the "salon_inactive" hardening test below) — must be seeded before any
+  // booking against salonId 'salonX' can succeed. An anonymous GET/POST also
+  // only reflects bookings scoped to an explicit ?salonId= (scopeBookingsForSession
+  // in api/sync.js) — a bare "give me every booking on the platform" request
+  // now returns [] by design, so every read below scopes to salonX.
+  fake.strings.set('salons_db', JSON.stringify([{ id: 'salonX', name: 'Salon X', workers: [] }]));
   const handler = await freshImport('api/sync.js');
 
   const r1 = mkRes();
-  await handler({ method: 'GET' }, r1.obj);
+  await handler({ method: 'GET', query: { salonId: 'salonX' } }, r1.obj);
   ok(r1.status === 200 && Array.isArray(r1.body.bookings) && r1.body.bookings.length === 0, 'GET returns empty bookings initially');
 
-  const newBooking = { id: 'bk1', status: 'confirmed', salonId: 'salonX', workerId: 'w1', dateISO: '2030-01-01', service: 'Taglio', time: '10:00', dateLabel: 'oggi', name: 'Test' };
+  // A self-cancel (below) proves ownership by matching phone numbers, so the
+  // original booking needs one on record.
+  const newBooking = { id: 'bk1', status: 'confirmed', salonId: 'salonX', workerId: 'w1', dateISO: '2030-01-01', service: 'Taglio', time: '10:00', dateLabel: 'oggi', name: 'Test', phone: '3331234567' };
   const r2 = mkRes();
-  await handler({ method: 'POST', body: { bookings: [newBooking], salons: [] } }, r2.obj);
+  await handler({ method: 'POST', query: { salonId: 'salonX' }, body: { bookings: [newBooking], salons: [] } }, r2.obj);
   ok(r2.status === 200 && r2.body.success === true, 'POST accepts a new booking');
   ok(r2.body.bookings.some(b => b.id === 'bk1'), 'POST response includes the newly merged booking');
   eq(r2.body.conflicts, [], 'no conflicts reported for a genuinely new booking');
 
   const r3 = mkRes();
-  await handler({ method: 'GET' }, r3.obj);
+  await handler({ method: 'GET', query: { salonId: 'salonX' } }, r3.obj);
   ok(r3.body.bookings.length === 1 && r3.body.bookings[0].id === 'bk1', 'subsequent GET reflects the persisted booking (proves the Hash round-trip works)');
 
   const r4 = mkRes();
-  await handler({ method: 'POST', body: { bookings: [{ ...newBooking, status: 'cancelled' }], salons: [] } }, r4.obj);
+  await handler({ method: 'POST', query: { salonId: 'salonX' }, body: { bookings: [{ ...newBooking, status: 'cancelled' }], salons: [] } }, r4.obj);
   ok(r4.body.bookings.length === 1 && r4.body.bookings[0].status === 'cancelled', 'POST updates existing booking by id instead of duplicating');
 
   const r5 = mkRes();
@@ -618,6 +709,7 @@ await withFakeKv(makeFakeRedis(), async () => {
 
 section('api/sync.js — CONCURRENCY: same-slot double-booking is rejected atomically');
 await withFakeKv(makeFakeRedis(), async (fake) => {
+  fake.strings.set('salons_db', JSON.stringify([{ id: 'sX', name: 'Salon X', workers: [] }]));
   const handler = await freshImport('api/sync.js');
   const base = { salonId: 'sX', workerId: 'wX', dateISO: '2030-02-02', time: '10:00', status: 'confirmed' };
   const bkA = { ...base, id: 'race-a', name: 'A' };
@@ -643,6 +735,7 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
 
 section('api/sync.js — CONCURRENCY: different-slot bookings never lose an update');
 await withFakeKv(makeFakeRedis(), async (fake) => {
+  fake.strings.set('salons_db', JSON.stringify([{ id: 'sX', name: 'Salon X', workers: [] }]));
   const handler = await freshImport('api/sync.js');
   const bkA = { id: 'diff-a', salonId: 'sX', workerId: 'wA', dateISO: '2030-02-02', time: '10:00', status: 'confirmed', name: 'A' };
   const bkB = { id: 'diff-b', salonId: 'sX', workerId: 'wB', dateISO: '2030-02-02', time: '10:00', status: 'confirmed', name: 'B' };
@@ -660,9 +753,12 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
 });
 
 section('api/sync.js — cancelling a booking releases its slot lock for reuse');
-await withFakeKv(makeFakeRedis(), async () => {
+await withFakeKv(makeFakeRedis(), async (fake) => {
+  fake.strings.set('salons_db', JSON.stringify([{ id: 'sX', name: 'Salon X', workers: [] }]));
   const handler = await freshImport('api/sync.js');
-  const bk = { id: 'cancel-1', salonId: 'sX', workerId: 'wX', dateISO: '2030-03-03', time: '11:00', status: 'confirmed', name: 'First' };
+  // A self-cancel (below) proves ownership by matching phone numbers, so the
+  // original booking needs one on record.
+  const bk = { id: 'cancel-1', salonId: 'sX', workerId: 'wX', dateISO: '2030-03-03', time: '11:00', status: 'confirmed', name: 'First', phone: '3331234567' };
 
   await handler({ method: 'POST', body: { bookings: [bk], salons: [] } }, mkRes().obj);
 
@@ -685,7 +781,7 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
 
   const handler = await freshImport('api/sync.js');
   const rGet = mkRes();
-  await handler({ method: 'GET' }, rGet.obj);
+  await handler({ method: 'GET', query: { salonId: 'sLegacy' } }, rGet.obj);
   ok(rGet.body.salons.some(s => s.id === 'sLegacy'), 'migrated GET response includes the legacy salon');
   ok(rGet.body.bookings.some(b => b.id === 'legacy-1'), 'migrated GET response includes the legacy booking');
 
@@ -698,13 +794,14 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
 
 section('api/sync.js — HARDENING: malformed input cannot crash the handler or corrupt data');
 await withFakeKv(makeFakeRedis(), async (fake) => {
+  fake.strings.set('salons_db', JSON.stringify([{ id: 'sX', name: 'Salon X', workers: [] }]));
   const handler = await freshImport('api/sync.js');
   const goodBooking = { id: 'good-1', salonId: 'sX', workerId: 'wX', dateISO: '2030-05-05', time: '09:00', status: 'confirmed', name: 'Good' };
   const malformedBooking = { id: 'bad-1', salonId: 'sX' }; // missing workerId/dateISO/time
   const noIdBooking = { salonId: 'sX', workerId: 'wX', dateISO: '2030-05-05', time: '10:00' };
 
   const r1 = mkRes();
-  await handler({ method: 'POST', body: { bookings: [goodBooking, malformedBooking, noIdBooking], salons: [] } }, r1.obj);
+  await handler({ method: 'POST', query: { salonId: 'sX' }, body: { bookings: [goodBooking, malformedBooking, noIdBooking], salons: [] } }, r1.obj);
   ok(r1.status === 200, 'a batch mixing valid and malformed bookings does not crash the request');
   ok(r1.body.bookings.some(b => b.id === 'good-1'), 'the well-formed booking in the same batch is still persisted');
   ok(r1.body.conflicts.some(c => c.id === 'bad-1' && c.error === 'invalid_booking'), 'the malformed booking is reported back instead of silently accepted');
@@ -723,17 +820,25 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
 section('api/toggle-salon.js — activate/deactivate a salon (fake KV, no live network)');
 await withFakeKv(makeFakeRedis(), async (fake) => {
   fake.strings.set('salons_db', JSON.stringify([{ id: 'salonX', name: 'Salon X' }]));
+  fake.strings.set('admin_db', JSON.stringify({ username: 'admin', password: 'realSecret1' }));
   const handler = await freshImport('api/toggle-salon.js');
 
+  // Admin-only destructive-adjacent action — salon ids are predictable and
+  // publicly visible, so a valid admin password is required (proof-of-
+  // identity, same pattern as reset_all_data).
+  const rNoPw = mkRes();
+  await handler({ method: 'POST', body: { salonId: 'salonX', inactive: true } }, rNoPw.obj);
+  eq(rNoPw.status, 401, 'toggle-salon rejects a request with no admin password');
+
   const r1 = mkRes();
-  await handler({ method: 'POST', body: { salonId: 'salonX', inactive: true } }, r1.obj);
-  ok(r1.status === 200 && r1.body.success === true, 'toggle-salon marks an existing salon inactive');
+  await handler({ method: 'POST', body: { salonId: 'salonX', inactive: true, adminPassword: 'realSecret1' } }, r1.obj);
+  ok(r1.status === 200 && r1.body.success === true, 'toggle-salon marks an existing salon inactive once the correct admin password is given');
 
   const parsed = JSON.parse(fake.strings.get('salons_db'));
   ok(parsed.find(s => s.id === 'salonX').inactive === true, 'inactive flag persisted into fake KV store');
 
   const r2 = mkRes();
-  await handler({ method: 'POST', body: { salonId: 'does-not-exist', inactive: true } }, r2.obj);
+  await handler({ method: 'POST', body: { salonId: 'does-not-exist', inactive: true, adminPassword: 'realSecret1' } }, r2.obj);
   eq(r2.status, 404, 'toggle-salon returns 404 for an unknown salonId');
 
   const r3 = mkRes();
@@ -743,6 +848,9 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
 
 section('api/sync.js — CRITICAL: a stale/partial salons snapshot never deletes other salons');
 await withFakeKv(makeFakeRedis(), async (fake) => {
+  const prevSecret = process.env.SESSION_SECRET;
+  process.env.SESSION_SECRET = 'test-only-secret-for-session-tokens';
+  try {
   fake.strings.set('salons_db', JSON.stringify([
     { id: 'salonA', name: 'Salon A' },
     { id: 'salonB', name: 'Salon B' }
@@ -751,16 +859,22 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
 
   // A client with a stale local copy (only knows about salonA, e.g. it
   // loaded before salonB was created) saves for an unrelated reason
-  // (confirming a booking) and sends its whole local salons snapshot.
+  // (confirming a booking) and sends its whole local salons snapshot. Must
+  // be salonA's own owner (or admin) — an unauthenticated salon write for an
+  // id that already exists is now rejected outright (isAuthorizedEditor).
+  const ownerToken = issueSessionToken({ role: 'owner', salonId: 'salonA' });
   const staleClientSalons = [{ id: 'salonA', name: 'Salon A Edited' }];
   const r1 = mkRes();
-  await handler({ method: 'POST', body: { bookings: [], salons: staleClientSalons } }, r1.obj);
+  await handler({ method: 'POST', headers: { authorization: `Bearer ${ownerToken}` }, body: { bookings: [], salons: staleClientSalons } }, r1.obj);
   ok(r1.status === 200, 'sync accepts a save from a client with a partial salons snapshot');
 
   const salonsAfter = JSON.parse(fake.strings.get('salons_db'));
   ok(salonsAfter.some(s => s.id === 'salonB'), 'salonB (absent from the stale payload) is NOT deleted');
   ok(salonsAfter.find(s => s.id === 'salonA')?.name === 'Salon A Edited', 'salonA is still updated with the fields the client actually sent');
   eq(salonsAfter.length, 2, 'total salon count is unchanged — nothing silently lost');
+  } finally {
+    restoreEnv('SESSION_SECRET', prevSecret);
+  }
 });
 
 section('api/delete-salon.js — explicit, targeted salon deletion (fake KV, no live network)');
@@ -769,6 +883,7 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
     { id: 'salonA', name: 'Salon A' },
     { id: 'salonB', name: 'Salon B' }
   ]));
+  fake.strings.set('admin_db', JSON.stringify({ username: 'admin', password: 'realSecret1' }));
   const handler = await freshImport('api/delete-salon.js');
 
   // Seed a booking + lock belonging to salonA to confirm cleanup.
@@ -779,9 +894,15 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
   fake.strings.set('lock:salonA:w1:2030-01-01:10:00', 'bkA1');
   fake.strings.set('lock:salonB:w2:2030-01-01:11:00', 'bkB1');
 
+  // Irreversible + salon ids are predictable/public — requires proof of the
+  // admin password, same as toggle-salon.js and reset_all_data.
+  const rNoPw = mkRes();
+  await handler({ method: 'POST', body: { salonId: 'salonA' } }, rNoPw.obj);
+  eq(rNoPw.status, 401, 'delete-salon rejects a request with no admin password');
+
   const r1 = mkRes();
-  await handler({ method: 'POST', body: { salonId: 'salonA' } }, r1.obj);
-  ok(r1.status === 200 && r1.body.success === true, 'delete-salon succeeds for an existing salon');
+  await handler({ method: 'POST', body: { salonId: 'salonA', adminPassword: 'realSecret1' } }, r1.obj);
+  ok(r1.status === 200 && r1.body.success === true, 'delete-salon succeeds for an existing salon once the correct admin password is given');
   eq(r1.body.removedBookings, 1, 'reports exactly the one booking removed for that salon');
 
   const salonsAfter = JSON.parse(fake.strings.get('salons_db'));
@@ -792,7 +913,7 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
   ok(!fake.strings.has('lock:salonA:w1:2030-01-01:10:00'), 'salonA\'s slot lock is released');
 
   const r2 = mkRes();
-  await handler({ method: 'POST', body: { salonId: 'does-not-exist' } }, r2.obj);
+  await handler({ method: 'POST', body: { salonId: 'does-not-exist', adminPassword: 'realSecret1' } }, r2.obj);
   eq(r2.status, 404, 'delete-salon returns 404 for an unknown salonId');
 });
 
@@ -828,48 +949,210 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
   ok(!fake.strings.has('lock:salonA:w1:2030-01-01:10:00'), 'stale slot locks are cleared');
 });
 
-section('api/sync.js — admin credentials sync across devices (fake KV, no live network)');
+section('api/sync.js — admin credentials: GET never ships a plaintext password, and a change requires proof of the current one');
 await withFakeKv(makeFakeRedis(), async (fake) => {
+  const prevSecret = process.env.SESSION_SECRET;
+  process.env.SESSION_SECRET = 'test-only-secret-for-session-tokens';
+  try {
+    const handler = await freshImport('api/sync.js');
+    fake.strings.set('salons_db', JSON.stringify([{ id: 'salon1', name: 'Salon', workers: [] }]));
+
+    // Login/password-change moved entirely to action-based, session-token
+    // flows — GET no longer ships plaintext credentials to the client at
+    // all (not even to an anonymous caller for the username, and never a
+    // password to anyone, admin session or not).
+    const r1 = mkRes();
+    await handler({ method: 'GET' }, r1.obj);
+    eq(r1.body.admin.username, undefined, 'anonymous GET does not reveal the admin username');
+    eq(r1.body.admin.password, undefined, 'GET response never includes a plaintext admin password field');
+
+    const adminToken = issueSessionToken({ role: 'admin' });
+    const rAdminGet = mkRes();
+    await handler({ method: 'GET', headers: { authorization: `Bearer ${adminToken}` } }, rAdminGet.obj);
+    eq(rAdminGet.body.admin.username, 'admin', 'an authenticated admin GET reveals the default admin username');
+    eq(rAdminGet.body.admin.password, undefined, 'an authenticated admin GET still never includes a plaintext password');
+
+    // Changing it requires proving the CURRENT password — a bare "here are
+    // new credentials" POST with no proof is not a valid path anymore.
+    const rWrongCurrent = mkRes();
+    await handler({ method: 'POST', body: { action: 'change_password', type: 'admin_self', currentPassword: 'totallyWrong', newUsername: 'boss', newPassword: 'newSecret9' } }, rWrongCurrent.obj);
+    eq(rWrongCurrent.status, 401, 'admin_self password change is rejected without the correct current password');
+
+    const rChange = mkRes();
+    await handler({ method: 'POST', body: { action: 'change_password', type: 'admin_self', currentPassword: 'admin123', newUsername: 'boss', newPassword: 'newSecret9' } }, rChange.obj);
+    eq(rChange.status, 200, 'admin_self password change succeeds once the correct current password is proven');
+
+    // The new credentials now actually authenticate; the old ones no longer do.
+    const rLoginNew = mkRes();
+    await handler({ method: 'POST', body: { action: 'login', role: 'admin', username: 'boss', password: 'newSecret9' } }, rLoginNew.obj);
+    eq(rLoginNew.body.success, true, 'the new admin credentials authenticate after the change');
+
+    const rLoginOld = mkRes();
+    await handler({ method: 'POST', body: { action: 'login', role: 'admin', username: 'admin', password: 'admin123' } }, rLoginOld.obj);
+    eq(rLoginOld.body.success, false, 'the old admin credentials no longer authenticate after the change');
+  } finally {
+    restoreEnv('SESSION_SECRET', prevSecret);
+  }
+});
+
+section('api/sync.js — a new booking against an inactive/unknown salon is rejected server-side');
+await withFakeKv(makeFakeRedis(), async () => {
+  // Bypassing the client UI's inactive-salon alert used to be possible with
+  // a direct POST, since the salon id/workerId are both visible in the
+  // anonymous GET response (needed for slot-availability rendering).
   const handler = await freshImport('api/sync.js');
-  fake.strings.set('salons_db', JSON.stringify([{ id: 'salon1', name: 'Salon', workers: [] }]));
+
+  // Nothing seeded in salons_db yet — this booking references a salon that
+  // simply doesn't exist.
+  const ghostBooking = { id: 'ghost-1', salonId: 'does-not-exist', workerId: 'w1', dateISO: '2030-06-01', time: '10:00', status: 'confirmed', name: 'Ghost' };
+  const r1 = mkRes();
+  await handler({ method: 'POST', body: { bookings: [ghostBooking], salons: [] } }, r1.obj);
+  ok(r1.body.conflicts.some(c => c.id === 'ghost-1' && c.error === 'salon_inactive'), 'a booking for a salon id that does not exist is rejected as salon_inactive');
+
+  const kvUrl = process.env.KV_REST_API_URL, kvToken = process.env.KV_REST_API_TOKEN;
+  await import('./lib/kv.js').then(m => m.setSalonsDb(kvUrl, kvToken, [
+    { id: 'salonPending', name: 'Salon Pending', inactive: true, workers: [{ id: 'w1', name: 'Barbiere' }] }
+  ]));
+  const pendingBooking = { id: 'pending-1', salonId: 'salonPending', workerId: 'w1', dateISO: '2030-06-01', time: '10:00', status: 'confirmed', name: 'Cliente' };
+  const r2 = mkRes();
+  await handler({ method: 'POST', body: { bookings: [pendingBooking], salons: [] } }, r2.obj);
+  ok(r2.body.conflicts.some(c => c.id === 'pending-1' && c.error === 'salon_inactive'), 'a booking for a real but inactive/pending salon is rejected as salon_inactive');
+  eq(r2.body.bookings.filter(b => b.id === 'pending-1').length, 0, 'the rejected booking is never actually persisted');
+});
+
+section('api/sync.js — GET response strips PII by caller role (cross-tenant leak regression)');
+await withFakeKv(makeFakeRedis(), async (fake) => {
+  const prevSecret = process.env.SESSION_SECRET;
+  process.env.SESSION_SECRET = 'test-only-secret-for-session-tokens';
+  try {
+    fake.strings.set('salons_db', JSON.stringify([
+      {
+        id: 'salonA', slug: 'salon-a', name: 'Salon A',
+        ownerUsername: 'ownerA', ownerPassword: 'secretA', ownerName: 'Mario', ownerPhone: '3331112222', email: 'a@test.it',
+        billing: { declaredWorkerCount: 3, paidThroughMonth: '2026-07', paymentFailing: false, suspendedByBilling: false, autopay: true, signupIp: '1.2.3.4', contractSignedName: 'Mario Rossi' },
+        workers: [{ id: 'wA1', name: 'Barbiere A', username: 'barberA', phone: '3339998888', password: 'pw' }]
+      },
+      { id: 'salonB', slug: 'salon-b', name: 'Salon B (inactive)', inactive: true, ownerUsername: 'ownerB', ownerPassword: 'secretB', workers: [] }
+    ]));
+    fake.strings.set('admin_db', JSON.stringify({ username: 'realAdminUser', password: 'adminPass1' }));
+    const handler = await freshImport('api/sync.js');
+
+    // Anonymous caller (no session at all — the public booking page).
+    const rAnon = mkRes();
+    await handler({ method: 'GET', headers: {} }, rAnon.obj);
+    const anonSalonA = rAnon.body.salons.find(s => s.id === 'salonA');
+    ok(!rAnon.body.salons.some(s => s.id === 'salonB'), 'anonymous GET does not list an inactive salon at all');
+    ok(anonSalonA && anonSalonA.workers[0].username === undefined && anonSalonA.workers[0].phone === undefined, 'anonymous GET strips worker username/phone');
+    ok(anonSalonA.billing === undefined, 'anonymous GET strips the whole billing object for a salon that is not their own');
+    ok(anonSalonA.ownerUsername === undefined && anonSalonA.ownerPassword === undefined && anonSalonA.email === undefined, 'anonymous GET strips owner credentials/contact fields');
+    eq(rAnon.body.admin.username, undefined, 'anonymous GET strips the platform admin username');
+
+    // Admin caller — sees everything, including the inactive salon.
+    const adminToken = issueSessionToken({ role: 'admin' });
+    const rAdmin = mkRes();
+    await handler({ method: 'GET', headers: { authorization: `Bearer ${adminToken}` } }, rAdmin.obj);
+    ok(rAdmin.body.salons.some(s => s.id === 'salonB'), 'admin GET includes the inactive salon');
+    const adminSalonA = rAdmin.body.salons.find(s => s.id === 'salonA');
+    eq(adminSalonA.workers[0].username, 'barberA', 'admin GET includes worker username');
+    eq(adminSalonA.billing.signupIp, '1.2.3.4', 'admin GET includes the full billing object, including admin-review-only fields like signupIp');
+    eq(rAdmin.body.admin.username, 'realAdminUser', 'admin GET includes the platform admin username');
+
+    // Owner of salonA — sees their OWN salon's staff contact info and a
+    // trimmed billing object, but still can't see the inactive salonB or
+    // the admin username.
+    const ownerToken = issueSessionToken({ role: 'owner', salonId: 'salonA' });
+    const rOwner = mkRes();
+    await handler({ method: 'GET', headers: { authorization: `Bearer ${ownerToken}` } }, rOwner.obj);
+    const ownerSalonA = rOwner.body.salons.find(s => s.id === 'salonA');
+    eq(ownerSalonA.workers[0].username, 'barberA', "owner GET includes their OWN salon's worker username");
+    ok(ownerSalonA.billing && ownerSalonA.billing.signupIp === undefined, "owner GET's billing omits admin-review-only fields (signupIp)");
+    eq(ownerSalonA.billing.declaredWorkerCount, 3, "owner GET's billing keeps the fields the Fatturazione UI actually needs");
+    ok(!rOwner.body.salons.some(s => s.id === 'salonB'), "owner of salonA still can't see an unrelated inactive salon");
+    eq(rOwner.body.admin.username, undefined, 'owner GET still strips the platform admin username');
+  } finally {
+    restoreEnv('SESSION_SECRET', prevSecret);
+  }
+});
+
+section('lib/auth.js — verifyAdminPassword rate-limits repeated guesses (shared budget across every admin-password-gated action)');
+await withFakeKv(makeFakeRedis(), async () => {
+  // Exercised via the reset_all_data action (api/sync.js), the only
+  // admin-password-gated action already covered by an existing test — the
+  // rate limit itself lives in lib/auth.js's verifyAdminPassword and is
+  // shared by every caller keyed on IP, not on the specific action.
+  const handler = await freshImport('api/sync.js');
+  const { setAdminDb } = await import('./lib/kv.js');
+  await setAdminDb(process.env.KV_REST_API_URL, process.env.KV_REST_API_TOKEN, { username: 'admin', password: 'realSecret1' });
+
+  for (let i = 1; i <= 10; i++) {
+    const r = mkRes();
+    await handler({ method: 'POST', body: { action: 'reset_all_data', password: 'wrongGuess' } }, r.obj);
+    eq(r.status, 401, `attempt ${i}/10 with a wrong password is rejected normally (within the rate-limit budget)`);
+  }
+  const rBlocked = mkRes();
+  await handler({ method: 'POST', body: { action: 'reset_all_data', password: 'realSecret1' } }, rBlocked.obj);
+  eq(rBlocked.status, 401, 'the 11th attempt is rejected even with the CORRECT password — proves the rate limit itself is gating, not just wrong-password checks');
+});
+
+section('api/image.js — serves stored images with a nosniff header (fake KV, no live network)');
+await withFakeKv(makeFakeRedis(), async (fake) => {
+  fake.strings.set('img:abc123', 'image/png|aGVsbG8=');
+  const handler = await freshImport('api/image.js');
 
   const r1 = mkRes();
-  await handler({ method: 'GET' }, r1.obj);
-  eq(r1.body.admin.username, 'admin', 'GET falls back to the default admin username when none stored yet');
-  eq(r1.body.admin.password, 'admin123', 'GET falls back to the default admin password when none stored yet');
+  await handler({ query: { id: 'abc123' } }, r1.obj);
+  eq(r1.status, 200, 'a valid, existing image id returns 200');
+  eq(r1.headers['Content-Type'], 'image/png', 'response carries the stored content type');
+  eq(r1.headers['X-Content-Type-Options'], 'nosniff', 'response sets X-Content-Type-Options: nosniff (image/HTML polyglot hardening)');
+  ok(Buffer.isBuffer(r1.endArg) && r1.endArg.toString() === 'hello', 'response body is the correctly base64-decoded image bytes');
 
   const r2 = mkRes();
-  await handler({ method: 'POST', body: { admin: { username: 'boss', password: 'newSecret9' } } }, r2.obj);
-  eq(r2.status, 200, 'POST with new admin credentials succeeds');
+  await handler({ query: { id: 'not-there' } }, r2.obj);
+  eq(r2.status, 404, 'an unknown image id returns 404 instead of leaking a KV error');
 
   const r3 = mkRes();
-  await handler({ method: 'GET' }, r3.obj);
-  eq(r3.body.admin.username, 'boss', 'GET now reflects the updated admin username');
-  eq(r3.body.admin.password, 'newSecret9', 'GET now reflects the updated admin password');
+  await handler({ query: { id: '../../etc/passwd' } }, r3.obj);
+  eq(r3.status, 400, 'an image id with path-traversal-shaped characters is rejected before ever touching KV');
 });
 
 section('api/subscribe.js — push subscription storage (fake KV, no live network)');
 await withFakeKv(makeFakeRedis(), async (fake) => {
-  const handler = await freshImport('api/subscribe.js');
+  const prevSecret = process.env.SESSION_SECRET;
+  process.env.SESSION_SECRET = 'test-only-secret-for-session-tokens';
+  try {
+    const handler = await freshImport('api/subscribe.js');
 
-  const r1 = mkRes();
-  await handler({ method: 'POST', body: { subscription: {} } }, r1.obj);
-  eq(r1.status, 400, 'rejects a subscription payload missing an endpoint');
+    const r1 = mkRes();
+    await handler({ method: 'POST', body: { subscription: {} } }, r1.obj);
+    eq(r1.status, 400, 'rejects a subscription payload missing an endpoint');
 
-  const sub = { subscription: { endpoint: 'https://push.test/abc' }, role: 'owner', salonId: 'salonX' };
-  const r2 = mkRes();
-  await handler({ method: 'POST', body: sub }, r2.obj);
-  ok(r2.status === 200 && r2.body.success === true, 'valid subscription accepted and stored');
+    // role:'owner'/'barber' are never trusted from the client-declared body
+    // alone — a caller must present a verified session token matching that
+    // exact role, so anyone can't claim to be a salon's owner just by
+    // saying so and receive that salon's live booking notifications.
+    const ownerToken = issueSessionToken({ role: 'owner', salonId: 'salonX' });
+    const sub = { subscription: { endpoint: 'https://push.test/abc' }, role: 'owner', salonId: 'salonX' };
+    const rNoSession = mkRes();
+    await handler({ method: 'POST', body: sub }, rNoSession.obj);
+    eq(rNoSession.status, 401, 'a role:owner subscription with no session token is rejected');
 
-  const stored = JSON.parse(fake.strings.get('push_subscriptions'));
-  ok(stored.length === 1 && stored[0].subscription.endpoint === sub.subscription.endpoint, 'subscription persisted to fake KV with correct endpoint');
+    const r2 = mkRes();
+    await handler({ method: 'POST', headers: { authorization: `Bearer ${ownerToken}` }, body: sub }, r2.obj);
+    ok(r2.status === 200 && r2.body.success === true, 'valid subscription accepted and stored once backed by a matching owner session');
 
-  // re-subscribing with the same endpoint should replace, not duplicate
-  const r3 = mkRes();
-  await handler({ method: 'POST', body: { ...sub, role: 'barber' } }, r3.obj);
-  const stored2 = JSON.parse(fake.strings.get('push_subscriptions'));
-  eq(stored2.length, 1, 'duplicate endpoint replaces existing subscription instead of appending');
-  eq(stored2[0].role, 'barber', 'replaced subscription reflects the updated role');
+    const stored = JSON.parse(fake.strings.get('push_subscriptions'));
+    ok(stored.length === 1 && stored[0].subscription.endpoint === sub.subscription.endpoint, 'subscription persisted to fake KV with correct endpoint');
+
+    // re-subscribing with the same endpoint should replace, not duplicate
+    const barberToken = issueSessionToken({ role: 'barber', salonId: 'salonX', workerId: 'w1' });
+    const r3 = mkRes();
+    await handler({ method: 'POST', headers: { authorization: `Bearer ${barberToken}` }, body: { ...sub, role: 'barber' } }, r3.obj);
+    const stored2 = JSON.parse(fake.strings.get('push_subscriptions'));
+    eq(stored2.length, 1, 'duplicate endpoint replaces existing subscription instead of appending');
+    eq(stored2[0].role, 'barber', 'replaced subscription reflects the updated role');
+  } finally {
+    restoreEnv('SESSION_SECRET', prevSecret);
+  }
 });
 
 /* ================================================================
