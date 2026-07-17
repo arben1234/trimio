@@ -678,7 +678,7 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
   // only reflects bookings scoped to an explicit ?salonId= (scopeBookingsForSession
   // in api/sync.js) — a bare "give me every booking on the platform" request
   // now returns [] by design, so every read below scopes to salonX.
-  fake.strings.set('salons_db', JSON.stringify([{ id: 'salonX', name: 'Salon X', workers: [] }]));
+  fake.strings.set('salons_db', JSON.stringify([{ id: 'salonX', name: 'Salon X', workers: [{ id: 'w1', name: 'Worker 1' }] }]));
   const handler = await freshImport('api/sync.js');
 
   const r1 = mkRes();
@@ -709,7 +709,7 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
 
 section('api/sync.js — CONCURRENCY: same-slot double-booking is rejected atomically');
 await withFakeKv(makeFakeRedis(), async (fake) => {
-  fake.strings.set('salons_db', JSON.stringify([{ id: 'sX', name: 'Salon X', workers: [] }]));
+  fake.strings.set('salons_db', JSON.stringify([{ id: 'sX', name: 'Salon X', workers: [{ id: 'wX', name: 'Worker X' }] }]));
   const handler = await freshImport('api/sync.js');
   const base = { salonId: 'sX', workerId: 'wX', dateISO: '2030-02-02', time: '10:00', status: 'confirmed' };
   const bkA = { ...base, id: 'race-a', name: 'A' };
@@ -735,7 +735,7 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
 
 section('api/sync.js — CONCURRENCY: different-slot bookings never lose an update');
 await withFakeKv(makeFakeRedis(), async (fake) => {
-  fake.strings.set('salons_db', JSON.stringify([{ id: 'sX', name: 'Salon X', workers: [] }]));
+  fake.strings.set('salons_db', JSON.stringify([{ id: 'sX', name: 'Salon X', workers: [{ id: 'wA', name: 'Worker A' }, { id: 'wB', name: 'Worker B' }] }]));
   const handler = await freshImport('api/sync.js');
   const bkA = { id: 'diff-a', salonId: 'sX', workerId: 'wA', dateISO: '2030-02-02', time: '10:00', status: 'confirmed', name: 'A' };
   const bkB = { id: 'diff-b', salonId: 'sX', workerId: 'wB', dateISO: '2030-02-02', time: '10:00', status: 'confirmed', name: 'B' };
@@ -754,7 +754,7 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
 
 section('api/sync.js — cancelling a booking releases its slot lock for reuse');
 await withFakeKv(makeFakeRedis(), async (fake) => {
-  fake.strings.set('salons_db', JSON.stringify([{ id: 'sX', name: 'Salon X', workers: [] }]));
+  fake.strings.set('salons_db', JSON.stringify([{ id: 'sX', name: 'Salon X', workers: [{ id: 'wX', name: 'Worker X' }] }]));
   const handler = await freshImport('api/sync.js');
   // A self-cancel (below) proves ownership by matching phone numbers, so the
   // original booking needs one on record.
@@ -782,7 +782,7 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
     // price/dur server-side from the salon's own service list (svcPrice/
     // svcDurMin), ignoring whatever the client sent, so the tampering test
     // below needs a genuine baseline to tamper away from.
-    fake.strings.set('salons_db', JSON.stringify([{ id: 'sY', name: 'Salon Y', workers: [], services: [{ name: 'Taglio', price: 20, dur: 30 }] }]));
+    fake.strings.set('salons_db', JSON.stringify([{ id: 'sY', name: 'Salon Y', workers: [{ id: 'wY', name: 'Worker Y' }], services: [{ name: 'Taglio', price: 20, dur: 30 }] }]));
     const handler = await freshImport('api/sync.js');
     const ownerToken = issueSessionToken({ role: 'owner', salonId: 'sY' });
     const authHdr = { authorization: `Bearer ${ownerToken}` };
@@ -853,7 +853,7 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
 
 section('api/sync.js — HARDENING: malformed input cannot crash the handler or corrupt data');
 await withFakeKv(makeFakeRedis(), async (fake) => {
-  fake.strings.set('salons_db', JSON.stringify([{ id: 'sX', name: 'Salon X', workers: [] }]));
+  fake.strings.set('salons_db', JSON.stringify([{ id: 'sX', name: 'Salon X', workers: [{ id: 'wX', name: 'Worker X' }] }]));
   const handler = await freshImport('api/sync.js');
   const goodBooking = { id: 'good-1', salonId: 'sX', workerId: 'wX', dateISO: '2030-05-05', time: '09:00', status: 'confirmed', name: 'Good' };
   const malformedBooking = { id: 'bad-1', salonId: 'sX' }; // missing workerId/dateISO/time
@@ -934,6 +934,58 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
   } finally {
     restoreEnv('SESSION_SECRET', prevSecret);
   }
+});
+
+section('api/sync.js — HARDENING: an existing salon cannot steal another salon\'s slug or ownerUsername (URL/QR-hijack regression)');
+await withFakeKv(makeFakeRedis(), async (fake) => {
+  const prevSecret = process.env.SESSION_SECRET;
+  process.env.SESSION_SECRET = 'test-only-secret-for-session-tokens';
+  try {
+    fake.strings.set('salons_db', JSON.stringify([
+      { id: 'salonA', name: 'Salon A', slug: 'SALON_A', ownerUsername: 'ownerA' },
+      { id: 'salonB', name: 'Salon B', slug: 'SALON_B', ownerUsername: 'ownerB' }
+    ]));
+    const handler = await freshImport('api/sync.js');
+    const adminToken = issueSessionToken({ role: 'admin' });
+
+    // Admin editing salonA tries to set its slug/ownerUsername to collide
+    // with salonB's — this used to pass straight through (uniqueness was
+    // only ever checked for a BRAND NEW salon), silently hijacking B's
+    // public booking link/QR code.
+    const hijack = { id: 'salonA', name: 'Salon A', slug: 'SALON_B', ownerUsername: 'ownerB' };
+    const r1 = mkRes();
+    await handler({ method: 'POST', headers: { authorization: `Bearer ${adminToken}` }, body: { bookings: [], salons: [hijack] } }, r1.obj);
+    ok(r1.status === 200, 'the save itself is accepted (not a hard rejection)');
+
+    const salonsAfter = JSON.parse(fake.strings.get('salons_db'));
+    const a = salonsAfter.find(s => s.id === 'salonA');
+    const b = salonsAfter.find(s => s.id === 'salonB');
+    eq(a.slug, 'SALON_A', "salonA's slug reverts to its own existing value instead of stealing salonB's");
+    eq(a.ownerUsername, 'ownerA', "salonA's ownerUsername reverts to its own existing value instead of stealing salonB's");
+    eq(b.slug, 'SALON_B', "salonB's own slug is completely untouched");
+
+    // A genuinely unique new slug still goes through normally.
+    const rename = { id: 'salonA', name: 'Salon A', slug: 'SALON_A_RENAMED', ownerUsername: 'ownerA' };
+    const r2 = mkRes();
+    await handler({ method: 'POST', headers: { authorization: `Bearer ${adminToken}` }, body: { bookings: [], salons: [rename] } }, r2.obj);
+    const salonsAfter2 = JSON.parse(fake.strings.get('salons_db'));
+    eq(salonsAfter2.find(s => s.id === 'salonA').slug, 'SALON_A_RENAMED', 'a genuinely unique slug change still goes through normally');
+  } finally {
+    restoreEnv('SESSION_SECRET', prevSecret);
+  }
+});
+
+section('api/sync.js — GET flags sessionExpired when a presented Authorization token is rejected (silent-degradation regression)');
+await withFakeKv(makeFakeRedis(), async () => {
+  const handler = await freshImport('api/sync.js');
+
+  const rNoToken = mkRes();
+  await handler({ method: 'GET', headers: {} }, rNoToken.obj);
+  eq(rNoToken.body.sessionExpired, false, 'an anonymous GET with no Authorization header at all is not flagged as an expired session');
+
+  const rBadToken = mkRes();
+  await handler({ method: 'GET', headers: { authorization: 'Bearer garbage.notarealtoken' } }, rBadToken.obj);
+  eq(rBadToken.body.sessionExpired, true, 'a GET with a present-but-invalid/expired token IS flagged, distinct from having no session at all');
 });
 
 section('api/delete-salon.js — explicit, targeted salon deletion (fake KV, no live network)');
@@ -1168,6 +1220,51 @@ await withFakeKv(makeFakeRedis(), async () => {
   await handler({ method: 'POST', body: { bookings: [pendingBooking], salons: [] } }, r2.obj);
   ok(r2.body.conflicts.some(c => c.id === 'pending-1' && c.error === 'salon_inactive'), 'a booking for a real but inactive/pending salon is rejected as salon_inactive');
   eq(r2.body.bookings.filter(b => b.id === 'pending-1').length, 0, 'the rejected booking is never actually persisted');
+});
+
+section('api/sync.js — HARDENING: a booking cannot pair a real salon with a workerId belonging to a DIFFERENT salon (cross-tenant push-spoofing regression)');
+await withFakeKv(makeFakeRedis(), async (fake) => {
+  fake.strings.set('salons_db', JSON.stringify([
+    { id: 'salonReal', name: 'Salon Real', workers: [{ id: 'wReal', name: 'Real Worker' }] },
+    { id: 'salonForeign', name: 'Salon Foreign', workers: [{ id: 'wForeign', name: 'Foreign Worker' }] }
+  ]));
+  const handler = await freshImport('api/sync.js');
+
+  // salonReal is a real, active salon (passes the salon_inactive gate), but
+  // wForeign belongs to salonForeign — pairing them used to silently skip
+  // the vacation/day-off/break check (no matching worker to check it
+  // against) and let the booking through, which also let its push
+  // notification target a barber outside the booking's own salon.
+  const spoofed = { id: 'spoof-1', salonId: 'salonReal', workerId: 'wForeign', dateISO: '2030-08-01', time: '10:00', status: 'confirmed', name: 'Spoofer' };
+  const r1 = mkRes();
+  await handler({ method: 'POST', body: { bookings: [spoofed], salons: [] } }, r1.obj);
+  ok(r1.body.conflicts.some(c => c.id === 'spoof-1' && c.error === 'invalid_booking'), 'a salonId/workerId pair that do not actually belong together is rejected');
+
+  // A genuinely matching pair still works normally.
+  const legit = { id: 'legit-1', salonId: 'salonReal', workerId: 'wReal', dateISO: '2030-08-01', time: '10:00', status: 'confirmed', name: 'Real Customer' };
+  const r2 = mkRes();
+  await handler({ method: 'POST', body: { bookings: [legit], salons: [] } }, r2.obj);
+  eq(r2.body.conflicts, [], 'a salonId/workerId pair that DO belong together is accepted normally');
+});
+
+section('api/subscribe.js — HARDENING: a customer push subscription requires proof of the booking\'s own phone number (subscription-hijack regression)');
+await withFakeKv(makeFakeRedis(), async (fake) => {
+  fake.hashes.set('bookings', new Map([
+    ['bk-real', JSON.stringify({ id: 'bk-real', salonId: 'sZ', workerId: 'wZ', dateISO: '2030-09-01', time: '10:00', status: 'confirmed', name: 'Real Customer', phone: '3335554444' })]
+  ]));
+  const handler = await freshImport('api/subscribe.js');
+
+  const rNoPhone = mkRes();
+  await handler({ method: 'POST', body: { subscription: { endpoint: 'https://push.test/stranger' }, role: 'customer', bookingId: 'bk-real' } }, rNoPhone.obj);
+  eq(rNoPhone.status, 403, 'a customer subscription with no phone at all is rejected');
+
+  const rWrongPhone = mkRes();
+  await handler({ method: 'POST', body: { subscription: { endpoint: 'https://push.test/stranger' }, role: 'customer', bookingId: 'bk-real', phone: '0000000000' } }, rWrongPhone.obj);
+  eq(rWrongPhone.status, 403, 'a customer subscription with the WRONG phone is rejected — a scraped/guessed booking id alone is not enough');
+
+  const rRightPhone = mkRes();
+  await handler({ method: 'POST', body: { subscription: { endpoint: 'https://push.test/real-customer' }, role: 'customer', bookingId: 'bk-real', phone: '333 555 4444' } }, rRightPhone.obj);
+  eq(rRightPhone.status, 200, "the booking's real customer, proving their own phone, can still subscribe normally");
 });
 
 section('api/sync.js — GET response strips PII by caller role (cross-tenant leak regression)');

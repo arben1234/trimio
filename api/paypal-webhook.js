@@ -156,14 +156,21 @@ export default async function handler(req, res) {
             // handling both defensively above), each carries a different
             // event.id, so claimWebhookEventOnce doesn't dedupe across them
             // — paidThroughMonth being set twice is harmless/idempotent, but
-            // the owner would get the "Pagamento ricevuto" email twice.
-            // Skip the (re-)send when this month was already marked paid
-            // before this event, since that means a duplicate/redundant
-            // event for a charge already processed this month, not a new one.
-            const alreadyPaidThisMonth = salon.billing?.paidThroughMonth === romeYearMonth();
+            // the owner would get the "Pagamento ricevuto" email twice. The
+            // "already paid this month" check used to be computed from the
+            // PRE-lock `probe` read, not re-checked under the lock the
+            // mutation itself uses — two concurrent invocations for the two
+            // different event types could both read "not yet paid" before
+            // either write landed, and both send the email. Compute it
+            // fresh INSIDE the locked mutation instead, and capture the
+            // per-salon decision it made so the send below reflects it
+            // truthfully instead of using the stale pre-lock read.
+            let shouldSendEmail = false;
             await withSalonLock(kvUrl, kvToken, salon.id, async (salons) => {
               const s = salons.find(x => x.id === salon.id);
               if (!s) return false;
+              const alreadyPaidThisMonth = s.billing?.paidThroughMonth === romeYearMonth();
+              shouldSendEmail = !alreadyPaidThisMonth;
               s.billing = s.billing || {};
               s.billing.paidThroughMonth = romeYearMonth();
               s.billing.paymentFailing = false;
@@ -177,7 +184,7 @@ export default async function handler(req, res) {
             // to the owner — only a FAILED/suspended payment ever emailed
             // them. Best-effort (sendEmail never throws): the payment is
             // already recorded above regardless of whether this reaches them.
-            if (!alreadyPaidThisMonth) {
+            if (shouldSendEmail) {
               await sendEmail(salon.email, 'TRIMIO — Pagamento ricevuto',
                 `<p>Ciao,</p><p>Abbiamo ricevuto correttamente il pagamento automatico del canone mensile TRIMIO per <b>${escapeHtml(salon.name)}</b>. Grazie!</p>`);
             }
@@ -206,6 +213,18 @@ export default async function handler(req, res) {
           await withSalonLock(kvUrl, kvToken, salon.id, async (salons) => {
             const s = salons.find(x => x.id === salon.id);
             if (!s || !s.billing) return false;
+            // findSalonByPaypalIds tries customId first — that always
+            // correlates to the right SALON but says nothing about which
+            // SUBSCRIPTION. If the owner already replaced this subscription
+            // with a new one, a delayed/redelivered refund event for the
+            // OLD one must not flag the salon's CURRENT, unrelated
+            // subscription as payment-failing (same reasoning already
+            // applied to BILLING.SUBSCRIPTION.CANCELLED below). Only check
+            // when a subscriptionId was actually extracted above — a refund
+            // resource that carries neither custom_id nor a resolvable
+            // subscriptionId can't be correlated this precisely anyway, and
+            // custId-only correlation is the best available signal then.
+            if (subscriptionId && s.billing.paypalSubscriptionId !== subscriptionId) return false;
             s.billing.paymentFailing = true;
             return true;
           });
@@ -222,6 +241,12 @@ export default async function handler(req, res) {
           await withSalonLock(kvUrl, kvToken, salon.id, async (salons) => {
             const s = salons.find(x => x.id === salon.id);
             if (!s || !s.billing) return false;
+            // See the CANCELLED handler's comment below — custom_id alone
+            // finds the right salon but not necessarily the right (current)
+            // subscription; a stale/superseded subscription's delayed
+            // PAYMENT.FAILED must not flag a salon that's actually paying
+            // fine on its current, different subscription.
+            if (s.billing.paypalSubscriptionId !== resource.id) return false;
             s.billing.paymentFailing = true;
             return true;
           });
@@ -237,19 +262,31 @@ export default async function handler(req, res) {
         const probe = await getSalonsDb(kvUrl, kvToken);
         const salon = await findSalonByPaypalIds(probe, { customId: resource.custom_id, subscriptionId: resource.id });
         if (salon) {
+          let applied = false;
           await withSalonLock(kvUrl, kvToken, salon.id, async (salons) => {
             const s = salons.find(x => x.id === salon.id);
             if (!s || !s.billing) return false;
+            // Same stale-subscription guard as PAYMENT.FAILED above — a
+            // delayed SUSPENDED for an old, already-replaced subscription
+            // must never suspend the salon's actual current one.
+            if (s.billing.paypalSubscriptionId !== resource.id) return false;
             s.billing.paymentFailing = true;
             if (!s.inactive) {
               s.inactive = true;
               s.billing.suspendedByBilling = true;
             }
+            applied = true;
             return true;
           });
-          await sendEmail(salon.email, 'TRIMIO — Servizio sospeso per mancato pagamento',
-            `<p>Ciao,</p><p>Il servizio TRIMIO per <b>${escapeHtml(salon.name)}</b> è stato sospeso: il pagamento automatico con carta non è andato a buon fine dopo diversi tentativi. ` +
-            `Accedi alla gestione del pagamento dal tuo pannello per riattivare il servizio.</p>`);
+          // Only email if this event actually applied to the salon's real,
+          // current subscription — an email about a suspension that didn't
+          // really happen (a stale event for a dead subscription) would
+          // needlessly alarm an owner who's actually still paying fine.
+          if (applied) {
+            await sendEmail(salon.email, 'TRIMIO — Servizio sospeso per mancato pagamento',
+              `<p>Ciao,</p><p>Il servizio TRIMIO per <b>${escapeHtml(salon.name)}</b> è stato sospeso: il pagamento automatico con carta non è andato a buon fine dopo diversi tentativi. ` +
+              `Accedi alla gestione del pagamento dal tuo pannello per riattivare il servizio.</p>`);
+          }
         }
         break;
       }

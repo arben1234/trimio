@@ -829,6 +829,7 @@ function initCloudSync() {
     })
     .then(data => {
       if (data) {
+        if (handleSessionExpiredIfNeeded(data)) return;
         // Safeguard: Only update salons if the cloud database contains them.
         // If the cloud is brand new and empty, upload our local salons to initialize it.
         if (data.salons && data.salons.length > 0) {
@@ -946,6 +947,7 @@ function initCloudSync() {
         // recent save began — that response can only reflect pre-save data.
         if (isSaving || pollStartedAt < lastSaveStartedAt) return;
         if (data) {
+          if (handleSessionExpiredIfNeeded(data)) return;
           const fbBookings = data.bookings ? (Array.isArray(data.bookings) ? data.bookings : Object.values(data.bookings)) : [];
           const prevBookings = STATE.bookings || [];
           const localDemoBookings = prevBookings.filter(b => b.isDemo);
@@ -1269,7 +1271,7 @@ async function syncPushSubscriptionToServer(subscription) {
 // (owner/barber/admin) flow above since a customer has no SESSION.role — the
 // subscription is tied to this specific bookingId instead, and is what
 // api/send-reminders.js (daily cron) looks up the day before the appointment.
-async function initCustomerPushNotifications(bookingId) {
+async function initCustomerPushNotifications(bookingId, phone) {
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) return false;
   try {
     const registration = await navigator.serviceWorker.register('/sw.js');
@@ -1285,10 +1287,16 @@ async function initCustomerPushNotifications(bookingId) {
         applicationServerKey: urlBase64ToUint8Array(publicVapidKey)
       });
     }
+    // The server now requires proof of the booking's own phone number
+    // before accepting a customer subscription against it — otherwise
+    // anyone who learned/enumerated a booking id (never secret — the
+    // anonymous GET response hands every id out for slot-availability
+    // rendering) could register their own device against a stranger's
+    // appointment and receive its cancellation/reminder notifications.
     const resp = await fetch('/api/subscribe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ subscription, role: 'customer', bookingId })
+      body: JSON.stringify({ subscription, role: 'customer', bookingId, phone })
     });
     return resp.ok;
   } catch (err) {
@@ -2276,7 +2284,7 @@ async function doSubmit(){
     // silenzio, senza chiedere di nuovo "Attiva".
     let reminderAuto=false;
     if(typeof Notification!=='undefined'&&Notification.permission==='granted'){
-      try{reminderAuto=await initCustomerPushNotifications(bk.id);}catch(e){}
+      try{reminderAuto=await initCustomerPushNotifications(bk.id, bk.phone);}catch(e){}
     }
     renderCustReminderBanner(reminderAuto);
   } finally {
@@ -2394,6 +2402,25 @@ function renderSalonModalServices(s) {
   `).join('');
 }
 
+
+// GET /api/sync sets sessionExpired:true when the caller presented an
+// Authorization token that the server rejected (expired/forged/malformed)
+// — distinct from simply not presenting one. This used to go completely
+// unnoticed client-side: a stale token silently degraded to anonymous-
+// scoped (empty/PII-stripped) responses forever, with the client never
+// re-prompting for login. dashAction()'s optimistic local mutations (e.g.
+// marking a booking "Fatto") would then appear to succeed and silently
+// revert on the next poll once the real, unchanged server record came
+// back — confusing and undiagnosable from inside the app. Force a clean,
+// explained logout instead.
+let sessionExpiredHandled = false;
+function handleSessionExpiredIfNeeded(data) {
+  if (!data || !data.sessionExpired || !SESSION || !SESSION.role || sessionExpiredHandled) return false;
+  sessionExpiredHandled = true;
+  alert('La tua sessione è scaduta. Effettua nuovamente l\'accesso.');
+  doLogout();
+  return true;
+}
 
 function doLogout(){
   SESSION={role:null,salonId:null,workerId:null,name:null};
@@ -5570,7 +5597,7 @@ async function boot(){
       if (!lastBookingId) return;
       custReminderBtn.disabled = true;
       custReminderBtn.textContent = '…';
-      const ok = await initCustomerPushNotifications(lastBookingId);
+      const ok = await initCustomerPushNotifications(lastBookingId, custData.phone);
       if (ok) {
         $('custReminderIcon').textContent = '✅';
         $('custReminderMsg').textContent = 'Promemoria attivato! Ti avviseremo 24h prima.';

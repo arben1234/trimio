@@ -1,5 +1,6 @@
 import { getVerifiedSession, getClientIp } from '../lib/auth.js';
 import { getAllBookings, checkRateLimit, acquirePushSubsLock, releasePushSubsLock } from '../lib/kv.js';
+import { toE164 } from '../lib/sms.js';
 
 export default async function handler(req, res) {
   // CORS
@@ -60,13 +61,24 @@ export default async function handler(req, res) {
       salonId = session.salonId || null;
       workerId = session.workerId || null;
     } else if (role === 'customer') {
-      // Lower stakes (tied to one specific booking the customer already
-      // knows the id of), but still worth confirming the booking is real
-      // before persisting a subscription against it.
+      // Booking ids aren't secret — the anonymous GET /api/sync response
+      // hands every id out to anyone viewing a salon's page (name/phone
+      // stripped, but not the id itself), needed for slot-availability
+      // rendering. Confirming the booking merely EXISTS let anyone who
+      // scraped/enumerated a salon's ids register their own device against
+      // a stranger's real appointment — every cancellation/reminder push
+      // for it (customer's first name, date/time, salon) would then go
+      // straight to the attacker instead. Requires the same phone-number
+      // proof the customer self-cancel path already holds callers to.
       if (!bookingId) return res.status(400).json({ error: 'Missing bookingId' });
       const bookingsMap = await getAllBookings(kvUrl, kvToken);
-      if (!bookingsMap.has(bookingId)) {
+      const booking = bookingsMap.get(bookingId);
+      if (!booking) {
         return res.status(404).json({ error: 'Booking not found' });
+      }
+      const claimedPhone = toE164(body.phone);
+      if (!booking.phone || !claimedPhone || toE164(booking.phone) !== claimedPhone) {
+        return res.status(403).json({ error: 'phone_mismatch' });
       }
     } else {
       return res.status(400).json({ error: 'invalid_role' });

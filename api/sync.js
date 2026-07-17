@@ -980,6 +980,17 @@ export default async function handler(req, res) {
         // POST handler below (backed by lib/auth.js), which read/write KV
         // directly, so the client has no need to hold these locally at all.
         const session = getVerifiedSession(req);
+        // getVerifiedSession returns null identically for "no token sent"
+        // and "a token WAS sent but it's expired/forged/malformed" — the
+        // client used to have no way to tell those apart, so an expired
+        // session silently degraded to anonymous-scoped data (empty/PII-
+        // stripped) forever, with no re-login prompt ever surfaced: a
+        // barber's "Fatto"/cancel action could appear to succeed locally
+        // (dashAction() mutates STATE optimistically) and then silently
+        // revert on the next poll once the real, unchanged server record
+        // came back. Flag it explicitly so the client can react.
+        const hadToken = !!(req.headers && req.headers['authorization']);
+        const sessionExpired = hadToken && !session;
         const isAdminCaller = !!(session && session.role === 'admin');
         // iban/taxId/signupIp/contract fields, the owner's personal
         // email/name/phone, and their login username are admin-review-only
@@ -1041,6 +1052,7 @@ export default async function handler(req, res) {
         return res.status(200).json({
           bookings: scopeBookingsForSession(Array.from(bookingsMap.values()), session, requestedSalonId),
           salons: sanitizedSalons,
+          sessionExpired,
           admin: {
             // The platform admin's own login username used to ship to
             // EVERY caller here unconditionally, unlike every other
@@ -1219,7 +1231,22 @@ export default async function handler(req, res) {
               }
               if (nb.status !== 'cancelled') {
                 const worker = (salonForVac.workers || []).find(w => w.id === nb.workerId);
-                if (worker && (isOnVacation(worker, nb.dateISO) || isWeeklyOff(worker, nb.dateISO) || overlapsBreak(worker, nb, salonForVac))) {
+                // An unmatched workerId used to just silently SKIP the
+                // vacation/off-day/break check below (no worker found to
+                // check it against) instead of rejecting the booking — a
+                // caller could pair a real, active salonId with a workerId
+                // belonging to a completely different salon and still have
+                // the booking accepted. Beyond polluting a foreign salon's
+                // calendar with a phantom appointment, sendPushNotifications'
+                // barber-target filter matches on workerId alone (not also
+                // salonId), so this let an anonymous caller push an
+                // arbitrary "Nuova Prenotazione" notification straight to
+                // any specific barber on the platform.
+                if (!worker) {
+                  conflicts.push({ id: nb.id, error: 'invalid_booking' });
+                  continue;
+                }
+                if (isOnVacation(worker, nb.dateISO) || isWeeklyOff(worker, nb.dateISO) || overlapsBreak(worker, nb, salonForVac)) {
                   conflicts.push({ id: nb.id, salonId: nb.salonId, workerId: nb.workerId, dateISO: nb.dateISO, time: nb.time });
                   continue;
                 }
@@ -1303,6 +1330,22 @@ export default async function handler(req, res) {
               const isStaffForThisBooking = session && (session.role === 'admin'
                 || (session.role === 'owner' && session.salonId === existing.salonId)
                 || (session.role === 'barber' && session.salonId === existing.salonId && session.workerId === existing.workerId));
+              // The self-cancel phone match just below costs one in-memory
+              // string compare, no KV round-trip — the request-level booking
+              // rate limit further up budgets whole REQUESTS, not individual
+              // guesses, and saveState() always resends the client's ENTIRE
+              // local bookings snapshot (not just what changed), so a batch
+              // can't be capped by array size either without breaking real
+              // usage. Rate-limit the actual guess itself, per IP, so
+              // bundling many (known id, phone guess) pairs into one request
+              // doesn't sidestep the request-level budget.
+              if (!session && !isStaffForThisBooking) {
+                const rlGuess = await checkRateLimit(kvUrl, kvToken, `ratelimit:cancelguess:${getClientIp(req)}`, 20, 600);
+                if (!rlGuess.allowed) {
+                  conflicts.push({ id: nb.id, error: 'rate_limited' });
+                  continue;
+                }
+              }
               let merged;
               if (isStaffForThisBooking) {
                 // A cancelled booking's slot lock is released the moment it's
@@ -1560,6 +1603,29 @@ export default async function handler(req, res) {
                 }
               }
               if (existing) {
+                // Slug is the salon's actual public routing key (booking
+                // link/QR code — js/app.js resolves a salon by first-match
+                // slug lookup) and ownerUsername is the global login lookup
+                // key for the homepage "Accedi" button — uniqueness for
+                // both was only ever enforced for a BRAND NEW salon
+                // (isValidNewSalon below), never re-checked when an
+                // EXISTING salon is edited. An authenticated owner/admin
+                // session for salon A could set salon A's own slug to
+                // collide with salon B's, silently hijacking B's booking
+                // link/QR code (or making A itself unreachable, depending
+                // on lookup order) — a real cross-tenant integrity break
+                // reachable with just a valid session for ANY salon. Falls
+                // back to the existing value on a collision rather than
+                // rejecting the whole save, so an unrelated field edit
+                // (hours, photos...) bundled in the same request isn't
+                // blocked by an incidental collision.
+                if (incoming.slug !== existing.slug || incoming.ownerUsername !== existing.ownerUsername) {
+                  for (const other of salonMap.values()) {
+                    if (other.id === incoming.id) continue;
+                    if (incoming.slug !== existing.slug && other.slug === incoming.slug) incoming.slug = existing.slug;
+                    if (incoming.ownerUsername !== existing.ownerUsername && other.ownerUsername === incoming.ownerUsername) incoming.ownerUsername = existing.ownerUsername;
+                  }
+                }
                 // Credentials for anything that already exists must never be
                 // overwritten through this generic bulk-save path — the client
                 // no longer even holds real passwords locally (GET strips them),
@@ -1753,7 +1819,14 @@ async function sendPushNotifications(newBookings, salons, kvUrl, kvToken) {
       const targets = activeSubs.filter(sub => {
         if (sub.role === 'admin') return true;
         if (sub.role === 'owner' && sub.salonId === bk.salonId) return true;
-        if (sub.role === 'barber' && sub.workerId === bk.workerId) return true;
+        // Also requires salonId to match, not just workerId, as defense in
+        // depth — worker ids are meant to be unique per salon already (the
+        // real fix is the new-booking branch above now rejecting a
+        // salonId/workerId pair that don't actually belong together), but a
+        // subscription record predating that fix, or any future bug that
+        // lets a mismatched pair back in, must not be able to target a
+        // barber outside the booking's own salon.
+        if (sub.role === 'barber' && sub.workerId === bk.workerId && sub.salonId === bk.salonId) return true;
         return false;
       });
 

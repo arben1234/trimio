@@ -1,9 +1,39 @@
 import webPush from 'web-push';
+import crypto from 'crypto';
 import { put, list, del } from '@vercel/blob';
 import { getAllBookings, getSalonsDb, setSalonsDb, getAdminDb, getBlob, setBlob, acquireBillingLock, releaseBillingLock } from '../lib/kv.js';
 import { twilioConfigured } from '../lib/sms.js';
 import { sendEmail, escapeHtml } from '../lib/email.js';
 import { feeForWorkerCount } from '../lib/billing.js';
+
+// @vercel/blob has no "private/authenticated" access mode — every put()
+// with access:'public' is reachable by anyone who ever obtains its URL, no
+// auth check at all. The daily off-Upstash backup below contains every
+// salon's owner PII (email/name/phone/address) and every booking platform-
+// wide with customer name+phone — if that URL were ever exposed via a log
+// line, a referrer header, a support screenshot, or any other incidental
+// leak, it would hand over a complete cross-tenant PII dump with zero
+// authentication, for up to the 35-day retention window. Rather than rely
+// on the URL's own unguessability, the snapshot content itself is
+// encrypted (AES-256-GCM) before upload, keyed off BLOB_READ_WRITE_TOKEN
+// (already a required secret for this feature to run at all — no new env
+// var to configure). A leaked URL alone is then useless without that token.
+// To restore: download the blob, then in Node —
+//   const crypto = require('crypto');
+//   const key = crypto.createHash('sha256').update(BLOB_READ_WRITE_TOKEN).digest();
+//   const buf = Buffer.from(fs.readFileSync('trimio-YYYY-MM-DD.json.enc', 'utf8'), 'base64');
+//   const iv = buf.subarray(0, 12), authTag = buf.subarray(12, 28), data = buf.subarray(28);
+//   const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+//   decipher.setAuthTag(authTag);
+//   const json = Buffer.concat([decipher.update(data), decipher.final()]).toString('utf8');
+function encryptBackup(jsonString, blobToken) {
+  const key = crypto.createHash('sha256').update(blobToken).digest();
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const encrypted = Buffer.concat([cipher.update(jsonString, 'utf8'), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return Buffer.concat([iv, authTag, encrypted]).toString('base64');
+}
 
 const VAPID_PUBLIC_KEY = 'BLLKr1SroPRHybfSN2OunQUzy6yd5hggq2fmAmT90LL32Pgyaa_VkoESjUq3DGk0bgD2a5tb17bSZHc2heLJXGo';
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY?.trim();
@@ -187,9 +217,9 @@ export default async function handler(req, res) {
         bookings: backupBookings
       };
       const todayISO = romeTodayISO();
-      await put(`backups/trimio-${todayISO}.json`, JSON.stringify(snapshot), {
+      await put(`backups/trimio-${todayISO}.json.enc`, encryptBackup(JSON.stringify(snapshot), blobToken), {
         access: 'public',
-        contentType: 'application/json',
+        contentType: 'application/octet-stream',
         token: blobToken
       });
       report.backupSalons = backupSalons.length;
