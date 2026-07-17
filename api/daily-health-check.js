@@ -38,11 +38,21 @@ function romeTodayISO() {
 
 export default async function handler(req, res) {
   const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const auth = req.headers['authorization'];
-    if (auth !== `Bearer ${cronSecret}`) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
+  // If CRON_SECRET isn't configured at all (not documented among this
+  // project's required env vars — easy to have skipped), this used to fall
+  // through as fully open: any anonymous caller got back the full
+  // response, including real salon names tied to unpaid/failed billing
+  // status (report.problems) and platform-wide counts (bookings, admin
+  // device registrations) — a genuine cross-tenant business-data leak, not
+  // just a theoretical one. Rather than reject the request outright (which
+  // could break the real Vercel cron / GitHub Action if CRON_SECRET
+  // genuinely isn't set there either — this endpoint's actual health-check/
+  // suspend/notify side effects must keep running regardless), only the
+  // detailed RESPONSE BODY is gated below; Vercel's own cron scheduler
+  // never reads the response body, so this can't break the real job.
+  const isAuthenticated = !!cronSecret && req.headers['authorization'] === `Bearer ${cronSecret}`;
+  if (cronSecret && !isAuthenticated) {
+    return res.status(401).json({ error: 'Unauthorized' });
   }
 
   const problems = [];
@@ -56,7 +66,7 @@ export default async function handler(req, res) {
   report.smsConfigured = twilioConfigured();
   if (!kvUrl || !kvToken) {
     problems.push('Database KV non configurato');
-    return res.status(200).json({ problems, report, notified: 0 });
+    return res.status(200).json(isAuthenticated ? { problems, report, notified: 0 } : { ok: false, notified: 0 });
   }
 
   // 1. Database + salons
@@ -324,5 +334,12 @@ export default async function handler(req, res) {
     }
   }
 
-  return res.status(200).json({ ok: problems.length === 0, problems, report, notified, alreadyNotifiedToday });
+  // The health-check side effects above (billing warnings/suspensions, the
+  // daily backup, the admin push notification) already ran regardless of
+  // auth — only the detailed response body (real salon names, billing
+  // status, platform-wide counts) is withheld from an unauthenticated
+  // caller, same reasoning as the early-return above.
+  return res.status(200).json(isAuthenticated
+    ? { ok: problems.length === 0, problems, report, notified, alreadyNotifiedToday }
+    : { ok: problems.length === 0 });
 }

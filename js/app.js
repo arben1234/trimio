@@ -2135,12 +2135,14 @@ function renderCustServices(){
 
 function renderCustStep(){
   clearErr('cErr');clearInfo('cInfo');
-  ['s0','s1','s2','s3','sDone'].forEach(id=>$(id).classList.remove('on'));
+  ['s0','s1','s2','s3','s4','sDone'].forEach(id=>$(id).classList.remove('on'));
   // Ordine dei passi: barbiere (s0) → servizio (s2) → data e orario (s1) →
-  // conferma (s3). Il servizio viene PRIMA dell'orario perché la sua durata
-  // determina quali orari sono proponibili.
-  const STEP_EL=['s0','s2','s1','s3'];
-  $(STEP_EL[Math.min(custStep,3)]).classList.add('on');
+  // conferma (s3) → verifica telefono (s4, solo se un codice è stato
+  // effettivamente inviato — vedi custRequestOtpAndAdvance). Il servizio
+  // viene PRIMA dell'orario perché la sua durata determina quali orari
+  // sono proponibili.
+  const STEP_EL=['s0','s2','s1','s3','s4'];
+  $(STEP_EL[Math.min(custStep,4)]).classList.add('on');
   document.querySelectorAll('#vCustomer .dots .dot').forEach((d,i)=>d.classList.toggle('on',i<=custStep));
   // Restore the action bar hidden by the confirmation screen — without this,
   // starting a new booking after a completed one left the page with no
@@ -2149,7 +2151,7 @@ function renderCustStep(){
   $('cBack').style.display=custStep>0?'block':'none';
   $('cNext').style.display='block';
   $('cNext').disabled=false;
-  $('cNext').textContent=custStep===3?'✓ Conferma':'Avanti →';
+  $('cNext').textContent=custStep===3?'✓ Conferma':custStep===4?'Verifica':'Avanti →';
   $('cFooter').style.display=custStep===0?'block':'none';
   if(custStep===1)renderCustServices();
   if(custStep===2){
@@ -2161,14 +2163,94 @@ function renderCustStep(){
     $('rT').textContent=custData.time+' · '+serviceDurMin(custSalon,custData.service)+' min';
     $('rS').textContent=custData.service;$('rP').textContent='€'+custData.price;
   }
+  if(custStep===4){
+    $('cOtpPhoneShown').textContent=custData.phone||'—';
+    $('cOtpCode').value='';
+    setTimeout(()=>$('cOtpCode').focus(),50);
+  }
 }
 
 // clearErr() here, not just inside renderCustStep(): the final step calls
 // doSubmit() instead of renderCustStep() on success, so a stale error from
 // an earlier failed attempt on the SAME step (e.g. "numero non valido")
 // was never hidden once the customer fixed it and the booking went through.
-function custNext(){if(!validateCust())return;clearErr('cErr');if(custStep===3){doSubmit();return;}custStep++;renderCustStep();}
+function custNext(){
+  if(custStep===4){custVerifyOtp();return;}
+  if(!validateCust())return;
+  clearErr('cErr');
+  if(custStep===3){custRequestOtpAndAdvance();return;}
+  custStep++;renderCustStep();
+}
 function custBack(){if(custStep>0){custStep--;renderCustStep();}}
+
+// A phone number only had to LOOK like a real Italian number to book — this
+// requires actually receiving and echoing back an SMS code first, same
+// proof-of-ownership bar self-signup already holds owners to (server-side
+// enforcement in api/sync.js's new-booking branch — this is the UI that
+// gets a real customer through that gate, not the enforcement itself).
+async function custRequestOtpAndAdvance(){
+  const btn=$('cNext');
+  btn.disabled=true;const orig=btn.textContent;btn.textContent='…';
+  try{
+    const r=await fetch('/api/sync',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'request_booking_otp',phone:custData.phone})}).then(x=>x.json()).catch(()=>null);
+    if(r&&r.success){
+      custStep=4;renderCustStep();
+      return;
+    }
+    if(r&&r.error==='sms_unavailable'){
+      // Twilio isn't configured (or couldn't deliver to this specific
+      // number, e.g. a trial-account restriction) — same fallback
+      // philosophy as the self-signup OTP gate: don't block a real booking
+      // over infrastructure that isn't set up, just skip straight through.
+      doSubmit();
+      return;
+    }
+    if(r&&r.error==='rate_limited'){
+      showErr('cErr','Troppi tentativi. Riprova tra qualche minuto.');
+    }else{
+      showErr('cErr','Impossibile inviare il codice di verifica. Riprova.');
+    }
+  }finally{
+    btn.disabled=false;btn.textContent=orig;
+  }
+}
+let custOtpVerifying=false;
+async function custVerifyOtp(){
+  if(custOtpVerifying)return;
+  const code=($('cOtpCode').value||'').trim();
+  if(!/^\d{4,6}$/.test(code))return showErr('cErr','Inserisci il codice ricevuto via SMS.');
+  custOtpVerifying=true;
+  const btn=$('cNext');btn.disabled=true;const orig=btn.textContent;btn.textContent='…';
+  try{
+    const r=await fetch('/api/sync',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'verify_booking_otp',phone:custData.phone,code})}).then(x=>x.json()).catch(()=>null);
+    if(r&&r.success){
+      doSubmit();
+      return;
+    }
+    showErr('cErr','Codice non valido. Riprova.');
+  }finally{
+    custOtpVerifying=false;
+    btn.disabled=false;btn.textContent=orig;
+  }
+}
+async function custResendOtp(){
+  const link=$('cOtpResend');
+  if(link.disabled)return;
+  link.disabled=true;const orig=link.textContent;link.textContent='Invio…';
+  try{
+    const r=await fetch('/api/sync',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'request_booking_otp',phone:custData.phone})}).then(x=>x.json()).catch(()=>null);
+    if(r&&r.success){
+      link.textContent='Codice inviato di nuovo';
+    }else if(r&&r.error==='rate_limited'){
+      showErr('cErr','Troppi tentativi. Riprova tra qualche minuto.');
+      link.textContent=orig;
+    }else{
+      link.textContent=orig;
+    }
+  }finally{
+    setTimeout(()=>{link.disabled=false;if(link.textContent!==orig)link.textContent=orig;},4000);
+  }
+}
 
 function validateCust(){
   const s=custStep;
@@ -2244,6 +2326,16 @@ async function doSubmit(){
         showErr('cErr','Il sistema è momentaneamente molto richiesto per questo orario. Riprova tra qualche secondo.');
         return;
       }
+      if(conflict.error==='phone_not_verified'){
+        // Only reaches here in a genuine edge case (e.g. two tabs racing to
+        // consume the same OTP claim) since the client never calls doSubmit
+        // before a successful verify_booking_otp. Not a slot problem, so
+        // showing the "choose another barber" modal would be misleading —
+        // send the customer back to request a fresh code instead.
+        showErr('cErr','Verifica del numero scaduta. Richiedi un nuovo codice.');
+        custStep=3;renderCustStep();
+        return;
+      }
       // Un altro cliente ha preso questo slot nel frattempo (rilevato dal server)
       const free=custSalon.workers.filter(w=>{
         if(w.id===custData.barberId)return false;
@@ -2264,7 +2356,7 @@ async function doSubmit(){
 
     $('dB').textContent=custData.barberName;$('dD').textContent=custData.dateLabel;
     $('dT').textContent=custData.time+' · '+durMin+' min';$('dS').textContent=custData.service;
-    ['s0','s1','s2','s3'].forEach(id=>$(id).classList.remove('on'));
+    ['s0','s1','s2','s3','s4'].forEach(id=>$(id).classList.remove('on'));
     $('sDone').classList.add('on');
     $('cActions').style.display='none';$('cFooter').style.display='none';
     document.querySelectorAll('#vCustomer .dots .dot').forEach(d=>d.classList.add('on'));
@@ -2381,14 +2473,14 @@ function renderSalonModalServices(s) {
   const svcs = s.services || DEFAULT_SERVICES;
   container.innerHTML = svcs.map(svc => `
     <div class="sm-svc-item" style="display:flex; align-items:center; gap:10px; margin-bottom:12px; padding-bottom:8px; border-bottom:1px solid #e4e4e7;">
-      <div style="flex:2; font-size:13px; font-weight:700; color:#18181b;">${svc.name}</div>
+      <div style="flex:2; font-size:13px; font-weight:700; color:#18181b;">${escapeHtml(svc.name)}</div>
       <div style="flex:1;">
         <label style="font-size:10px; color:#71717a; display:block; margin-bottom:2px;">Prezzo (€)</label>
-        <input type="number" class="minput sm-svc-price" data-name="${svc.name}" value="${svc.price}" style="margin-bottom:0; padding:6px 8px; font-size:12px; border-radius:6px; border:1px solid #ccc;">
+        <input type="number" class="minput sm-svc-price" data-name="${escapeHtml(svc.name)}" value="${svc.price}" style="margin-bottom:0; padding:6px 8px; font-size:12px; border-radius:6px; border:1px solid #ccc;">
       </div>
       <div style="flex:1;">
         <label style="font-size:10px; color:#71717a; display:block; margin-bottom:2px;">Durata</label>
-        <input type="text" class="minput sm-svc-dur" data-name="${svc.name}" value="${svc.dur}" style="margin-bottom:0; padding:6px 8px; font-size:12px; border-radius:6px; border:1px solid #ccc;">
+        <input type="text" class="minput sm-svc-dur" data-name="${escapeHtml(svc.name)}" value="${escapeHtml(svc.dur)}" style="margin-bottom:0; padding:6px 8px; font-size:12px; border-radius:6px; border:1px solid #ccc;">
       </div>
     </div>
   `).join('');
@@ -2474,7 +2566,7 @@ function updateNavMenu() {
       // prenotazioni" lives only in the automatic banner on the page
       // itself, not duplicated here in the menu.
       html += `
-        <option value="" disabled selected>☰ Menu: ${custSalon.name}</option>
+        <option value="" disabled selected>☰ Menu: ${escapeHtml(custSalon.name)}</option>
         <option value="booking">📅 Prenota in questo Salone</option>
         <option value="login_owner">🔑 Login Proprietario (Owner)</option>
         <option value="login_barber">🔑 Login Staf / Barbiere</option>
@@ -3740,7 +3832,7 @@ function periodLabel(){
 function barChart(data,cls=''){
   const max=Math.max(1,...Object.values(data));
   return Object.entries(data).map(([k,v])=>`<div class="bar-row">
-    <div class="bar-label">${k}</div>
+    <div class="bar-label">${escapeHtml(k)}</div>
     <div class="bar-track"><div class="bar-fill ${cls}" style="width:${Math.round(v/max*100)}%"><span>${v}</span></div></div>
   </div>`).join('');
 }
@@ -3910,16 +4002,16 @@ function printStatsExport(){
   if(!d||!target)return;
   target.innerHTML=`
     <div class="ps-header">
-      <div class="ps-title">${d.title}</div>
-      <div class="ps-sub">${d.subtitle}</div>
+      <div class="ps-title">${escapeHtml(d.title)}</div>
+      <div class="ps-sub">${escapeHtml(d.subtitle)}</div>
     </div>
     <table>
       <thead><tr>
-        <th>Periodo</th><th>${d.colLabel}</th><th style="text-align:right">Clienti serviti</th><th style="text-align:right">Incasso (€)</th>
+        <th>Periodo</th><th>${escapeHtml(d.colLabel)}</th><th style="text-align:right">Clienti serviti</th><th style="text-align:right">Incasso (€)</th>
       </tr></thead>
       <tbody>
         ${d.rows.map(row=>`<tr>
-          <td>${d.period}</td><td>${row.name}</td>
+          <td>${escapeHtml(d.period)}</td><td>${escapeHtml(row.name)}</td>
           <td style="text-align:right">${row.count}</td>
           <td style="text-align:right">€${row.rev}</td>
         </tr>`).join('')}
@@ -4717,7 +4809,7 @@ function renderHomepage(){
     const addressDisplay = s.address ? `📍 ${escapeHtml(s.address)}, ${escapeHtml(s.city || '—')}` : `📍 ${escapeHtml(s.city || '—')}`;
     const phoneDisplay = s.phone ? `
       <div style="font-size:12.5px; color:#444; margin-top:5px; display:flex; align-items:center; gap:5px;" onclick="event.stopPropagation();">
-        📞 <a href="tel:${s.phone}" style="color:#4f46e5; text-decoration:none; font-weight:700;">${s.phone}</a>
+        📞 <a href="tel:${escapeHtml(s.phone)}" style="color:#4f46e5; text-decoration:none; font-weight:700;">${escapeHtml(s.phone)}</a>
       </div>` : '';
       
     const promoDisplay = s.promo ? `
@@ -5037,6 +5129,8 @@ async function boot(){
   // ---- Customer wiring ----
   $('cNext').addEventListener('click',custNext);
   $('cBack').addEventListener('click',custBack);
+  $('cOtpResend').addEventListener('click',custResendOtp);
+  $('cOtpCode').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();custVerifyOtp();}});
   $('again').addEventListener('click',()=>location.reload());
   $('cname').addEventListener('input',e=>{custData.name=e.target.value;clearErr('cErr');});
   $('cphone').addEventListener('input',e=>{custData.phone=e.target.value;});

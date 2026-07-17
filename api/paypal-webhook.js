@@ -1,4 +1,4 @@
-import { getSalonsDb, setSalonsDb, acquireBillingLock, releaseBillingLock, claimWebhookEventOnce } from '../lib/kv.js';
+import { getSalonsDb, setSalonsDb, acquireBillingLock, releaseBillingLock, claimWebhookEventOnce, unclaimWebhookEvent } from '../lib/kv.js';
 import { paypalFetch, paypalConfigured } from '../lib/paypal.js';
 import { romeYearMonth } from '../lib/time.js';
 import { sendEmail, escapeHtml } from '../lib/email.js';
@@ -22,6 +22,11 @@ async function findSalonByPaypalIds(salons, { customId, subscriptionId }) {
   return null;
 }
 
+// Thrown by withSalonLock when it couldn't even get the lock — distinct
+// from any other error so the handler below can tell "genuine contention,
+// PayPal should retry" apart from "a real bug happened".
+class LockAcquisitionError extends Error {}
+
 // Wraps a salon read-modify-write with the per-salon lock, so two webhook
 // events for different salons landing within milliseconds of each other
 // can't clobber one another (getSalonsDb/setSalonsDb is a full-blob
@@ -30,8 +35,14 @@ async function findSalonByPaypalIds(salons, { customId, subscriptionId }) {
 async function withSalonLock(kvUrl, kvToken, salonId, mutate) {
   const locked = await acquireBillingLock(kvUrl, kvToken, salonId);
   if (!locked) {
-    console.error('[PAYPAL-WEBHOOK] Could not acquire billing lock for salon', salonId);
-    return;
+    // Used to just log and silently return here — but by this point
+    // claimWebhookEventOnce has ALREADY marked event.id as processed, so a
+    // silent return meant this event's side effects were dropped forever:
+    // PayPal would only ever retry on a non-2xx response, and even if it
+    // did, the claim would tell that retry "already_processed". Throwing
+    // lets the top-level handler unclaim the event and return a status
+    // PayPal actually retries.
+    throw new LockAcquisitionError(`Could not acquire billing lock for salon ${salonId}`);
   }
   try {
     const salons = await getSalonsDb(kvUrl, kvToken);
@@ -140,6 +151,16 @@ export default async function handler(req, res) {
           const probe = await getSalonsDb(kvUrl, kvToken);
           const salon = await findSalonByPaypalIds(probe, { subscriptionId });
           if (salon) {
+            // If PAYPAL.SALE.COMPLETED and PAYMENT.CAPTURE.COMPLETED both
+            // fire for the SAME real charge (unconfirmed from docs, hence
+            // handling both defensively above), each carries a different
+            // event.id, so claimWebhookEventOnce doesn't dedupe across them
+            // — paidThroughMonth being set twice is harmless/idempotent, but
+            // the owner would get the "Pagamento ricevuto" email twice.
+            // Skip the (re-)send when this month was already marked paid
+            // before this event, since that means a duplicate/redundant
+            // event for a charge already processed this month, not a new one.
+            const alreadyPaidThisMonth = salon.billing?.paidThroughMonth === romeYearMonth();
             await withSalonLock(kvUrl, kvToken, salon.id, async (salons) => {
               const s = salons.find(x => x.id === salon.id);
               if (!s) return false;
@@ -156,8 +177,10 @@ export default async function handler(req, res) {
             // to the owner — only a FAILED/suspended payment ever emailed
             // them. Best-effort (sendEmail never throws): the payment is
             // already recorded above regardless of whether this reaches them.
-            await sendEmail(salon.email, 'TRIMIO — Pagamento ricevuto',
-              `<p>Ciao,</p><p>Abbiamo ricevuto correttamente il pagamento automatico del canone mensile TRIMIO per <b>${escapeHtml(salon.name)}</b>. Grazie!</p>`);
+            if (!alreadyPaidThisMonth) {
+              await sendEmail(salon.email, 'TRIMIO — Pagamento ricevuto',
+                `<p>Ciao,</p><p>Abbiamo ricevuto correttamente il pagamento automatico del canone mensile TRIMIO per <b>${escapeHtml(salon.name)}</b>. Grazie!</p>`);
+            }
           }
         }
         break;
@@ -271,6 +294,14 @@ export default async function handler(req, res) {
     }
   } catch (err) {
     console.error('[PAYPAL-WEBHOOK] Handler error for event', event.event_type, err);
+    if (err instanceof LockAcquisitionError) {
+      // Release the idempotency claim so PayPal's own redelivery (triggered
+      // by this non-2xx response) can actually go through and apply the
+      // event next time, instead of silently no-op'ing on "already
+      // processed" against an event that was never really processed.
+      await unclaimWebhookEvent(kvUrl, kvToken, event.id);
+      return res.status(503).json({ error: 'busy' });
+    }
     return res.status(500).json({ error: 'internal_error' });
   }
 

@@ -36,6 +36,14 @@ export default async function handler(req, res) {
 
     res.setHeader('Content-Type', contentType);
     res.setHeader('Cache-Control', 'public, max-age=31536000, s-maxage=31536000, immutable');
+    // Magic-byte validation at upload time (api/upload-image.js) can't rule
+    // out an image/HTML polyglot (a file that's simultaneously a valid GIF/
+    // JPEG and valid HTML/script) — without this, a sniff-happy user agent
+    // could still render the response body as HTML instead of the declared
+    // image type. Explicit here (in addition to the global header in
+    // vercel.json) since this is the one response most worth guaranteeing
+    // it on regardless of how the two might interact.
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     return res.status(200).end(buffer);
   } catch (err) {
     console.error('[IMAGE] Error:', err);

@@ -37,7 +37,7 @@ export default async function handler(req, res) {
     if (!kvUrl || !kvToken) {
       return res.status(403).json({ error: 'database_suspended', message: 'Il database Vercel Blob è stato sospeso. Per riattivare, collega un database Vercel KV.' });
     }
-    if (!(await verifyAdminPassword(body.adminPassword, kvUrl, kvToken))) {
+    if (!(await verifyAdminPassword(body.adminPassword, kvUrl, kvToken, req))) {
       return res.status(401).json({ error: 'Incorrect admin password' });
     }
 

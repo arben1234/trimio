@@ -1,5 +1,6 @@
 import { put } from '@vercel/blob';
-import { getVerifiedSession } from '../lib/auth.js';
+import { getVerifiedSession, getClientIp } from '../lib/auth.js';
+import { checkRateLimit } from '../lib/kv.js';
 
 // Accepts { filename, dataBase64, contentType } and stores the decoded image
 // in Vercel Blob storage, returning its public URL. The client reads the
@@ -49,6 +50,21 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: 'invalid_session' });
   }
 
+  const kvUrl = process.env.KV_REST_API_URL;
+  const kvToken = process.env.KV_REST_API_TOKEN;
+  // Any verified session (owner/barber/admin) could otherwise loop real
+  // (magic-byte-valid) uploads indefinitely with no throttle at all,
+  // consuming real Vercel Blob storage/bandwidth cost — a single
+  // compromised or malicious low-privilege staff login was enough, no
+  // admin access needed. Generous enough for a real person uploading a
+  // handful of salon/worker photos in one sitting.
+  if (kvUrl && kvToken) {
+    const rl = await checkRateLimit(kvUrl, kvToken, `ratelimit:upload:${getClientIp(req)}`, 20, 600);
+    if (!rl.allowed) {
+      return res.status(429).json({ error: 'rate_limited' });
+    }
+  }
+
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
     const { filename, dataBase64, contentType } = body || {};
@@ -85,8 +101,7 @@ export default async function handler(req, res) {
     // Fallback backend: Upstash KV ("img:<id>" = "contentType|base64"),
     // served back by /api/image?id=<id>. The client compresses images before
     // uploading, so they fit comfortably under Upstash's ~1MB request cap.
-    const kvUrl = process.env.KV_REST_API_URL;
-    const kvToken = process.env.KV_REST_API_TOKEN;
+    // (kvUrl/kvToken already resolved above, for the rate limit check.)
     if (!kvUrl || !kvToken) {
       return res.status(403).json({ error: 'storage_not_configured', message: 'Nessuno storage immagini configurato.' });
     }

@@ -35,7 +35,7 @@ export default async function handler(req, res) {
     // Irreversible, and salon ids are predictable + publicly visible via
     // /api/sync — must never be reachable with just an id. Same
     // proof-of-identity pattern as reset-all-data.js.
-    if (!(await verifyAdminPassword(body.adminPassword, kvUrl, kvToken))) {
+    if (!(await verifyAdminPassword(body.adminPassword, kvUrl, kvToken, req))) {
       return res.status(401).json({ error: 'Incorrect admin password' });
     }
 

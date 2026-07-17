@@ -325,7 +325,7 @@
         <button id="custGalleryLightboxClose" type="button" aria-label="Chiudi" style="position:absolute; top:16px; right:16px; width:40px; height:40px; border-radius:50%; border:none; background:rgba(255,255,255,0.15); color:#fff; font-size:20px; line-height:1; cursor:pointer;">✕</button>
         <img id="custGalleryLightboxImg" src="" alt="" style="max-width:100%; max-height:100%; border-radius:12px; object-fit:contain;">
       </div>
-      <div class="dots" style="margin-top: 10px;"><div class="dot on"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+      <div class="dots" style="margin-top: 10px;"><div class="dot on"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
       <div class="err" id="cErr"></div>
       <div class="info-box" id="cInfo"></div>
 
@@ -370,6 +370,13 @@
         </div>
         <div class="field" style="margin-bottom:0"><label>Il tuo nome <span style="color:#e5c158">*</span></label><input type="text" id="cname" placeholder="Es. Marco" autocomplete="name" required></div>
         <div class="field" style="margin-top:12px; margin-bottom:0"><label>Numero di telefono <span style="color:#e5c158">*</span></label><input type="tel" id="cphone" placeholder="Es. +39 345 678 9012" autocomplete="tel" required></div>
+      </div>
+
+      <div class="step" id="s4">
+        <div class="title">Verifica il tuo numero</div>
+        <p style="font-size:13px; color:#666; margin-bottom:16px;">Ti abbiamo inviato un codice via SMS al numero <b id="cOtpPhoneShown">—</b>. Inseriscilo qui sotto per confermare la prenotazione.</p>
+        <div class="field" style="margin-bottom:0"><label>Codice di verifica <span style="color:#e5c158">*</span></label><input type="text" id="cOtpCode" inputmode="numeric" maxlength="6" placeholder="123456" autocomplete="one-time-code"></div>
+        <button class="link" id="cOtpResend" type="button" style="margin-top:10px;">Non hai ricevuto il codice? Invia di nuovo</button>
       </div>
 
       <div class="step" id="sDone">
@@ -1161,6 +1168,6 @@
      own "Save as PDF" print target produces a clean report. -->
 <div id="printableStats"></div>
 
-<script src="/js/app.min.js?v=20260716_0010"></script>
+<script src="/js/app.min.js?v=20260717_0002"></script>
 </body>
 </html>
