@@ -223,53 +223,6 @@ async function handleVerifySignupOtp(body, kvUrl, kvToken) {
   return { status: 200, json: { success: true } };
 }
 
-// Same shape as handleRequestSignupOtp/handleVerifySignupOtp above, but a
-// dedicated key namespace (booking_otp*, not signup_otp*) so a customer
-// verifying their phone to book doesn't interact with a completely
-// different person's in-progress salon self-signup for the same number (or
-// vice versa) — each flow proves phone ownership for its OWN purpose, at
-// the time of that action, independently.
-//
-// Requiring only a phone FORMAT to look valid (isValidItalianPhone) let a
-// customer book with a number that looks real but isn't theirs — or isn't
-// even a real assigned number at all — with no way for the salon to ever
-// actually reach them (a reminder/notification silently going nowhere, or
-// a no-show with no contact trail). This closes that: a real SMS code must
-// be received and echoed back before a booking is accepted, same proof-of-
-// ownership bar self-signup already holds owners to.
-async function handleRequestBookingOtp(body, kvUrl, kvToken, req) {
-  if (!twilioConfigured()) return { status: 200, json: { success: false, error: 'sms_unavailable' } };
-  const phone = toE164(body.phone);
-  if (!phone) return { status: 400, json: { success: false, error: 'invalid_phone' } };
-
-  const rlIp = await checkRateLimit(kvUrl, kvToken, `ratelimit:bkotp_ip:${getClientIp(req)}`, 12, 3600);
-  if (!rlIp.allowed) return { status: 429, json: { success: false, error: 'rate_limited' } };
-  const rlPhone = await checkRateLimit(kvUrl, kvToken, `ratelimit:bkotp_phone:${phone}`, 6, 3600);
-  if (!rlPhone.allowed) return { status: 429, json: { success: false, error: 'rate_limited' } };
-
-  const code = String(Math.floor(100000 + Math.random() * 900000));
-  await kvCmd(kvUrl, kvToken, ['SET', `booking_otp:${phone}`, code, 'EX', '600']);
-  const sent = await sendCustomerText(phone, `Il tuo codice di verifica TRIMIO è: ${code}`);
-  if (!sent) return { status: 200, json: { success: false, error: 'sms_unavailable' } };
-  return { status: 200, json: { success: true } };
-}
-async function handleVerifyBookingOtp(body, kvUrl, kvToken) {
-  const phone = toE164(body.phone);
-  const code = typeof body.code === 'string' ? body.code.trim() : '';
-  if (!phone || !/^\d{4,6}$/.test(code)) return { status: 400, json: { success: false, error: 'missing_fields' } };
-
-  const stored = await kvCmd(kvUrl, kvToken, ['GET', `booking_otp:${phone}`]);
-  if (!stored || stored !== code) return { status: 401, json: { success: false, error: 'invalid_code' } };
-
-  await kvCmd(kvUrl, kvToken, ['DEL', `booking_otp:${phone}`]);
-  // Consumed atomically (see the new-booking branch below) — this is a
-  // capability that's spent exactly once per verification, not a durable
-  // "this phone is trusted forever" flag, so a customer booking again
-  // later must re-prove ownership.
-  await kvCmd(kvUrl, kvToken, ['SET', `booking_otp_verified:${phone}`, '1', 'EX', '1800']);
-  return { status: 200, json: { success: true } };
-}
-
 // Self-service salon signup ("Registra il tuo salone" on the public
 // homepage) — the ONLY path where a genuinely new salon can be created
 // without an admin session (the generic bulk salons[] save further below
@@ -1100,14 +1053,6 @@ export default async function handler(req, res) {
           const r = await handleSignupSalon(newData, kvUrl, kvToken, req);
           return res.status(r.status).json(r.json);
         }
-        if (newData && newData.action === 'request_booking_otp') {
-          const r = await handleRequestBookingOtp(newData, kvUrl, kvToken, req);
-          return res.status(r.status).json(r.json);
-        }
-        if (newData && newData.action === 'verify_booking_otp') {
-          const r = await handleVerifyBookingOtp(newData, kvUrl, kvToken);
-          return res.status(r.status).json(r.json);
-        }
         if (newData && newData.action === 'reset_all_data') {
           const r = await handleResetAllData(newData, kvUrl, kvToken, req);
           return res.status(r.status).json(r.json);
@@ -1226,36 +1171,6 @@ export default async function handler(req, res) {
                 conflicts.push({ id: nb.id, error: 'invalid_booking' });
                 continue;
               }
-              // A customer's phone number only had to look VALID (a real
-              // Italian mobile/landline shape), never that it was actually
-              // THEIRS — anyone could book with a real-looking number that
-              // isn't reachable, or belongs to someone else entirely, with
-              // no way for the salon to ever contact them. Require a fresh,
-              // just-verified booking_otp_verified claim (see
-              // handleVerifyBookingOtp above) for any anonymous/customer
-              // booking. Only enforced when Twilio is actually configured —
-              // same "don't block real bookings over infrastructure that
-              // isn't set up" fallback the self-signup OTP gate already
-              // uses — and never applied to a STAFF-created manual/walk-in
-              // booking (`session` present), since staff enters that
-              // customer's info on their behalf and can't hand them an SMS
-              // code to type in. This only PEEKs at the claim (GET, not
-              // DEL) — actually consuming it happens right before the slot
-              // is locked further down, so a verified customer who hits a
-              // slot conflict here and retries with a different barber
-              // (the "choose another barber" flow below) still has a valid
-              // claim left to consume on that retry, instead of being
-              // wrongly bounced with phone_not_verified for a code they
-              // already used successfully.
-              let custPhoneForOtp = null;
-              if (!session && nb.status !== 'cancelled' && twilioConfigured()) {
-                custPhoneForOtp = toE164(nb.phone);
-                const stillValid = custPhoneForOtp && await kvCmd(kvUrl, kvToken, ['GET', `booking_otp_verified:${custPhoneForOtp}`]);
-                if (!stillValid) {
-                  conflicts.push({ id: nb.id, error: 'phone_not_verified' });
-                  continue;
-                }
-              }
               if (nb.status !== 'cancelled') {
                 const worker = (salonForVac.workers || []).find(w => w.id === nb.workerId);
                 if (worker && (isOnVacation(worker, nb.dateISO) || isWeeklyOff(worker, nb.dateISO) || overlapsBreak(worker, nb, salonForVac))) {
@@ -1301,20 +1216,6 @@ export default async function handler(req, res) {
                     && overlapsExisting(nb, bookingsMap, salonsForDur.find(s => s.id === nb.salonId))) {
                   conflicts.push({ id: nb.id, salonId: nb.salonId, workerId: nb.workerId, dateISO: nb.dateISO, time: nb.time });
                   continue;
-                }
-                // Now that every conflict check has passed and this booking
-                // is actually about to be committed, atomically consume the
-                // OTP claim (DEL, not GET) so it can never be reused for a
-                // second booking. The earlier GET only confirmed a valid
-                // claim existed; re-checking here also covers the (tiny)
-                // window where a concurrent request for the same phone
-                // number raced this one to consume it first.
-                if (custPhoneForOtp) {
-                  const consumed = await kvCmd(kvUrl, kvToken, ['DEL', `booking_otp_verified:${custPhoneForOtp}`]);
-                  if (!consumed) {
-                    conflicts.push({ id: nb.id, error: 'phone_not_verified' });
-                    continue;
-                  }
                 }
                 // Brand-new booking claiming a slot — must go through the atomic lock.
                 const acquired = await tryAcquireSlotLock(kvUrl, kvToken, nb);
