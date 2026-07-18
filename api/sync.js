@@ -528,6 +528,75 @@ async function handleMarkSalonPaid(body, kvUrl, kvToken, req) {
   }
 }
 
+// Cancels a removed worker's remaining FUTURE confirmed bookings (customer
+// notified exactly like any other staff cancellation) and archives their
+// review history at the salon level instead of letting it be destroyed.
+// Shared by handleDeleteWorker below — the only path a worker can actually
+// be removed through now, after the generic bulk salon-save was found to
+// treat a worker simply MISSING from a (possibly stale) payload as an
+// intentional deletion, silently cancelling real bookings and notifying
+// real customers for a worker nobody had actually asked to remove.
+async function cancelRemovedWorkerBookings(salon, removedWorker, bookingsMap, kvUrl, kvToken, staffCancelledBks) {
+  if (Array.isArray(removedWorker.reviews) && removedWorker.reviews.length) {
+    if (!Array.isArray(salon.archivedReviews)) salon.archivedReviews = [];
+    salon.archivedReviews.push(...removedWorker.reviews.map(r => ({ ...r, workerName: removedWorker.name })));
+  }
+  const now = romeNow();
+  for (const b of bookingsMap.values()) {
+    if (b.salonId !== salon.id || b.workerId !== removedWorker.id || b.status !== 'confirmed') continue;
+    const bMin = timeToMin(b.time);
+    const isFuture = b.dateISO > now.todayISO || (b.dateISO === now.todayISO && bMin !== null && bMin > now.minutes);
+    if (!isFuture) continue;
+    const cancelled = { ...b, status: 'cancelled', cancelledBy: 'staff' };
+    await hsetBooking(kvUrl, kvToken, cancelled);
+    await releaseSlotLock(kvUrl, kvToken, cancelled);
+    bookingsMap.set(b.id, cancelled);
+    // Same idempotency guard the normal staff-cancel path uses, so a
+    // retried/duplicated request can't notify the same customer twice.
+    if (await claimCancellationNotifyOnce(kvUrl, kvToken, cancelled.id)) {
+      staffCancelledBks.push(cancelled);
+    }
+  }
+}
+
+// Admin-only, explicit, targeted worker deletion — mirrors delete-salon.js's
+// pattern (acts on the current server-side record directly, requires the
+// real admin password re-typed, not just an admin session) rather than
+// being inferred from a bulk salons[] payload that might just be stale.
+async function handleDeleteWorker(body, kvUrl, kvToken, req) {
+  const { salonId, workerId, adminPassword } = body;
+  if (!salonId || !workerId) return { status: 400, json: { success: false, error: 'missing_fields' } };
+  if (!(await verifyAdminPassword(adminPassword, kvUrl, kvToken, req))) {
+    return { status: 401, json: { success: false, error: 'wrong_admin_password' } };
+  }
+  const locked = await acquireBillingLock(kvUrl, kvToken, salonId);
+  if (!locked) return { status: 503, json: { success: false, error: 'busy' } };
+  try {
+    const salons = await getSalonsDb(kvUrl, kvToken);
+    const salon = salons.find(s => s.id === salonId);
+    if (!salon) return { status: 404, json: { success: false, error: 'salon_not_found' } };
+    const worker = (salon.workers || []).find(w => w.id === workerId);
+    if (!worker) return { status: 404, json: { success: false, error: 'worker_not_found' } };
+
+    salon.workers = salon.workers.filter(w => w.id !== workerId);
+    const bookingsMap = await getAllBookings(kvUrl, kvToken);
+    const staffCancelledBks = [];
+    await cancelRemovedWorkerBookings(salon, worker, bookingsMap, kvUrl, kvToken, staffCancelledBks);
+    await setSalonsDb(kvUrl, kvToken, salons);
+
+    if (staffCancelledBks.length > 0) {
+      try {
+        await sendCancellationNotifications(staffCancelledBks, salons, kvUrl, kvToken);
+      } catch (err) {
+        console.error('[SYNC] delete_worker cancellation notifications job error:', err);
+      }
+    }
+    return { status: 200, json: { success: true, cancelledBookings: staffCancelledBks.length } };
+  } finally {
+    await releaseBillingLock(kvUrl, kvToken, salonId);
+  }
+}
+
 // Admin-only: opts an admin-created salon (which has no billing object at
 // all by default — see CLAUDE.md) into the billing system on request, e.g.
 // an owner who wants automatic PayPal billing but can't self-signup a whole
@@ -1176,6 +1245,10 @@ export default async function handler(req, res) {
         }
         if (newData && newData.action === 'mark_salon_paid') {
           const r = await handleMarkSalonPaid(newData, kvUrl, kvToken, req);
+          return res.status(r.status).json(r.json);
+        }
+        if (newData && newData.action === 'delete_worker') {
+          const r = await handleDeleteWorker(newData, kvUrl, kvToken, req);
           return res.status(r.status).json(r.json);
         }
         if (newData && newData.action === 'enable_salon_billing') {
@@ -1852,50 +1925,29 @@ export default async function handler(req, res) {
                     }
                     return w;
                   }).filter(Boolean);
-                  // Only admin may actually remove a worker — an owner's
-                  // payload that omits an existing worker (client bug, stale
-                  // local copy, or a tampered request) must not silently
-                  // delete them; restore anything missing from a non-admin save.
-                  if (session.role !== 'admin') {
-                    const incomingIds = new Set(incoming.workers.map(w => w.id));
-                    for (const ew of existingWorkersById.values()) {
-                      if (!incomingIds.has(ew.id)) incoming.workers.push(ew);
-                    }
-                  } else {
-                    // A worker admin actually removes here used to just
-                    // vanish from the array with no other cleanup: their
-                    // remaining FUTURE confirmed bookings stayed on the
-                    // books referencing a workerId that no longer exists —
-                    // customers kept getting reminders for an appointment
-                    // with someone no longer on staff, and nothing ever
-                    // surfaced it to the salon. Their review history was
-                    // also just destroyed outright. Cancel the former, and
-                    // preserve the latter, for every actually-removed id.
-                    const incomingIdsAfterRemoval = new Set(incoming.workers.map(w => w.id));
-                    for (const removedWorker of existingWorkersById.values()) {
-                      if (incomingIdsAfterRemoval.has(removedWorker.id)) continue;
-                      if (Array.isArray(removedWorker.reviews) && removedWorker.reviews.length) {
-                        if (!Array.isArray(incoming.archivedReviews)) incoming.archivedReviews = [];
-                        incoming.archivedReviews.push(...removedWorker.reviews.map(r => ({ ...r, workerName: removedWorker.name })));
-                      }
-                      const now = romeNow();
-                      for (const b of bookingsMap.values()) {
-                        if (b.salonId !== incoming.id || b.workerId !== removedWorker.id || b.status !== 'confirmed') continue;
-                        const bMin = timeToMin(b.time);
-                        const isFuture = b.dateISO > now.todayISO || (b.dateISO === now.todayISO && bMin !== null && bMin > now.minutes);
-                        if (!isFuture) continue;
-                        const cancelled = { ...b, status: 'cancelled', cancelledBy: 'staff' };
-                        await hsetBooking(kvUrl, kvToken, cancelled);
-                        await releaseSlotLock(kvUrl, kvToken, cancelled);
-                        bookingsMap.set(b.id, cancelled);
-                        // Same idempotency guard the normal staff-cancel path
-                        // uses, so a retried/duplicated request can't notify
-                        // the same customer twice for the same cancellation.
-                        if (await claimCancellationNotifyOnce(kvUrl, kvToken, cancelled.id)) {
-                          staffCancelledBks.push(cancelled);
-                        }
-                      }
-                    }
+                  // A worker can no longer be removed via this generic bulk
+                  // save AT ALL, admin included — restore anything missing
+                  // from the incoming payload for EVERY role. This used to
+                  // treat any worker missing from an ADMIN payload as an
+                  // intentional deletion (owners/barbers already got this
+                  // same restore-protection). But admin's client sends its
+                  // FULL local snapshot of every salon's workers on every
+                  // save, no matter how unrelated the edit — a worker
+                  // added by an owner after admin's copy last refreshed
+                  // (admin polls every 6s, but a backgrounded tab can go
+                  // stale far longer than that) would be silently absent
+                  // from admin's next save of ANY field on that salon, and
+                  // got treated as a deliberate removal: their future
+                  // bookings were cancelled and customers were sent a real
+                  // "cancelled by staff" notification for nothing anyone
+                  // actually asked to happen. Deletion is now EXCLUSIVELY
+                  // handled by the dedicated delete_worker action below,
+                  // which acts on the current server-side record directly
+                  // (like delete-salon.js) instead of being inferred from
+                  // array differences in a payload that might just be stale.
+                  const incomingIds = new Set(incoming.workers.map(w => w.id));
+                  for (const ew of existingWorkersById.values()) {
+                    if (!incomingIds.has(ew.id)) incoming.workers.push(ew);
                   }
                 }
               }

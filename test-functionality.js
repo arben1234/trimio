@@ -1008,7 +1008,7 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
   ok(r3.body.conflicts.some(c => c.id === 'retry-bk-1'), "a mismatched phone on the same booking id is still rejected, not treated as a legitimate retry");
 });
 
-section('api/sync.js — HARDENING: deleting a worker cancels their future bookings and preserves their reviews (orphaned-data regression)');
+section('api/sync.js — HARDENING: a worker can only be deleted via the explicit delete_worker action, never inferred from a stale bulk-save payload (cross-tenant/stale-admin-cache regression)');
 await withFakeKv(makeFakeRedis(), async (fake) => {
   const prevSecret = process.env.SESSION_SECRET;
   process.env.SESSION_SECRET = 'test-only-secret-for-session-tokens';
@@ -1017,6 +1017,7 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
       id: 'salonD', name: 'Salon D', slug: 'SALON_D',
       workers: [{ id: 'wGone', name: 'Departing Barber', reviews: [{ rating: 5, author: 'Happy Client', comment: 'Great cut', date: '2026-01-01' }] }]
     }]));
+    fake.strings.set('admin_db', JSON.stringify({ username: 'admin', password: 'realSecret1' }));
     fake.hashes.set('bookings', new Map([
       ['bk-future', JSON.stringify({ id: 'bk-future', salonId: 'salonD', workerId: 'wGone', dateISO: '2099-01-01', time: '10:00', status: 'confirmed', name: 'Future Client', phone: '333' })],
       ['bk-past', JSON.stringify({ id: 'bk-past', salonId: 'salonD', workerId: 'wGone', dateISO: '2000-01-01', time: '10:00', status: 'completed', name: 'Past Client', phone: '333' })]
@@ -1024,9 +1025,27 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
     const handler = await freshImport('api/sync.js');
     const adminToken = issueSessionToken({ role: 'admin' });
 
+    // The exact bug this closes: an admin's STALE local snapshot (worker
+    // already missing, e.g. from a backgrounded tab that never saw them)
+    // resubmitted via the generic bulk salon save used to be interpreted
+    // as an intentional deletion — cancelling real bookings and notifying
+    // real customers for a worker nobody actually asked to remove. It must
+    // now be a genuine no-op: the worker is restored, nothing is cancelled.
+    const rBulk = mkRes();
+    await handler({ method: 'POST', headers: { authorization: `Bearer ${adminToken}` }, body: { bookings: [], salons: [{ id: 'salonD', name: 'Salon D', slug: 'SALON_D', workers: [] }] } }, rBulk.obj);
+    const afterStaleBulkSave = JSON.parse(fake.strings.get('salons_db')).find(s => s.id === 'salonD');
+    eq((afterStaleBulkSave.workers || []).length, 1, "a worker missing from a stale bulk-save payload is restored, not deleted, even for an admin session");
+    const untouchedBooking = JSON.parse(fake.hashes.get('bookings').get('bk-future'));
+    eq(untouchedBooking.status, 'confirmed', "the worker's future booking is untouched by the stale bulk save — no phantom cancellation");
+
+    // Deletion requires the explicit action, and the real admin password.
+    const rNoPw = mkRes();
+    await handler({ method: 'POST', headers: { authorization: `Bearer ${adminToken}` }, body: { action: 'delete_worker', salonId: 'salonD', workerId: 'wGone' } }, rNoPw.obj);
+    eq(rNoPw.status, 401, 'delete_worker rejects a request with no admin password, even from a valid admin session');
+
     const r1 = mkRes();
-    await handler({ method: 'POST', headers: { authorization: `Bearer ${adminToken}` }, body: { bookings: [], salons: [{ id: 'salonD', name: 'Salon D', slug: 'SALON_D', workers: [] }] } }, r1.obj);
-    ok(r1.status === 200 && r1.body.success === true, 'admin removing the worker succeeds');
+    await handler({ method: 'POST', headers: { authorization: `Bearer ${adminToken}` }, body: { action: 'delete_worker', salonId: 'salonD', workerId: 'wGone', adminPassword: 'realSecret1' } }, r1.obj);
+    ok(r1.status === 200 && r1.body.success === true, 'delete_worker succeeds once the correct admin password is given');
 
     const salonsAfter = JSON.parse(fake.strings.get('salons_db')).find(s => s.id === 'salonD');
     eq((salonsAfter.workers || []).length, 0, 'the worker is genuinely removed');

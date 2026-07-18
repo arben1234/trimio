@@ -927,7 +927,7 @@ function initCloudSync() {
   // Temporary compromise until upgrading to the Vercel/Upstash Pro plan
   // (was briefly 30s to protect the free KV quota, but felt too slow for
   // staff catching new bookings) — revisit once on Pro.
-  setInterval(async () => {
+  const pollSync = async () => {
     if (isSaving) return; // Skip polling updates while we are actively saving to prevent overwrites
     const pollStartedAt = Date.now();
     try {
@@ -1030,7 +1030,20 @@ function initCloudSync() {
       console.error("Polling sync error:", e);
       updateUIStatus(false);
     }
-  }, 6000);
+  };
+  setInterval(pollSync, 6000);
+
+  // Browsers throttle/freeze setInterval in a backgrounded tab, sometimes
+  // for minutes to hours — a staff/admin tab left open in the background
+  // can go stale far longer than the nominal 6s cadence suggests. This
+  // used to matter more than a display lag: the bulk salon-save path (now
+  // fixed to never infer a deletion from a stale payload) and any
+  // still-open edit form could act on data that's arbitrarily out of
+  // date. Force an immediate resync the moment the tab regains visibility
+  // instead of waiting for the next timer tick.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') pollSync();
+  });
 }
 
 /* ======== SINC ALERTS & NOTIFICHE APPLICAZIONE ======== */
@@ -2056,6 +2069,10 @@ async function customerCancelBooking(id,btn){
 }
 
 function renderBarberGrid(){
+  if(!custSalon.workers||!custSalon.workers.length){
+    $('barberGrid').innerHTML=`<div style="grid-column:1/-1;text-align:center;padding:24px 12px;color:#888;font-size:13px;">Nessun barbiere disponibile al momento. Riprova più tardi.</div>`;
+    return;
+  }
   const iso=todayISO();
   $('barberGrid').innerHTML=custSalon.workers.map(w=>{
     const vac=isOnVacation(w,iso);
@@ -2080,7 +2097,15 @@ function renderBarberGrid(){
       ${!vac&&offDaysLabel(w)?`<div class="bc-vac">Riposo: ${offDaysLabel(w)}</div>`:''}
     </div>`;
   }).join('');
-  $('barberGrid').querySelectorAll('.barber-card:not(.on-vacation)').forEach(el=>el.addEventListener('click',()=>{
+  // Vacation status here is computed against TODAY only (this is step 0,
+  // before any date is even chosen) — a barber on vacation today used to
+  // be permanently unselectable for the WHOLE flow, including any future
+  // date after they're back, since only non-vacation-today cards got a
+  // click handler at all. The "In ferie" badge above is still shown as an
+  // informational hint, but selection is never blocked here; per-date
+  // vacation/day-off/break availability is what step 2's actual date/time
+  // picker (freeGridTimesFor) correctly filters against.
+  $('barberGrid').querySelectorAll('.barber-card').forEach(el=>el.addEventListener('click',()=>{
     $('barberGrid').querySelectorAll('.barber-card').forEach(x=>x.classList.remove('sel'));
     el.classList.add('sel');
     const w=custSalon.workers.find(x=>x.id===el.dataset.id);
@@ -2416,12 +2441,38 @@ function renderSalonModalWorkers(s) {
   }));
 }
 
-function deleteSalonModalWorker(wid, sid) {
+async function deleteSalonModalWorker(wid, sid) {
   if (!confirm('Eliminare questo dipendente?')) return;
+  const adminPassword = prompt('Conferma la tua password di amministratore per procedere:');
+  if (adminPassword === null) return;
+  // Deletion goes through a dedicated action that acts on the current
+  // server-side record directly (like delete-salon.js), instead of the
+  // generic bulk salons[] save inferring a deletion from a worker simply
+  // being MISSING from this device's local snapshot — that snapshot can be
+  // stale (a backgrounded admin tab, or another device's concurrent edit),
+  // and treating "missing" as "delete" used to silently cancel real future
+  // bookings and notify real customers for a worker nobody actually meant
+  // to remove.
+  let result;
+  try {
+    const resp = await fetch('/api/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ action: 'delete_worker', salonId: sid, workerId: wid, adminPassword })
+    });
+    result = await resp.json().catch(() => ({}));
+  } catch (err) {
+    alert('Errore di connessione al server: ' + err.message);
+    return;
+  }
+  if (!result.success) {
+    alert('Errore durante l\'eliminazione: ' + (result.error || 'sconosciuto'));
+    return;
+  }
   const s = STATE.salons.find(x => x.id === sid);
   if (s && s.workers) {
     s.workers = s.workers.filter(w => w.id !== wid);
-    saveState();
+    if (canStore) { try { localStorage.setItem(SK, JSON.stringify(STATE)); } catch(e) {} }
     renderSalonModalWorkers(s);
     renderDipendenti();
   }
@@ -4422,9 +4473,35 @@ function renderSmGallery(){
   }));
 }
 
-function openSalonModal(sid){
+async function openSalonModal(sid){
   clearErr('smErr');salonEditId=sid;
-  
+
+  // saveState() always resends this device's ENTIRE local snapshot of
+  // every salon, not just the one being edited — if this tab's copy of
+  // THIS salon is stale (a poll cycle behind another device's own recent
+  // edit, or simply because this tab was in the background), opening the
+  // edit form on stale data and saving would silently overwrite whatever
+  // that other edit changed the moment this form is submitted, with
+  // nothing telling either side a conflict happened. Refetching fresh
+  // right before rendering the form narrows that window from "since this
+  // tab's last poll" (could be minutes) down to "between opening this
+  // modal and clicking Salva" (seconds) — doesn't eliminate the race, but
+  // meaningfully shrinks it for the single highest-risk entry point.
+  if(sid!=='new'){
+    try{
+      const resp=await fetch(syncUrl('/api/sync?t='+Date.now()),{cache:'no-store',headers:authHeaders()});
+      if(resp.ok){
+        const data=await resp.json().catch(()=>null);
+        if(data&&Array.isArray(data.salons)&&data.salons.length>0){
+          const fresh=data.salons.find(x=>x.id===sid);
+          if(fresh){
+            STATE.salons=STATE.salons.map(x=>x.id===sid?fresh:x);
+          }
+        }
+      }
+    }catch(e){/* best-effort — fall back to whatever's already cached locally */}
+  }
+
   // Reset tabs to default active 'Dati Principali'
   document.querySelectorAll('.modal-tab').forEach(t => t.classList.remove('active'));
   ['panelSalonInfo', 'panelSalonStaff', 'panelSalonServices'].forEach(p => $(p).style.display = 'none');
