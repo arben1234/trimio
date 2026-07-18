@@ -62,12 +62,18 @@ const DEFAULT_SERVICES = [
 //     with no salonId hint (first paint before the salon is resolved locally)
 //     gets nothing rather than everything; the 6s poll picks it up moments
 //     later once the salon is known.
-function scopeBookingsForSession(bookings, session, requestedSalonId) {
+function scopeBookingsForSession(bookings, session, requestedSalonId, barberStillEmployed = true) {
   if (session && session.role === 'admin') return bookings;
   if (session && session.role === 'owner') {
     return bookings.filter(b => b.salonId === session.salonId);
   }
   if (session && session.role === 'barber') {
+    // A deleted worker's token stays valid up to 30 days (stateless,
+    // no revocation list) — the caller resolves whether they're still
+    // actually in the salon's current worker list and passes it in, so a
+    // removed barber's own bookings (real customer names/phones) stop
+    // being served the moment they're removed, not up to a month later.
+    if (!barberStillEmployed) return [];
     return bookings.filter(b => b.salonId === session.salonId && b.workerId === session.workerId);
   }
   if (typeof requestedSalonId !== 'string' || !requestedSalonId) return [];
@@ -594,9 +600,9 @@ async function handleApproveSalon(body, kvUrl, kvToken, req) {
   await sendEmail(salon.email, '🎉 TRIMIO — Il tuo salone è stato approvato!',
     `<p>Ciao ${escapeHtml(salon.ownerName || '')},</p>
      <p>Il tuo salone <b>${escapeHtml(salon.name)}</b> è stato approvato ed è ora attivo su TRIMIO!</p>
-     <p><b>Le tue credenziali di accesso proprietario:</b><br>
+     <p><b>Accesso proprietario:</b><br>
      Username: ${escapeHtml(salon.ownerUsername)}<br>
-     Password: ${escapeHtml(salon.ownerPassword)}</p>
+     Password: quella che hai scelto in fase di registrazione.</p>
      <p><b>Link di prenotazione del tuo salone:</b><br><a href="${link}">${link}</a></p>
      <p>I tuoi clienti possono anche scansionare questo QR code per prenotare direttamente:</p>
      <img src="${qrUrl}" alt="QR Code" width="200" height="200">`);
@@ -1015,6 +1021,17 @@ export default async function handler(req, res) {
         // came back. Flag it explicitly so the client can react.
         const hadToken = !!(req.headers && req.headers['authorization']);
         const sessionExpired = hadToken && !session;
+        // See the POST handler's own barberStillEmployed for the full
+        // rationale — a deleted worker's token stays valid up to 30 days,
+        // so their own former bookings (real customer names/phones) must
+        // stop being served the moment they're actually removed from the
+        // salon's worker list, not up to a month later. `salons` here is
+        // the same fresh read already used for sanitizedSalons below.
+        let barberStillEmployed = true;
+        if (session && session.role === 'barber') {
+          const sessionSalon = salons.find(s => s.id === session.salonId);
+          barberStillEmployed = !!(sessionSalon && (sessionSalon.workers || []).some(w => w.id === session.workerId));
+        }
         const isAdminCaller = !!(session && session.role === 'admin');
         // iban/taxId/signupIp/contract fields, the owner's personal
         // email/name/phone, and their login username are admin-review-only
@@ -1048,7 +1065,8 @@ export default async function handler(req, res) {
           // customer booking UI genuinely needs those (worker cards,
           // slot-availability computation) — only username/phone are
           // staff-only now.
-          const isOwnSalonStaff = session && (session.role === 'owner' || session.role === 'barber') && session.salonId === rest.id;
+          const isOwnSalonStaff = session && session.salonId === rest.id
+            && (session.role === 'owner' || (session.role === 'barber' && barberStillEmployed));
           const canSeeWorkerContact = isAdminCaller || isOwnSalonStaff;
           const base = {
             ...rest,
@@ -1074,7 +1092,7 @@ export default async function handler(req, res) {
         });
         const requestedSalonId = req.query && typeof req.query.salonId === 'string' ? req.query.salonId : null;
         return res.status(200).json({
-          bookings: scopeBookingsForSession(Array.from(bookingsMap.values()), session, requestedSalonId),
+          bookings: scopeBookingsForSession(Array.from(bookingsMap.values()), session, requestedSalonId, barberStillEmployed),
           salons: sanitizedSalons,
           sessionExpired,
           admin: {
@@ -1163,6 +1181,21 @@ export default async function handler(req, res) {
         console.log('[SYNC] Saving database state to Vercel KV');
 
         const session = getVerifiedSession(req);
+        // A deleted worker's session token stays cryptographically valid
+        // (stateless HMAC, no revocation list) for up to 30 days — without
+        // re-checking they're still actually in the salon's CURRENT worker
+        // list, a fired/removed barber could keep viewing and cancelling
+        // their own former bookings (real customer names/phone numbers)
+        // for the rest of that window, with the salon having no way to
+        // know. Resolved once per request (not once per booking item in
+        // the loop below) and reused everywhere a barber session's
+        // authority is checked in this handler.
+        let barberStillEmployed = true;
+        if (session && session.role === 'barber') {
+          const sessionSalons = await getSalonsDb(kvUrl, kvToken);
+          const sessionSalon = sessionSalons.find(s => s.id === session.salonId);
+          barberStillEmployed = !!(sessionSalon && (sessionSalon.workers || []).some(w => w.id === session.workerId));
+        }
         const newBks = Array.isArray(newData.bookings) ? newData.bookings : [];
         // Only anonymous callers (the public customer booking flow) are
         // capped — staff carry a verified session token and legitimately
@@ -1353,7 +1386,7 @@ export default async function handler(req, res) {
               // change didn't take.
               const isStaffForThisBooking = session && (session.role === 'admin'
                 || (session.role === 'owner' && session.salonId === existing.salonId)
-                || (session.role === 'barber' && session.salonId === existing.salonId && session.workerId === existing.workerId));
+                || (session.role === 'barber' && barberStillEmployed && session.salonId === existing.salonId && session.workerId === existing.workerId));
               // The self-cancel phone match just below costs one in-memory
               // string compare, no KV round-trip — the request-level booking
               // rate limit further up budgets whole REQUESTS, not individual
@@ -1790,7 +1823,7 @@ export default async function handler(req, res) {
         }
 
         const postRequestedSalonId = req.query && typeof req.query.salonId === 'string' ? req.query.salonId : null;
-        return res.status(200).json({ success: true, bookings: scopeBookingsForSession(Array.from(bookingsMap.values()), session, postRequestedSalonId), conflicts });
+        return res.status(200).json({ success: true, bookings: scopeBookingsForSession(Array.from(bookingsMap.values()), session, postRequestedSalonId, barberStillEmployed), conflicts });
       }
     } catch (kvErr) {
       console.error('[SYNC] KV Database Error:', kvErr);

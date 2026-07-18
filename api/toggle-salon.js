@@ -105,9 +105,9 @@ export default async function handler(req, res) {
         await sendEmail(salon.email, '🎉 TRIMIO — Il tuo salone è stato approvato!',
           `<p>Ciao ${escapeHtml(salon.ownerName || '')},</p>
            <p>Il tuo salone <b>${escapeHtml(salon.name)}</b> è stato approvato ed è ora attivo su TRIMIO!</p>
-           <p><b>Le tue credenziali di accesso proprietario:</b><br>
+           <p><b>Accesso proprietario:</b><br>
            Username: ${escapeHtml(salon.ownerUsername)}<br>
-           Password: ${escapeHtml(salon.ownerPassword)}</p>
+           Password: quella che hai scelto in fase di registrazione.</p>
            <p><b>Link di prenotazione del tuo salone:</b><br><a href="${link}">${link}</a></p>
            <p>I tuoi clienti possono anche scansionare questo QR code per prenotare direttamente:</p>
            <img src="${qrUrl}" alt="QR Code" width="200" height="200">`);

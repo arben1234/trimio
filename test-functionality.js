@@ -1350,6 +1350,40 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
   eq(rRightPhone.status, 200, "the booking's real customer, proving their own phone, can still subscribe normally");
 });
 
+section('api/sync.js — HARDENING: a removed worker\'s session token stops being served their old bookings (revocation regression)');
+await withFakeKv(makeFakeRedis(), async (fake) => {
+  const prevSecret = process.env.SESSION_SECRET;
+  process.env.SESSION_SECRET = 'test-only-secret-for-session-tokens';
+  try {
+    fake.strings.set('salons_db', JSON.stringify([{ id: 'salonV', name: 'Salon V', workers: [{ id: 'wV', name: 'Worker V' }] }]));
+    fake.hashes.set('bookings', new Map([
+      ['bkV1', JSON.stringify({ id: 'bkV1', salonId: 'salonV', workerId: 'wV', dateISO: '2030-01-01', time: '10:00', status: 'confirmed', name: 'Client', phone: '333' })]
+    ]));
+    const handler = await freshImport('api/sync.js');
+    const barberToken = issueSessionToken({ role: 'barber', salonId: 'salonV', workerId: 'wV' });
+
+    const rBefore = mkRes();
+    await handler({ method: 'GET', headers: { authorization: `Bearer ${barberToken}` } }, rBefore.obj);
+    ok(rBefore.body.bookings.some(b => b.id === 'bkV1'), "a still-employed barber's own booking is visible normally");
+
+    // Admin removes the worker from the salon (the token itself is still
+    // cryptographically valid — stateless, no revocation list).
+    fake.strings.set('salons_db', JSON.stringify([{ id: 'salonV', name: 'Salon V', workers: [] }]));
+
+    const rAfterGet = mkRes();
+    await handler({ method: 'GET', headers: { authorization: `Bearer ${barberToken}` } }, rAfterGet.obj);
+    eq(rAfterGet.body.bookings, [], "a removed worker's token no longer sees their old bookings via GET, despite still being a valid signature");
+
+    const rAfterCancel = mkRes();
+    await handler({ method: 'POST', headers: { authorization: `Bearer ${barberToken}` }, body: { bookings: [{ id: 'bkV1', salonId: 'salonV', workerId: 'wV', dateISO: '2030-01-01', time: '10:00', status: 'cancelled', cancelledBy: 'staff' }], salons: [] } }, rAfterCancel.obj);
+    ok(rAfterCancel.body.conflicts.some(c => c.id === 'bkV1'), "a removed worker's token can no longer cancel their old bookings either");
+    const stillConfirmedBk = JSON.parse(fake.hashes.get('bookings').get('bkV1'));
+    eq(stillConfirmedBk.status, 'confirmed', 'the booking itself is genuinely untouched — the rejected cancel attempt never actually applied');
+  } finally {
+    restoreEnv('SESSION_SECRET', prevSecret);
+  }
+});
+
 section('api/sync.js — GET response strips PII by caller role (cross-tenant leak regression)');
 await withFakeKv(makeFakeRedis(), async (fake) => {
   const prevSecret = process.env.SESSION_SECRET;
@@ -1450,6 +1484,7 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
   const prevSecret = process.env.SESSION_SECRET;
   process.env.SESSION_SECRET = 'test-only-secret-for-session-tokens';
   try {
+    fake.strings.set('salons_db', JSON.stringify([{ id: 'salonX', name: 'Salon X', workers: [{ id: 'w1', name: 'Worker 1' }] }]));
     const handler = await freshImport('api/subscribe.js');
 
     const r1 = mkRes();
@@ -1480,6 +1515,14 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
     const stored2 = JSON.parse(fake.strings.get('push_subscriptions'));
     eq(stored2.length, 1, 'duplicate endpoint replaces existing subscription instead of appending');
     eq(stored2[0].role, 'barber', 'replaced subscription reflects the updated role');
+
+    // A removed worker's session token stays cryptographically valid (no
+    // revocation list) — must not be able to register a device to keep
+    // receiving that salon's live booking-notification pushes.
+    fake.strings.set('salons_db', JSON.stringify([{ id: 'salonX', name: 'Salon X', workers: [] }]));
+    const rRemoved = mkRes();
+    await handler({ method: 'POST', headers: { authorization: `Bearer ${barberToken}` }, body: { subscription: { endpoint: 'https://push.test/removed' }, role: 'barber', salonId: 'salonX' } }, rRemoved.obj);
+    eq(rRemoved.status, 401, "a removed worker's still-valid token can no longer register a push subscription");
   } finally {
     restoreEnv('SESSION_SECRET', prevSecret);
   }

@@ -2925,6 +2925,17 @@ function initDash(){
     doLogout();
     return;
   }
+  // A removed barber's session token stays valid up to 30 days (stateless,
+  // no revocation list) — an already-open tab wouldn't otherwise notice
+  // they'd been let go until something else broke. The server already
+  // stops serving their data (barberStillEmployed in api/sync.js); mirror
+  // that here so the local UI doesn't sit on a stale dashboard in the
+  // meantime.
+  if (r==='barber' && !(salon.workers||[]).some(w=>w.id===SESSION.workerId)) {
+    alert(`Il tuo profilo non è più presente in questo salone. Effettua nuovamente l'accesso.`);
+    doLogout();
+    return;
+  }
 
   // sidebar header
   $('sideSalon').textContent=salon?salon.name:'TRIMIO · Admin';
@@ -4053,7 +4064,7 @@ function renderPendingSaloni(){
         s.inactive=false; s.billing.pendingApproval=false;
         try{localStorage.setItem(SK,JSON.stringify(STATE));}catch(e){}
         renderPendingSaloni(); buildNav();
-        alert(`"${s.name}" è stato approvato. Le credenziali sono state inviate via email al proprietario.`);
+        alert(`"${s.name}" è stato approvato. L'email di conferma (con username e link di prenotazione) è stata inviata al proprietario — la password resta quella scelta in fase di registrazione.`);
       }else{
         alert('Errore: '+(r.error||'sconosciuto'));
         b.disabled=false; b.textContent='✅ Approva e invia credenziali';

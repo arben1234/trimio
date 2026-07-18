@@ -1,5 +1,5 @@
 import { getVerifiedSession, getClientIp } from '../lib/auth.js';
-import { getAllBookings, checkRateLimit, acquirePushSubsLock, releasePushSubsLock } from '../lib/kv.js';
+import { getAllBookings, getSalonsDb, checkRateLimit, acquirePushSubsLock, releasePushSubsLock } from '../lib/kv.js';
 import { toE164 } from '../lib/sms.js';
 
 export default async function handler(req, res) {
@@ -58,6 +58,16 @@ export default async function handler(req, res) {
       const session = getVerifiedSession(req);
       if (!session || session.role !== role) {
         return res.status(401).json({ error: 'invalid_session' });
+      }
+      // A deleted worker's session token stays valid up to 30 days
+      // (stateless, no revocation list) — without this, a fired/removed
+      // barber could still register a device to keep receiving live
+      // booking-notification pushes for their old salon indefinitely.
+      if (role === 'barber') {
+        const salons = await getSalonsDb(kvUrl, kvToken);
+        const salon = salons.find(s => s.id === session.salonId);
+        const stillEmployed = !!(salon && (salon.workers || []).some(w => w.id === session.workerId));
+        if (!stillEmployed) return res.status(401).json({ error: 'invalid_session' });
       }
       salonId = session.salonId || null;
       workerId = session.workerId || null;
