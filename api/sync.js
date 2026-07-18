@@ -708,7 +708,24 @@ async function handleCreateBillingCheckoutSession(body, kvUrl, kvToken, req) {
     // the way for a fresh subscription below.
     if (salon.billing.paypalSubscriptionId) {
       const staleId = salon.billing.paypalSubscriptionId;
-      const staleSub = await paypalFetch(`/v1/billing/subscriptions/${encodeURIComponent(staleId)}`).catch(() => null);
+      // A caught fetch failure used to be treated identically to "this
+      // subscription genuinely doesn't exist" regardless of WHY it failed
+      // — a transient network blip or PayPal 5xx at exactly the moment of
+      // a repeat "Attiva" click would fall through to creating a second
+      // subscription anyway, reopening a narrower version of the double-
+      // billing race this whole check exists to close. Only a confirmed
+      // 404 means "genuinely gone"; any other failure aborts instead of
+      // silently proceeding.
+      let staleSub = null;
+      try {
+        staleSub = await paypalFetch(`/v1/billing/subscriptions/${encodeURIComponent(staleId)}`);
+      } catch (err) {
+        if (err.status !== 404) {
+          console.error('[BILLING] Could not verify stale subscription status, aborting rather than risk a duplicate:', err.message);
+          return { status: 502, json: { success: false, error: 'paypal_error' } };
+        }
+        // Confirmed 404 — genuinely gone, nothing to reuse or cancel.
+      }
       const staleStatus = staleSub && staleSub.status;
       if (staleStatus === 'ACTIVE') {
         // Shouldn't normally be reachable (the ACTIVATED webhook would
@@ -728,8 +745,8 @@ async function handleCreateBillingCheckoutSession(body, kvUrl, kvToken, req) {
         // SUSPENDED or any other cancellable-but-not-pending/active state.
         await cancelPaypalSubscription(staleId, 'Superseded by a new checkout attempt');
       }
-      // staleStatus === null (fetch failed / subscription genuinely gone at
-      // PayPal, e.g. a 404) — nothing to reuse or cancel, proceed below.
+      // staleStatus === null here only means a confirmed 404 — genuinely
+      // gone at PayPal — nothing to reuse or cancel, proceed below.
     }
 
     const fee = feeForWorkerCount(Math.max((salon.workers || []).length, salon.billing.declaredWorkerCount || 0));
@@ -1368,6 +1385,27 @@ export default async function handler(req, res) {
               } finally {
                 await releaseBarberDayLock(kvUrl, kvToken, nb.salonId, nb.workerId, nb.dateISO);
               }
+            } else if (!session && nb.status === 'confirmed' && existing.status === 'confirmed'
+                && nb.salonId === existing.salonId && nb.workerId === existing.workerId
+                && nb.dateISO === existing.dateISO && nb.time === existing.time
+                && toE164(nb.phone) && toE164(nb.phone) === toE164(existing.phone)) {
+              // An anonymous customer resubmitting what is genuinely THEIR
+              // OWN already-confirmed booking (id + core identity fields +
+              // phone all match — booking ids are random per-attempt, so
+              // this can't collide with a different customer's booking) —
+              // typically a retry after the original request's response
+              // was lost client-side despite the server having already
+              // committed it. The exact-byte-match dedup above already
+              // handles the common case, but price/dur are server-derived
+              // from the salon's live service list at creation time and
+              // can legitimately drift from the client's own cached copy
+              // between the original attempt and a retry (e.g. the owner
+              // edited that service's price in between) — treated here as
+              // a no-op success instead of falling through to the generic
+              // 'forbidden' conflict below, which used to show the
+              // customer a confusing "someone else took this slot" modal
+              // for a booking that had actually already succeeded.
+              continue;
             } else {
               // Update to an existing booking (e.g. status change) — no lock
               // needed, but this must never let a caller touch a booking
@@ -1570,6 +1608,58 @@ export default async function handler(req, res) {
             // server-side list directly.
             const currentSalons = await getSalonsDb(kvUrl, kvToken);
             const salonMap = new Map(currentSalons.map(s => [s.id, s]));
+            // Slug/ownerUsername uniqueness (see the per-item check below)
+            // must be resolved against the FINAL proposed state of the
+            // WHOLE batch up front, not incrementally salon-by-salon as
+            // each item is processed — checking incrementally against
+            // salonMap (mutated as the loop progresses) made a genuine
+            // two-salon slug SWAP submitted in one request (A takes B's
+            // old slug, B takes A's old slug) silently no-op for BOTH:
+            // processing A first sees B still at its old slug (collision,
+            // A reverted), then processing B sees A already reverted back
+            // to its own old slug (collision again, B reverted too) — with
+            // no error ever surfaced. Computing everyone's intended final
+            // value first means a real swap has each salon claiming a
+            // value nobody else's FINAL state still holds, so it resolves
+            // cleanly, while an actual theft attempt (setting your slug to
+            // someone else's who ISN'T changing) still collides and reverts.
+            const finalSlugs = new Map(currentSalons.map(s => [s.id, s.slug]));
+            const finalUsernames = new Map(currentSalons.map(s => [s.id, s.ownerUsername]));
+            for (const incoming of newData.salons) {
+              const existingForResolve = salonMap.get(incoming.id);
+              if (!existingForResolve) continue; // new-salon uniqueness handled separately by isValidNewSalon
+              const authorizedForResolve = session && (session.role === 'admin'
+                || (session.role === 'owner' && session.salonId === incoming.id));
+              if (!authorizedForResolve) continue;
+              if (typeof incoming.slug === 'string') finalSlugs.set(incoming.id, incoming.slug);
+              if (typeof incoming.ownerUsername === 'string') finalUsernames.set(incoming.id, incoming.ownerUsername);
+            }
+            function resolveCollisions(finalMap, originalMap) {
+              const byValue = new Map();
+              for (const [id, val] of finalMap) {
+                // A falsy slug/ownerUsername (missing on an old/legacy
+                // record, or a malformed edit) must never be treated as a
+                // shared "value" that collides with every other such
+                // record — only a genuine non-empty duplicate is a real
+                // collision.
+                if (!val) continue;
+                if (!byValue.has(val)) byValue.set(val, []);
+                byValue.get(val).push(id);
+              }
+              for (const [val, ids] of byValue) {
+                if (ids.length <= 1) continue;
+                // More than one salon ending up with the same final value —
+                // whichever of them didn't already legitimately hold it
+                // loses and reverts to its own prior value. (The one salon,
+                // if any, whose value was already this exact one keeps it —
+                // it never actually asked to change.)
+                for (const id of ids) {
+                  if (originalMap.get(id) !== val) finalMap.set(id, originalMap.get(id));
+                }
+              }
+            }
+            resolveCollisions(finalSlugs, new Map(currentSalons.map(s => [s.id, s.slug])));
+            resolveCollisions(finalUsernames, new Map(currentSalons.map(s => [s.id, s.ownerUsername])));
             for (const incoming of newData.salons) {
               const existing = salonMap.get(incoming.id);
               // lockIds above only includes ids this session is actually
@@ -1673,18 +1763,14 @@ export default async function handler(req, res) {
                 // collide with salon B's, silently hijacking B's booking
                 // link/QR code (or making A itself unreachable, depending
                 // on lookup order) — a real cross-tenant integrity break
-                // reachable with just a valid session for ANY salon. Falls
-                // back to the existing value on a collision rather than
-                // rejecting the whole save, so an unrelated field edit
-                // (hours, photos...) bundled in the same request isn't
-                // blocked by an incidental collision.
-                if (incoming.slug !== existing.slug || incoming.ownerUsername !== existing.ownerUsername) {
-                  for (const other of salonMap.values()) {
-                    if (other.id === incoming.id) continue;
-                    if (incoming.slug !== existing.slug && other.slug === incoming.slug) incoming.slug = existing.slug;
-                    if (incoming.ownerUsername !== existing.ownerUsername && other.ownerUsername === incoming.ownerUsername) incoming.ownerUsername = existing.ownerUsername;
-                  }
-                }
+                // reachable with just a valid session for ANY salon.
+                // Resolved for the whole batch up front (see finalSlugs/
+                // finalUsernames + resolveCollisions above, which also
+                // makes a genuine two-salon slug SWAP in one request work
+                // correctly instead of silently no-op'ing for both) — just
+                // apply the already-collision-resolved value here.
+                if (finalSlugs.has(incoming.id)) incoming.slug = finalSlugs.get(incoming.id);
+                if (finalUsernames.has(incoming.id)) incoming.ownerUsername = finalUsernames.get(incoming.id);
                 // Credentials for anything that already exists must never be
                 // overwritten through this generic bulk-save path — the client
                 // no longer even holds real passwords locally (GET strips them),
@@ -1774,6 +1860,41 @@ export default async function handler(req, res) {
                     const incomingIds = new Set(incoming.workers.map(w => w.id));
                     for (const ew of existingWorkersById.values()) {
                       if (!incomingIds.has(ew.id)) incoming.workers.push(ew);
+                    }
+                  } else {
+                    // A worker admin actually removes here used to just
+                    // vanish from the array with no other cleanup: their
+                    // remaining FUTURE confirmed bookings stayed on the
+                    // books referencing a workerId that no longer exists —
+                    // customers kept getting reminders for an appointment
+                    // with someone no longer on staff, and nothing ever
+                    // surfaced it to the salon. Their review history was
+                    // also just destroyed outright. Cancel the former, and
+                    // preserve the latter, for every actually-removed id.
+                    const incomingIdsAfterRemoval = new Set(incoming.workers.map(w => w.id));
+                    for (const removedWorker of existingWorkersById.values()) {
+                      if (incomingIdsAfterRemoval.has(removedWorker.id)) continue;
+                      if (Array.isArray(removedWorker.reviews) && removedWorker.reviews.length) {
+                        if (!Array.isArray(incoming.archivedReviews)) incoming.archivedReviews = [];
+                        incoming.archivedReviews.push(...removedWorker.reviews.map(r => ({ ...r, workerName: removedWorker.name })));
+                      }
+                      const now = romeNow();
+                      for (const b of bookingsMap.values()) {
+                        if (b.salonId !== incoming.id || b.workerId !== removedWorker.id || b.status !== 'confirmed') continue;
+                        const bMin = timeToMin(b.time);
+                        const isFuture = b.dateISO > now.todayISO || (b.dateISO === now.todayISO && bMin !== null && bMin > now.minutes);
+                        if (!isFuture) continue;
+                        const cancelled = { ...b, status: 'cancelled', cancelledBy: 'staff' };
+                        await hsetBooking(kvUrl, kvToken, cancelled);
+                        await releaseSlotLock(kvUrl, kvToken, cancelled);
+                        bookingsMap.set(b.id, cancelled);
+                        // Same idempotency guard the normal staff-cancel path
+                        // uses, so a retried/duplicated request can't notify
+                        // the same customer twice for the same cancellation.
+                        if (await claimCancellationNotifyOnce(kvUrl, kvToken, cancelled.id)) {
+                          staffCancelledBks.push(cancelled);
+                        }
+                      }
                     }
                   }
                 }

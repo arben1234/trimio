@@ -1970,15 +1970,16 @@ function renderCustMyBookingBanner(){
   // also compares the time-of-day when the date is today, closing that gap.
   const upcoming=mine.filter(b=>b.status!=='cancelled'&&isBookingInFuture(b))
     .sort((a,b)=>(a.dateISO+a.time).localeCompare(b.dateISO+b.time))[0];
-  // With an upcoming booking, headline its date/time; otherwise (only
-  // past/cancelled ones on record) keep the banner as a generic entry point
-  // instead of hiding it — the point of this banner is that "my bookings"
-  // stays reachable at any time without a menu, not just while something's
-  // still upcoming.
-  const upcomingEnd=upcoming?bookingEndTime(upcoming,custSalon):null;
-  $('custMyBookingBannerText').textContent=upcoming
-    ?`${upcoming.dateLabel} alle ${upcoming.time}${upcomingEnd?'-'+upcomingEnd:''} · ${upcoming.workerName}`
-    :'Le tue prenotazioni';
+  // The banner used to stay visible with a generic "Le tue prenotazioni"
+  // label even when every remembered booking was in the past — tapping it
+  // then opened renderMyBookingsModal(), which (now correctly) filters to
+  // upcoming-only and showed "Nessuna prenotazione trovata", directly
+  // contradicting what the banner had just implied. Hide the banner
+  // instead once nothing upcoming remains, consistent with the modal's
+  // own scope.
+  if(!upcoming){banner.style.display='none';return;}
+  const upcomingEnd=bookingEndTime(upcoming,custSalon);
+  $('custMyBookingBannerText').textContent=`${upcoming.dateLabel} alle ${upcoming.time}${upcomingEnd?'-'+upcomingEnd:''} · ${upcoming.workerName}`;
   banner.style.display='flex';
 }
 
@@ -2282,6 +2283,20 @@ async function doSubmit(){
         showErr('cErr','Il sistema è momentaneamente molto richiesto per questo orario. Riprova tra qualche secondo.');
         return;
       }
+      if(conflict.error==='invalid_booking'){
+        // The server rejects a workerId that no longer actually belongs to
+        // this salon — the barber selected earlier in the flow was
+        // deleted (and possibly replaced by a different worker with a new
+        // id) in the meantime. Showing the generic "someone else took this
+        // slot" alt-barber picker here would be misleading (it implies
+        // contention, not "this barber no longer exists") and offers stale
+        // choices from the same outdated worker list. Send the customer
+        // back to pick a barber fresh instead.
+        custStep=0;renderCustStep();
+        if(typeof renderBarberGrid==='function')renderBarberGrid();
+        showErr('cErr','Il barbiere selezionato non è più disponibile. Scegline un altro.');
+        return;
+      }
       // Un altro cliente ha preso questo slot nel frattempo (rilevato dal server)
       const free=custSalon.workers.filter(w=>{
         if(w.id===custData.barberId)return false;
@@ -2370,7 +2385,7 @@ function renderSalonModalWorkers(s) {
     <div style="display:flex; align-items:center; justify-content:space-between; padding:8px; border-bottom:1px solid #e4e4e7; font-size:13px;">
       <div style="display:flex; align-items:center; gap:8px;">
         <div style="width:32px; height:32px; border-radius:50%; background:#e5c158; color:#000; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:12px; flex-shrink:0;">
-          ${initials(w.name)}
+          ${escapeHtml(initials(w.name))}
         </div>
         <div>
           <div style="font-weight:700; color:#18181b;">${escapeHtml(w.name)}</div>
@@ -2728,6 +2743,14 @@ let loginRoleContext = null;
 async function onLoginSuccess() {
   clearErr('lErr');
   $('lpw').value = '';
+  // A fresh login means a fresh, definitely-valid token — reset the
+  // one-shot sessionExpired guard so a LATER genuine expiry in this same
+  // tab (long-lived tab crossing the 30-day boundary, a SESSION_SECRET
+  // rotation) is still detected. Without this, the forced-logout mechanism
+  // only ever fired once per tab for its whole lifetime — any subsequent
+  // real expiry silently reverted to the old "quietly degrade to
+  // anonymous-scoped data forever" behavior this was built to fix.
+  sessionExpiredHandled = false;
   // Ask for notification permission HERE — still synchronously inside the
   // login button's click (user gesture), but only after credentials checked
   // out, so wrong-password attempts don't trigger a permission prompt.
@@ -3612,7 +3635,7 @@ function renderDipendenti(){
     const showDel = r==='admin'; // Only admin can delete staff
     const showBreak = r==='admin'||r==='owner'; // Pause e riposo: gestibili da admin e proprietario (o dal barbiere stesso dal proprio menu)
     html+=`<div class="worker-card${w.vacFrom?' on-vac':''}">
-      <div class="av">${initials(w.name)}</div>
+      <div class="av">${escapeHtml(initials(w.name))}</div>
       <div class="wc-info"><div class="wc-name">${escapeHtml(w.name)}${vacLabel}</div><div class="wc-meta">@${escapeHtml(w.username)}</div></div>
       ${canEdit?`<div class="wc-btns"><button class="iconbtn" data-wedit="${w.id}">✏️</button>${showBreak?`<button class="iconbtn" title="Pause e riposo" data-wbreak="${w.id}">🕐</button>`:''}${showDel?`<button class="iconbtn del" data-wdel="${w.id}">🗑️</button>`:''}</div>`:''}
     </div>`;
@@ -4113,7 +4136,7 @@ function renderSaloni(){
       }
     }
     html+=`<div class="salon-item">
-      <div style="width:40px;height:40px;border-radius:12px;background:#000;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px;flex-shrink:0">${initials(s.name)}</div>
+      <div style="width:40px;height:40px;border-radius:12px;background:#000;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px;flex-shrink:0">${escapeHtml(initials(s.name))}</div>
       <div class="si-info"><div class="si-name">${escapeHtml(s.name)}${pendingBadge}</div><div class="si-slug">${locationString}</div><div class="si-stats">${s.workers.length} barbieri · ${tot} prenotazioni ${billingPill}</div></div>
       <div class="si-btns" style="display:flex; align-items:center; gap:8px;">
         ${statusBtn}
@@ -4528,7 +4551,7 @@ function renderUtenti(){
   let html=`<div class="sub-sec-h">Proprietari saloni</div>`;
   STATE.salons.forEach(s=>{
     html+=`<div class="worker-card">
-      <div class="av">${initials(s.ownerUsername)}</div>
+      <div class="av">${escapeHtml(initials(s.ownerUsername))}</div>
       <div class="wc-info"><div class="wc-name">${escapeHtml(s.name)}</div><div class="wc-meta">@${escapeHtml(s.ownerUsername)} · Proprietario (Liv. 2)</div></div>
       <div class="wc-btns">
         <button class="iconbtn" data-utype="owner" data-usid="${s.id}" title="Reset password">🔑</button>
@@ -4539,7 +4562,7 @@ function renderUtenti(){
   STATE.salons.forEach(s=>{
     s.workers.forEach(w=>{
       html+=`<div class="worker-card">
-        <div class="av">${initials(w.name)}</div>
+        <div class="av">${escapeHtml(initials(w.name))}</div>
         <div class="wc-info"><div class="wc-name">${escapeHtml(w.name)}</div><div class="wc-meta">@${escapeHtml(w.username)} · ${escapeHtml(s.name)} · Barbiere (Liv. 3)</div></div>
         <div class="wc-btns">
           <button class="iconbtn" data-utype="barber" data-usid="${s.id}" data-uwid="${w.id}" title="Reset password">🔑</button>

@@ -970,6 +970,79 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
   }
 });
 
+section('api/sync.js — HARDENING: a customer retrying their own already-succeeded booking gets a clean success, not a confusing "slot taken" conflict');
+await withFakeKv(makeFakeRedis(), async (fake) => {
+  fake.strings.set('salons_db', JSON.stringify([{ id: 'salonR2', name: 'Salon R2', workers: [{ id: 'wR2', name: 'Worker R2' }], services: [{ name: 'Taglio', price: 20, dur: 30 }] }]));
+  const handler = await freshImport('api/sync.js');
+  const original = { id: 'retry-bk-1', salonId: 'salonR2', workerId: 'wR2', dateISO: '2030-10-10', time: '09:00', status: 'confirmed', name: 'Client', phone: '3339990000', service: 'Taglio', price: 20, dur: 30 };
+
+  const r1 = mkRes();
+  await handler({ method: 'POST', body: { bookings: [original], salons: [] } }, r1.obj);
+  ok(r1.body.success, 'the original booking succeeds');
+
+  // Simulate the salon editing the service's price BETWEEN the original
+  // attempt and the client's retry (the client's own resend still carries
+  // its stale locally-cached price/dur, unlike the server's already-
+  // persisted record) — a real scenario the byte-identical dedup alone
+  // can't recognize as "this is still just my own booking".
+  const salons = JSON.parse(fake.strings.get('salons_db'));
+  salons[0].services[0].price = 25;
+  fake.strings.set('salons_db', JSON.stringify(salons));
+
+  const retryAttempt = { ...original }; // client resubmits its own stale copy unchanged
+  const r2 = mkRes();
+  await handler({ method: 'POST', body: { bookings: [retryAttempt], salons: [] } }, r2.obj);
+  eq(r2.body.conflicts, [], "the customer's own retry of their already-succeeded booking is NOT reported as a conflict, despite the price drift");
+
+  const stored = JSON.parse(fake.hashes.get('bookings').get('retry-bk-1'));
+  eq(stored.price, 20, "the retry never overwrites the server's authoritative price with the client's stale one");
+  eq(stored.status, 'confirmed', 'the booking is still exactly as it was — the retry was a true no-op');
+
+  // A DIFFERENT customer trying to touch this same booking id (impossible
+  // in practice since ids are random, but verifies the phone check is
+  // actually load-bearing, not just an id match) is still correctly
+  // rejected, not silently treated as a no-op success.
+  const impostor = { ...original, phone: '0000000000' };
+  const r3 = mkRes();
+  await handler({ method: 'POST', body: { bookings: [impostor], salons: [] } }, r3.obj);
+  ok(r3.body.conflicts.some(c => c.id === 'retry-bk-1'), "a mismatched phone on the same booking id is still rejected, not treated as a legitimate retry");
+});
+
+section('api/sync.js — HARDENING: deleting a worker cancels their future bookings and preserves their reviews (orphaned-data regression)');
+await withFakeKv(makeFakeRedis(), async (fake) => {
+  const prevSecret = process.env.SESSION_SECRET;
+  process.env.SESSION_SECRET = 'test-only-secret-for-session-tokens';
+  try {
+    fake.strings.set('salons_db', JSON.stringify([{
+      id: 'salonD', name: 'Salon D', slug: 'SALON_D',
+      workers: [{ id: 'wGone', name: 'Departing Barber', reviews: [{ rating: 5, author: 'Happy Client', comment: 'Great cut', date: '2026-01-01' }] }]
+    }]));
+    fake.hashes.set('bookings', new Map([
+      ['bk-future', JSON.stringify({ id: 'bk-future', salonId: 'salonD', workerId: 'wGone', dateISO: '2099-01-01', time: '10:00', status: 'confirmed', name: 'Future Client', phone: '333' })],
+      ['bk-past', JSON.stringify({ id: 'bk-past', salonId: 'salonD', workerId: 'wGone', dateISO: '2000-01-01', time: '10:00', status: 'completed', name: 'Past Client', phone: '333' })]
+    ]));
+    const handler = await freshImport('api/sync.js');
+    const adminToken = issueSessionToken({ role: 'admin' });
+
+    const r1 = mkRes();
+    await handler({ method: 'POST', headers: { authorization: `Bearer ${adminToken}` }, body: { bookings: [], salons: [{ id: 'salonD', name: 'Salon D', slug: 'SALON_D', workers: [] }] } }, r1.obj);
+    ok(r1.status === 200 && r1.body.success === true, 'admin removing the worker succeeds');
+
+    const salonsAfter = JSON.parse(fake.strings.get('salons_db')).find(s => s.id === 'salonD');
+    eq((salonsAfter.workers || []).length, 0, 'the worker is genuinely removed');
+    ok(salonsAfter.archivedReviews && salonsAfter.archivedReviews.some(r => r.comment === 'Great cut' && r.workerName === 'Departing Barber'), "the departed worker's review is preserved at the salon level, not destroyed");
+
+    const futureBkAfter = JSON.parse(fake.hashes.get('bookings').get('bk-future'));
+    eq(futureBkAfter.status, 'cancelled', "the removed worker's future confirmed booking is automatically cancelled");
+    eq(futureBkAfter.cancelledBy, 'staff', 'the cancellation is attributed to staff, so the customer gets notified like any other staff cancellation');
+
+    const pastBkAfter = JSON.parse(fake.hashes.get('bookings').get('bk-past'));
+    eq(pastBkAfter.status, 'completed', "an already-completed past booking is left alone — there's nothing to cancel");
+  } finally {
+    restoreEnv('SESSION_SECRET', prevSecret);
+  }
+});
+
 section('api/sync.js — HARDENING: an existing salon cannot steal another salon\'s slug or ownerUsername (URL/QR-hijack regression)');
 await withFakeKv(makeFakeRedis(), async (fake) => {
   const prevSecret = process.env.SESSION_SECRET;
@@ -1004,6 +1077,18 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
     await handler({ method: 'POST', headers: { authorization: `Bearer ${adminToken}` }, body: { bookings: [], salons: [rename] } }, r2.obj);
     const salonsAfter2 = JSON.parse(fake.strings.get('salons_db'));
     eq(salonsAfter2.find(s => s.id === 'salonA').slug, 'SALON_A_RENAMED', 'a genuinely unique slug change still goes through normally');
+
+    // A genuine SWAP (both salons trade slugs in the SAME request) must
+    // actually succeed, not silently no-op for both — the naive
+    // incremental version of this check used to do exactly that, since
+    // processing A first saw B still at its old (soon-to-change) slug.
+    const swapA = { id: 'salonA', name: 'Salon A', slug: 'SALON_B' };
+    const swapB = { id: 'salonB', name: 'Salon B', slug: 'SALON_A_RENAMED' };
+    const r3 = mkRes();
+    await handler({ method: 'POST', headers: { authorization: `Bearer ${adminToken}` }, body: { bookings: [], salons: [swapA, swapB] } }, r3.obj);
+    const salonsAfter3 = JSON.parse(fake.strings.get('salons_db'));
+    eq(salonsAfter3.find(s => s.id === 'salonA').slug, 'SALON_B', 'a genuine two-salon slug swap actually applies for salon A');
+    eq(salonsAfter3.find(s => s.id === 'salonB').slug, 'SALON_A_RENAMED', 'a genuine two-salon slug swap actually applies for salon B');
   } finally {
     restoreEnv('SESSION_SECRET', prevSecret);
   }
