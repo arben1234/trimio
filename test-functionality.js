@@ -644,6 +644,11 @@ function makeFakeRedis() {
         if (h) for (const [f, v] of h.entries()) flat.push(f, v);
         return okResult(flat);
       }
+      case 'HGET': {
+        const [key, field] = rest;
+        const h = hashes.get(key);
+        return okResult(h && h.has(field) ? h.get(field) : null);
+      }
       case 'KEYS': {
         const [pattern] = rest;
         const re = new RegExp('^' + String(pattern).split('*').map(s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$');
@@ -1333,6 +1338,46 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
   const rBlocked = mkRes();
   await handler({ method: 'POST', body: { action: 'verify_signup_otp', phone, code: '999999' } }, rBlocked.obj);
   eq(rBlocked.status, 429, 'the 9th verify attempt is rate-limited even with the CORRECT code — brute-force protection actually engages');
+});
+
+section('api/sync.js — HARDENING: two staff devices racing to flip the SAME booking\'s status get a deterministic outcome, not a silent false-success (concurrent-update regression)');
+await withFakeKv(makeFakeRedis(), async (fake) => {
+  const prevSecret = process.env.SESSION_SECRET;
+  process.env.SESSION_SECRET = 'test-only-secret-for-session-tokens';
+  try {
+    fake.strings.set('salons_db', JSON.stringify([{ id: 'salonC', name: 'Salon C', workers: [{ id: 'wC', name: 'Worker C' }] }]));
+    // Seeded directly (past date/time) rather than created through the
+    // handler — "mark as done" is only valid for an appointment that has
+    // already happened, and this test is specifically about the RACE
+    // between two staff devices, not the separate future-date guard.
+    const bk = { id: 'race-bk-1', salonId: 'salonC', workerId: 'wC', dateISO: '2020-01-01', time: '09:00', status: 'confirmed', name: 'Client', price: 20, dur: 30 };
+    fake.hashes.set('bookings', new Map([['race-bk-1', JSON.stringify(bk)]]));
+    const handler = await freshImport('api/sync.js');
+    const ownerToken = issueSessionToken({ role: 'owner', salonId: 'salonC' });
+    const authHdr = { authorization: `Bearer ${ownerToken}` };
+
+    // Two "devices" both start from the SAME pre-race snapshot (status
+    // still 'confirmed') and fire concurrently — one marking it done, the
+    // other cancelling it. Real concurrency (not awaited individually), so
+    // their internal awaits genuinely interleave.
+    const deviceA = { ...bk, status: 'completed' };
+    const deviceB = { ...bk, status: 'cancelled', cancelledBy: 'staff' };
+    const rA = mkRes(), rB = mkRes();
+    await Promise.all([
+      handler({ method: 'POST', headers: authHdr, body: { bookings: [deviceA], salons: [] } }, rA.obj),
+      handler({ method: 'POST', headers: authHdr, body: { bookings: [deviceB], salons: [] } }, rB.obj)
+    ]);
+
+    const aConflict = rA.body.conflicts.some(c => c.id === 'race-bk-1' && c.error === 'concurrent_update');
+    const bConflict = rB.body.conflicts.some(c => c.id === 'race-bk-1' && c.error === 'concurrent_update');
+    eq([aConflict, bConflict].filter(Boolean).length, 1, 'exactly one of the two concurrent status changes is rejected as a concurrent_update conflict, not silently overwritten');
+    eq([aConflict, bConflict].filter(x => !x).length, 1, 'the other one genuinely succeeds — the lock serializes them instead of both silently racing');
+
+    const finalBk = JSON.parse(fake.hashes.get('bookings').get('race-bk-1'));
+    ok(finalBk.status === 'completed' || finalBk.status === 'cancelled', 'the booking ends up in exactly one deterministic, real final state');
+  } finally {
+    restoreEnv('SESSION_SECRET', prevSecret);
+  }
 });
 
 section('api/sync.js — a new booking against an inactive/unknown salon is rejected server-side');

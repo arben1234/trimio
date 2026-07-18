@@ -5,7 +5,8 @@ import {
   acquireBarberDayLock, releaseBarberDayLock, checkRateLimit,
   ensureMigratedV2, getAdminDb, setAdminDb,
   acquireBillingLock, releaseBillingLock, claimCancellationNotifyOnce,
-  acquirePushSubsLock, releasePushSubsLock
+  acquirePushSubsLock, releasePushSubsLock,
+  acquireBookingLock, releaseBookingLock
 } from '../lib/kv.js';
 import { sendCustomerText, toE164, twilioConfigured, isValidItalianPhone } from '../lib/sms.js';
 import { sendEmail, escapeHtml } from '../lib/email.js';
@@ -269,14 +270,20 @@ async function handleSignupSalon(body, kvUrl, kvToken, req) {
     return { status: 200, json: { success: true } };
   }
 
-  const ownerName = typeof body.ownerName === 'string' ? body.ownerName.trim() : '';
+  // Every free-text field here had a MINIMUM length check but no MAXIMUM —
+  // this endpoint is reachable by a fully anonymous visitor (self-signup),
+  // and salons_db is ONE JSON blob shared by the entire platform, re-
+  // downloaded by every logged-in client's 6s poll. Capped the same way
+  // reviews/homepage-ad text already are elsewhere in this file, so an
+  // anonymous submission can't bloat that shared blob for every tenant.
+  const ownerName = (typeof body.ownerName === 'string' ? body.ownerName.trim() : '').slice(0, 100);
   const username = typeof body.username === 'string' ? body.username.trim() : '';
   const password = typeof body.password === 'string' ? body.password : '';
-  const salonName = typeof body.salonName === 'string' ? body.salonName.trim() : '';
-  const email = typeof body.email === 'string' ? body.email.trim() : '';
-  const city = typeof body.city === 'string' ? body.city.trim() : '';
-  const address = typeof body.address === 'string' ? body.address.trim() : '';
-  const contractSignedName = typeof body.contractSignedName === 'string' ? body.contractSignedName.trim() : '';
+  const salonName = (typeof body.salonName === 'string' ? body.salonName.trim() : '').slice(0, 100);
+  const email = (typeof body.email === 'string' ? body.email.trim() : '').slice(0, 200);
+  const city = (typeof body.city === 'string' ? body.city.trim() : '').slice(0, 60);
+  const address = (typeof body.address === 'string' ? body.address.trim() : '').slice(0, 200);
+  const contractSignedName = (typeof body.contractSignedName === 'string' ? body.contractSignedName.trim() : '').slice(0, 100);
 
   // Every field below is mandatory in the signup wizard — reject a bare
   // API call that skips the client-side checks the same way, rather than
@@ -959,7 +966,7 @@ function isValidSalonsArray(salons) {
 // own URL/QR code (every slug lookup is a first-match find()), with no
 // error surfaced anywhere.
 function isValidNewSalon(s, existingSalonsMap) {
-  if (typeof s.name !== 'string' || s.name.trim().length < 2) return false;
+  if (typeof s.name !== 'string' || s.name.trim().length < 2 || s.name.length > 100) return false;
   if (typeof s.slug !== 'string' || !/^[A-Z0-9_]{2,50}$/.test(s.slug)) return false;
   if (typeof s.ownerUsername !== 'string' || !/^[a-zA-Z0-9._-]{3,30}$/.test(s.ownerUsername)) return false;
   // Matches handleSignupSalon's own rules (password length, real phone
@@ -970,11 +977,14 @@ function isValidNewSalon(s, existingSalonsMap) {
   // existed at all against a direct API call bypassing the client.
   if (typeof s.ownerPassword !== 'string' || s.ownerPassword.length < 6) return false;
   if (typeof s.phone !== 'string' || !isValidItalianPhone(s.phone)) return false;
-  // Same light "not a single word" sanity check as handleSignupSalon.
-  if (typeof s.address !== 'string' || s.address.trim().length < 5 || !/\s/.test(s.address.trim())) return false;
+  // Same light "not a single word" sanity check as handleSignupSalon, plus
+  // an upper bound — this endpoint had minimums everywhere but no maximum
+  // on any free-text field, and salons_db is one JSON blob shared by the
+  // whole platform, re-downloaded by every client's 6s poll.
+  if (typeof s.address !== 'string' || s.address.trim().length < 5 || s.address.length > 200 || !/\s/.test(s.address.trim())) return false;
   // handleSignupSalon requires city.length>=2 — this path (admin-created
   // salon) had no check on it at all, a parity gap versus self-signup.
-  if (typeof s.city !== 'string' || s.city.trim().length < 2) return false;
+  if (typeof s.city !== 'string' || s.city.trim().length < 2 || s.city.length > 60) return false;
   for (const other of existingSalonsMap.values()) {
     if (other.id === s.id) continue;
     if (other.slug === s.slug) return false;
@@ -1394,7 +1404,15 @@ export default async function handler(req, res) {
                   continue;
                 }
                 if (isOnVacation(worker, nb.dateISO) || isWeeklyOff(worker, nb.dateISO) || overlapsBreak(worker, nb, salonForVac)) {
-                  conflicts.push({ id: nb.id, salonId: nb.salonId, workerId: nb.workerId, dateISO: nb.dateISO, time: nb.time });
+                  // Distinct from a genuine slot-taken conflict (no error
+                  // code, further below) — the client used to show the
+                  // same "someone else took this slot, choose another
+                  // barber" modal for this too, which is misleading (the
+                  // barber isn't busy, this day/time just doesn't work for
+                  // them at all — vacation, weekly day off, or lunch break)
+                  // and can send a customer into a pointless retry loop
+                  // picking alternates that hit the exact same rejection.
+                  conflicts.push({ id: nb.id, salonId: nb.salonId, workerId: nb.workerId, dateISO: nb.dateISO, time: nb.time, error: 'worker_unavailable' });
                   continue;
                 }
               }
@@ -1479,14 +1497,45 @@ export default async function handler(req, res) {
               // customer a confusing "someone else took this slot" modal
               // for a booking that had actually already succeeded.
               continue;
-            } else {
-              // Update to an existing booking (e.g. status change) — no lock
-              // needed, but this must never let a caller touch a booking
-              // outside their own salon (or, for a barber, outside their own
-              // calendar — a barber session used to be able to cancel or
-              // mark-complete any OTHER barber's booking in the same salon,
-              // since only salonId was checked here; the UI never offered
-              // that action, but a direct POST could). Legitimate callers:
+            } else if (!(await acquireBookingLock(kvUrl, kvToken, nb.id))) {
+              // Genuine sustained contention on this one booking (very rare
+              // — this lock is only ever held for the short critical
+              // section below) rather than a real conflict; ask the client
+              // to retry, same shape as the new-booking day-lock's own
+              // busy_retry.
+              conflicts.push({ id: nb.id, error: 'busy_retry' });
+              continue;
+            } else { try {
+              // Two staff devices flipping the SAME booking's status within
+              // the same few seconds (a front-desk tablet and a barber's
+              // phone both on "Oggi" is completely ordinary) used to race
+              // on an unconditional write with no lock and no re-check: the
+              // pre-loop `existing` snapshot could already be stale by the
+              // time this item is processed, so whichever request's HSET
+              // physically landed last in KV won non-deterministically on a
+              // revenue-relevant field (completed vs cancelled) — and the
+              // LOSING request's own response still echoed its own change
+              // as "succeeded" (built from its own in-memory merge, never a
+              // fresh re-read), showing that device a false confirmation
+              // for an action that was actually discarded. Now that the
+              // lock is held, re-check against the true current record: if
+              // it already moved since this request's pre-loop read, don't
+              // blindly overwrite it — tell the client plainly so it can
+              // resync instead of trusting a stale snapshot.
+              const freshRaw = await kvCmd(kvUrl, kvToken, ['HGET', 'bookings', nb.id]);
+              let freshExisting = null;
+              try { freshExisting = freshRaw ? JSON.parse(freshRaw) : null; } catch { /* corrupt entry, treat as gone */ }
+              if (!freshExisting || freshExisting.status !== existing.status) {
+                conflicts.push({ id: nb.id, error: 'concurrent_update' });
+                continue;
+              }
+              // Update to an existing booking (e.g. status change) — this
+              // must never let a caller touch a booking outside their own
+              // salon (or, for a barber, outside their own calendar — a
+              // barber session used to be able to cancel or mark-complete
+              // any OTHER barber's booking in the same salon, since only
+              // salonId was checked here; the UI never offered that
+              // action, but a direct POST could). Legitimate callers:
               // admin (any booking); owner (any booking in their salon);
               // barber (only bookings assigned to their OWN workerId); and a
               // customer — who has no session at all — cancelling their OWN
@@ -1608,15 +1657,17 @@ export default async function handler(req, res) {
                 // Only a STAFF-initiated cancellation is news to the customer —
                 // if they cancelled it themselves there's nothing to tell them.
                 // claimCancellationNotifyOnce dedupes two concurrent requests
-                // for the same booking (this branch takes no per-booking lock)
-                // down to a single notification — the cancellation itself is
-                // written correctly by both either way.
+                // for the same booking down to a single notification — the
+                // cancellation itself is written correctly by both either way,
+                // and is now additionally serialized by acquireBookingLock above.
                 if (existing.status !== 'cancelled' && merged.cancelledBy === 'staff'
                     && await claimCancellationNotifyOnce(kvUrl, kvToken, merged.id)) {
                   staffCancelledBks.push(merged);
                 }
               }
-            }
+            } finally {
+              await releaseBookingLock(kvUrl, kvToken, nb.id);
+            } }
           } catch (itemErr) {
             // One malformed/unexpected booking must never abort the whole batch —
             // saveState() sends the client's entire local array on every save, so a
@@ -1804,6 +1855,34 @@ export default async function handler(req, res) {
               if (Array.isArray(incoming.services) && incoming.services.length > 200) {
                 console.warn('[SYNC] Rejected salon save, too many services:', incoming.id, incoming.services.length);
                 continue;
+              }
+              // The array-length caps above bound HOW MANY worker/service
+              // entries can be pushed into the shared blob, but nothing
+              // bounded how LONG any single string field inside them (or
+              // the salon's own name/promo/gallery) could be — the same
+              // "single authorized session inflates the platform-wide
+              // shared blob" risk the comment above already describes,
+              // just via string size instead of array count. Truncated
+              // (not rejected) to match the pattern already used for
+              // review/homepage-ad text elsewhere in this file.
+              if (typeof incoming.name === 'string') incoming.name = incoming.name.slice(0, 100);
+              if (typeof incoming.promo === 'string') incoming.promo = incoming.promo.slice(0, 300);
+              if (typeof incoming.city === 'string') incoming.city = incoming.city.slice(0, 60);
+              if (typeof incoming.address === 'string') incoming.address = incoming.address.slice(0, 200);
+              if (Array.isArray(incoming.gallery) && incoming.gallery.length > 30) incoming.gallery = incoming.gallery.slice(0, 30);
+              if (Array.isArray(incoming.workers)) {
+                for (const w of incoming.workers) {
+                  if (!w || typeof w !== 'object') continue;
+                  if (typeof w.name === 'string') w.name = w.name.slice(0, 80);
+                  if (typeof w.desc === 'string') w.desc = w.desc.slice(0, 500);
+                  if (typeof w.role === 'string') w.role = w.role.slice(0, 60);
+                }
+              }
+              if (Array.isArray(incoming.services)) {
+                for (const svc of incoming.services) {
+                  if (!svc || typeof svc !== 'object') continue;
+                  if (typeof svc.name === 'string') svc.name = svc.name.slice(0, 100);
+                }
               }
               if (!existing) {
                 if (!isValidNewSalon(incoming, salonMap)) {

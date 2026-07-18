@@ -1000,6 +1000,15 @@ function initCloudSync() {
               custSalon = refreshed;
               if (typeof applyCustomerTheme === 'function') applyCustomerTheme(refreshed);
               if (heroChanged && typeof initCustHero === 'function') initCustHero(refreshed);
+              // Unlike the one-time initial sync above, this recurring 6s
+              // poll never re-rendered the currently-visible booking step
+              // — a newly-freed slot (someone else's cancellation) or a
+              // worker/service change wouldn't visually appear until the
+              // customer manually reselected a date, even though actual
+              // submission was always checked against live data regardless.
+              if (custStep === 0 && typeof renderBarberGrid === 'function') renderBarberGrid();
+              if (custStep === 1 && typeof renderCustServices === 'function') renderCustServices();
+              if (custStep === 2 && typeof renderCustTimes === 'function') renderCustTimes();
               // Keeps the "you have a booking" banner/modal in sync with
               // server-side status changes (e.g. the salon cancelling it)
               // without the customer having to do anything.
@@ -2076,6 +2085,11 @@ function renderBarberGrid(){
   const iso=todayISO();
   $('barberGrid').innerHTML=custSalon.workers.map(w=>{
     const vac=isOnVacation(w,iso);
+    // The "Disponibile" badge only ever checked vacation, so a barber on
+    // their ordinary weekly day off (not vacation) still showed as
+    // available today — misleading, even though the "Riposo: ..." line
+    // below already correctly listed which weekday(s) they're off.
+    const offToday=!vac&&isWeeklyOff(w,iso);
     const reviews=w.reviews || [];
     const count=reviews.length;
     const avg=count ? (reviews.reduce((sum, r) => sum + r.rating, 0) / count).toFixed(1) : 'Nuovo';
@@ -2092,7 +2106,7 @@ function renderBarberGrid(){
       <div class="bc-role">${escapeHtml(w.role || 'Senior Barber')}</div>
       <div class="bc-desc">${escapeHtml(w.desc || 'Specialista in taglio e rasatura.')}</div>
       <div class="bc-stars" onclick="event.stopPropagation(); showBarberReviews('${w.id}')">${starsHtml}</div>
-      <div class="bc-status">${vac?'In ferie 🌴':'Disponibile'}</div>
+      <div class="bc-status">${vac?'In ferie 🌴':offToday?'Riposo oggi':'Disponibile'}</div>
       ${vac&&w.vacTo?`<div class="bc-vac">Fino al ${w.vacTo}</div>`:''}
       ${!vac&&offDaysLabel(w)?`<div class="bc-vac">Riposo: ${offDaysLabel(w)}</div>`:''}
     </div>`;
@@ -2155,7 +2169,19 @@ function renderCustTimes(){
 }
 
 function renderCustServices(){
-  const svcs=custSalon.services||DEFAULT_SERVICES;
+  // custSalon.services||DEFAULT_SERVICES used to substitute the generic
+  // defaults for an explicit EMPTY array too (a salon whose owner deleted
+  // every service — the service-delete handler has no minimum-1 guard),
+  // not just for a genuinely never-configured salon (services undefined/
+  // null) — silently offering a customer services the salon doesn't
+  // actually provide (wrong names/prices) is worse than a blank step, so
+  // an explicit [] now shows a clear message instead of masquerading as
+  // DEFAULT_SERVICES.
+  const svcs=Array.isArray(custSalon.services)?custSalon.services:DEFAULT_SERVICES;
+  if(!svcs.length){
+    $('svc').innerHTML=`<div style="text-align:center;padding:24px 12px;color:#888;font-size:13px;">Nessun servizio disponibile al momento. Riprova più tardi.</div>`;
+    return;
+  }
   $('svc').innerHTML=svcs.map(s=>`<div class="svc-item" data-name="${escapeHtml(s.name)}" data-price="${s.price}">
     <div><div class="svc-name">${escapeHtml(s.name)}</div><div class="svc-meta">${escapeHtml(s.dur)}</div></div>
     <div class="svc-price">€${s.price}</div></div>`).join('');
@@ -2322,6 +2348,33 @@ async function doSubmit(){
         showErr('cErr','Il barbiere selezionato non è più disponibile. Scegline un altro.');
         return;
       }
+      if(conflict.error==='salon_inactive'){
+        // The salon itself was deactivated/suspended (or a pending self-
+        // signup never got approved) between page load and submit — the
+        // generic "someone took this slot" alt-barber modal would be
+        // actively misleading here (picking any alternate just resubmits
+        // against the same now-inactive salon and gets the identical
+        // rejection, a pointless retry loop). Nothing about this is
+        // recoverable from the booking flow itself.
+        showErr('cErr','Questo salone non è al momento disponibile per nuove prenotazioni.');
+        return;
+      }
+      if(conflict.error==='worker_unavailable'){
+        // The barber isn't busy at this exact time (that's the untagged
+        // conflict further below) — this day/time simply doesn't work for
+        // them at all: vacation, weekly day off, or their lunch break.
+        // Still recoverable via a different barber, so the alt-picker
+        // modal is the right UI, just with accurate wording instead of
+        // implying contention that isn't what actually happened.
+        const freeUnavail=custSalon.workers.filter(w=>{
+          if(w.id===custData.barberId)return false;
+          if(isOnVacation(w,custData.dateISO))return false;
+          if(isWeeklyOff(w,custData.dateISO))return false;
+          return!slotConflicts(custSalon.id,w.id,custData.dateISO,custData.time,durMin);
+        });
+        showAltModal(custData.barberName,custData.time,freeUnavail,'non lavora in questo giorno/orario');
+        return;
+      }
       // Un altro cliente ha preso questo slot nel frattempo (rilevato dal server)
       const free=custSalon.workers.filter(w=>{
         if(w.id===custData.barberId)return false;
@@ -2342,6 +2395,16 @@ async function doSubmit(){
 
     $('dB').textContent=custData.barberName;$('dD').textContent=custData.dateLabel;
     $('dT').textContent=custData.time+' · '+durMin+' min';$('dS').textContent=custData.service;
+    // Price/duration are server-authoritative (re-derived from the salon's
+    // LIVE service list at creation, never trusted from the client) — the
+    // confirmation screen never showed a price at all, so if the salon's
+    // price for this service changed between the customer loading the
+    // page and submitting, the discrepancy was invisible. saveState()
+    // already merged the server's own copy of this booking back into
+    // STATE.bookings, so read the true recorded price from there rather
+    // than repeating custData's (possibly stale) client-side guess.
+    const savedBk=STATE.bookings.find(x=>x.id===bk.id);
+    $('dP').textContent='€'+(savedBk?savedBk.price:custData.price);
     ['s0','s1','s2','s3'].forEach(id=>$(id).classList.remove('on'));
     $('sDone').classList.add('on');
     $('cActions').style.display='none';$('cFooter').style.display='none';
@@ -2362,8 +2425,8 @@ async function doSubmit(){
   }
 }
 
-function showAltModal(busyName,time,freeB){
-  $('altSub').textContent=`${busyName} è occupato alle ${time}. Liberi in questo orario:`;
+function showAltModal(busyName,time,freeB,reason){
+  $('altSub').textContent=`${busyName} ${reason||`è occupato alle ${time}`}. Liberi in questo orario:`;
   $('altList').innerHTML=freeB.length===0
     ?`<div style="padding:14px 0;color:#888;font-size:13px">Nessun altro barbiere libero in questo orario.</div>`
     :freeB.map(w=>`<div class="alt-item" data-id="${w.id}" data-name="${escapeHtml(w.name)}">
@@ -3449,9 +3512,23 @@ async function dashAction(act,id){
     alert(`Non puoi segnare come "Fatto" un appuntamento futuro (${b.dateLabel} alle ${b.time}). Attendi che arrivi l'orario dell'appuntamento.`);
     return;
   }
+  const prevStatus=b.status,prevCancelledBy=b.cancelledBy;
   b.status=act==='done'?'completed':'cancelled';
   if(act==='cancel')b.cancelledBy='staff';
-  await saveState();renderDash();renderNewBookingsPanel();
+  const r=await saveState();
+  // The server now serializes concurrent status updates to the SAME
+  // booking per-request (acquireBookingLock) and rejects one side with
+  // 'concurrent_update' if another device's change landed first — this
+  // used to be a silent, non-deterministic last-write-wins race where the
+  // LOSING device's UI still showed its own action as if it had
+  // succeeded. Revert the optimistic local change and say so plainly
+  // instead, rather than displaying a false confirmation.
+  const conflict=r&&r.conflicts&&r.conflicts.find(c=>c.id===id);
+  if(conflict&&conflict.error==='concurrent_update'){
+    b.status=prevStatus;b.cancelledBy=prevCancelledBy;
+    alert('Questa prenotazione è stata appena modificata da un altro dispositivo. Ricontrolla lo stato aggiornato.');
+  }
+  renderDash();renderNewBookingsPanel();
 }
 
 // Manual "notify client" button — sends an immediate push reminder for one
@@ -4199,6 +4276,8 @@ function renderSaloni(){
   $('saloniList').innerHTML=html||`<div class="empty"><div class="empty-t">Nessun salone</div></div>`;
   $('saloniList').querySelectorAll('[data-markpaid]').forEach(b=>b.addEventListener('click',async()=>{
     const s=STATE.salons.find(x=>x.id===b.dataset.markpaid);if(!s)return;
+    if(b.disabled)return;
+    b.disabled=true;
     try{
       const resp=await fetch('/api/sync',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify({action:'mark_salon_paid',salonId:s.id})});
       const r=await resp.json().catch(()=>({}));
@@ -4211,12 +4290,15 @@ function renderSaloni(){
         renderSaloni();
       }else{
         alert('Errore: '+(r.error||'sconosciuto'));
+        b.disabled=false;
       }
-    }catch(e){alert('Errore di connessione: '+e.message);}
+    }catch(e){alert('Errore di connessione: '+e.message);b.disabled=false;}
   }));
   $('saloniList').querySelectorAll('[data-enablebilling]').forEach(b=>b.addEventListener('click',async()=>{
     const s=STATE.salons.find(x=>x.id===b.dataset.enablebilling);if(!s)return;
     if(!confirm(`Attivare la Fatturazione per "${s.name}"? Il proprietario potrà così attivare il pagamento automatico dal proprio pannello.`))return;
+    if(b.disabled)return;
+    b.disabled=true;
     try{
       const resp=await fetch('/api/sync',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify({action:'enable_salon_billing',salonId:s.id})});
       const r=await resp.json().catch(()=>({}));
@@ -4226,8 +4308,9 @@ function renderSaloni(){
         renderSaloni();
       }else{
         alert('Errore: '+(r.error||'sconosciuto'));
+        b.disabled=false;
       }
-    }catch(e){alert('Errore di connessione: '+e.message);}
+    }catch(e){alert('Errore di connessione: '+e.message);b.disabled=false;}
   }));
   $('saloniList').querySelectorAll('[data-sedit]').forEach(b=>b.addEventListener('click',()=>openSalonModal(b.dataset.sedit)));
   $('saloniList').querySelectorAll('[data-stoggle]').forEach(b=>b.addEventListener('click',async()=>{
