@@ -138,7 +138,8 @@ new vm.Script(`
     isOnVacation, freqTag, urlBase64ToUint8Array, isValidItalianPhone,
     validateCust, custData, doSubmit, custNext,
     doLogin, getSession: function(){ return SESSION; },
-    filterByPeriod, feeForWorkerCount
+    filterByPeriod, feeForWorkerCount,
+    isBookingInFuture, getMyBookingsForSalon, rememberMyBooking, renderMyBookingsModal
   };
   var __uiCallCounts = { showView:0, initDash:0, initPush:0 };
   showView = function(){ __uiCallCounts.showView++; };
@@ -282,6 +283,39 @@ section('Customer booking flow validation (validateCust)');
   ok(X.validateCust() === false, 'step 3 still rejected with no phone number');
   X.custData.phone = '3331234567';
   ok(X.validateCust() === true, 'step 3 passes with a valid name and phone');
+}
+
+section('isBookingInFuture() and the customer "my bookings" list (past-bookings-hidden regression)');
+{
+  const todayIso = X.todayISO();
+  ok(X.isBookingInFuture({ dateISO: '2099-01-01', time: '10:00' }) === true, 'isBookingInFuture(): a far-future date is future');
+  ok(X.isBookingInFuture({ dateISO: '2000-01-01', time: '10:00' }) === false, 'isBookingInFuture(): a far-past date is not future');
+  ok(X.isBookingInFuture({ dateISO: todayIso, time: '00:00' }) === false, "isBookingInFuture(): today at 00:00 has already passed (unless run at literally midnight)");
+  ok(X.isBookingInFuture({ dateISO: todayIso, time: '23:59' }) === true, 'isBookingInFuture(): today at 23:59 has not happened yet');
+
+  // renderMyBookingsModal() used to hand getMyBookingsForSalon()'s result
+  // (deliberately unfiltered by date — sorted by nearest-in-time in EITHER
+  // direction) straight to the customer's own booking list, mixing past
+  // appointments in alongside upcoming ones.
+  const salon = new vm.Script(`custSalon = STATE.salons[0]; custSalon;`, { filename: 'set-salon-mybookings.js' }).runInContext(context);
+  const pastBk = { id: 'mybk-past', salonId: salon.id, workerId: salon.workers[0].id, workerName: salon.workers[0].name, dateISO: '2000-01-01', dateLabel: '1 Gen 2000', time: '10:00', service: 'Taglio', status: 'confirmed', name: 'Me', phone: '333' };
+  const futureBk = { id: 'mybk-future', salonId: salon.id, workerId: salon.workers[0].id, workerName: salon.workers[0].name, dateISO: '2099-01-01', dateLabel: '1 Gen 2099', time: '10:00', service: 'Taglio', status: 'confirmed', name: 'Me', phone: '333' };
+  X.STATE.bookings.push(pastBk, futureBk);
+  fakeLocalStorage.setItem('trimio_my_bookings', JSON.stringify(['mybk-past', 'mybk-future']));
+
+  const mineUnfiltered = X.getMyBookingsForSalon(salon.id);
+  ok(mineUnfiltered.some(b => b.id === 'mybk-past') && mineUnfiltered.some(b => b.id === 'mybk-future'),
+    'getMyBookingsForSalon() itself is still unfiltered by date (used elsewhere for nearest-in-time sorting)');
+
+  elementCache.delete('myBookingsList');
+  X.renderMyBookingsModal();
+  const listHtml = elementCache.get('myBookingsList').innerHTML;
+  ok(listHtml.includes('1 Gen 2099'), "the customer's booking list shows an upcoming booking");
+  ok(!listHtml.includes('1 Gen 2000'), "the customer's booking list no longer shows a past booking");
+
+  // cleanup
+  X.STATE.bookings = X.STATE.bookings.filter(b => b.id !== 'mybk-past' && b.id !== 'mybk-future');
+  fakeLocalStorage.removeItem('trimio_my_bookings');
 }
 
 /* ================================================================

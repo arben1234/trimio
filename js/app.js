@@ -1964,8 +1964,11 @@ function renderCustMyBookingBanner(){
   if(!banner||!custSalon)return;
   const mine=getMyBookingsForSalon(custSalon.id);
   if(!mine.length){banner.style.display='none';return;}
-  const today=todayISO();
-  const upcoming=mine.filter(b=>b.status!=='cancelled'&&b.dateISO>=today)
+  // dateISO>=today alone used to still count a booking as "upcoming" for
+  // the rest of TODAY even after its own time had already passed (e.g. a
+  // 10:00 appointment still shown as next-up at 18:00) — isBookingInFuture()
+  // also compares the time-of-day when the date is today, closing that gap.
+  const upcoming=mine.filter(b=>b.status!=='cancelled'&&isBookingInFuture(b))
     .sort((a,b)=>(a.dateISO+a.time).localeCompare(b.dateISO+b.time))[0];
   // With an upcoming booking, headline its date/time; otherwise (only
   // past/cancelled ones on record) keep the banner as a generic entry point
@@ -1975,13 +1978,18 @@ function renderCustMyBookingBanner(){
   const upcomingEnd=upcoming?bookingEndTime(upcoming,custSalon):null;
   $('custMyBookingBannerText').textContent=upcoming
     ?`${upcoming.dateLabel} alle ${upcoming.time}${upcomingEnd?'-'+upcomingEnd:''} · ${upcoming.workerName}`
-    :'Vedi lo storico delle tue prenotazioni';
+    :'Le tue prenotazioni';
   banner.style.display='flex';
 }
 
 function renderMyBookingsModal(){
   if(!custSalon)return;
-  const mine=getMyBookingsForSalon(custSalon.id);
+  // Only bookings that haven't happened yet — a customer's own list used to
+  // mix in every past/completed appointment right alongside upcoming ones
+  // (getMyBookingsForSalon deliberately sorts by nearest-in-time in EITHER
+  // direction, which is right for that function's own purpose but wrong to
+  // hand straight to this customer-facing list unfiltered).
+  const mine=getMyBookingsForSalon(custSalon.id).filter(isBookingInFuture);
   $('myBookingsList').innerHTML=mine.length?mine.map(b=>{
     const end=bookingEndTime(b,custSalon);
     return`
