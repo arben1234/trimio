@@ -1677,6 +1677,89 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
   }
 });
 
+section('api/send-reminders.js — CONCURRENCY: a reminder send can never resurrect a booking cancelled while it was in flight');
+await withFakeKv(makeFakeRedis(), async (fake) => {
+  const prevVapid = process.env.VAPID_PRIVATE_KEY;
+  const prevSid = process.env.TWILIO_ACCOUNT_SID;
+  const prevToken = process.env.TWILIO_AUTH_TOKEN;
+  const prevFrom = process.env.TWILIO_FROM;
+  const prevCronSecret = process.env.CRON_SECRET;
+  const RealDate = Date;
+  try {
+    // No push key, Twilio configured instead — keeps the SMS-fallback branch
+    // reachable without needing a real (format-validated) VAPID key pair.
+    delete process.env.VAPID_PRIVATE_KEY;
+    process.env.TWILIO_ACCOUNT_SID = 'ACtest';
+    process.env.TWILIO_AUTH_TOKEN = 'tokentest';
+    process.env.TWILIO_FROM = 'TRIMIO';
+    delete process.env.CRON_SECRET;
+
+    // romeNow() calls `new Date()` with no args every time it's invoked —
+    // overriding just the zero-arg constructor path pins "now" to a fixed
+    // instant safely inside the 8:00-20:00 Rome reminder window, without
+    // disturbing Date.UTC()/explicit-arg construction used elsewhere.
+    const FIXED_MS = RealDate.UTC(2030, 0, 15, 9, 0, 0); // 10:00 in Rome (CET, winter, no DST)
+    class FixedDate extends RealDate {
+      constructor(...args) { super(...(args.length ? args : [FIXED_MS])); }
+      static now() { return FIXED_MS; }
+    }
+    globalThis.Date = FixedDate;
+
+    fake.strings.set('salons_db', JSON.stringify([{ id: 'sR', name: 'Salon R', workers: [{ id: 'wR', name: 'Worker R' }] }]));
+    const bookingId = 'bkRem1';
+    const original = {
+      id: bookingId, status: 'confirmed', salonId: 'sR', workerId: 'wR', dateISO: '2030-01-16',
+      time: '10:00', service: 'Taglio', dateLabel: 'domani', name: 'Cliente Test', phone: '3331112222', workerName: 'Worker R'
+    };
+    fake.hashes.set('bookings', new Map([[bookingId, JSON.stringify(original)]]));
+
+    // Simulates the real-world race: while notifyBooking() is awaiting the
+    // SMS round-trip, the customer self-cancels through api/sync.js's own
+    // booklock-guarded path. There's no real network latency in this fake-KV
+    // test for that await to span, so the concurrent write is injected
+    // deterministically at the exact moment the reminder code goes to
+    // acquire the SAME per-booking lock for its own final write — i.e.
+    // sometime after notifyBooking has already resolved and before the fix's
+    // fresh re-read, which is the precise window the bug lived in.
+    const underlyingFetch = fake.fetchImpl;
+    let raced = false;
+    globalThis.fetch = async (url, opts) => {
+      const urlStr = String(url);
+      if (urlStr.includes('api.twilio.com')) return { ok: true, text: async () => '' };
+      if (!raced && opts && typeof opts.body === 'string') {
+        try {
+          const parsed = JSON.parse(opts.body);
+          if (Array.isArray(parsed) && parsed[0] === 'SET' && parsed[1] === `booklock:${bookingId}`) {
+            raced = true;
+            const h = fake.hashes.get('bookings');
+            const stale = JSON.parse(h.get(bookingId));
+            h.set(bookingId, JSON.stringify({ ...stale, status: 'cancelled', cancelledBy: 'customer' }));
+          }
+        } catch { /* not a KV array-command call (e.g. push_subscriptions path GET) */ }
+      }
+      return underlyingFetch(url, opts);
+    };
+
+    const handler = await freshImport('api/send-reminders.js');
+    const r = mkRes();
+    await handler({ headers: {} }, r.obj);
+    ok(raced, 'the simulated concurrent cancellation was actually injected during this run');
+    eq(r.status, 200, 'reminder run completes successfully');
+
+    const stored = JSON.parse(fake.hashes.get('bookings').get(bookingId));
+    eq(stored.status, 'cancelled', "the customer's concurrent cancellation is preserved, not reverted to 'confirmed'");
+    eq(stored.cancelledBy, 'customer', 'cancelledBy is preserved from the fresh record, not overwritten by the stale in-memory snapshot');
+    eq(stored.reminderSent, true, 'reminderSent is still correctly patched on top of the fresh record (so it is not resent forever)');
+  } finally {
+    globalThis.Date = RealDate;
+    restoreEnv('VAPID_PRIVATE_KEY', prevVapid);
+    restoreEnv('TWILIO_ACCOUNT_SID', prevSid);
+    restoreEnv('TWILIO_AUTH_TOKEN', prevToken);
+    restoreEnv('TWILIO_FROM', prevFrom);
+    restoreEnv('CRON_SECRET', prevCronSecret);
+  }
+});
+
 /* ================================================================
    11. OPTIONAL — api/subscribe.js AGAINST THE REAL VERCEL/UPSTASH KV
    OFF BY DEFAULT. This performs a real network write to the production

@@ -1,5 +1,5 @@
 import webPush from 'web-push';
-import { getAllBookings, hsetBooking, getSalonsDb, claimReminderOnce, acquirePushSubsLock, releasePushSubsLock } from '../lib/kv.js';
+import { getAllBookings, hsetBooking, getSalonsDb, claimReminderOnce, acquirePushSubsLock, releasePushSubsLock, acquireBookingLock, releaseBookingLock, kvCmd } from '../lib/kv.js';
 import { sendCustomerText, twilioConfigured } from '../lib/sms.js';
 import { romeNow } from '../lib/time.js';
 
@@ -30,6 +30,32 @@ if (VAPID_PRIVATE_KEY) {
 function bookingMinutes(time) {
   const m = /^(\d{1,2}):(\d{2})/.exec(time || '');
   return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
+
+// notifyBooking() below can take a while (webPush round-trips, SMS fallback)
+// during which a customer or staff member can legitimately cancel/complete
+// the same booking through api/sync.js's booklock-guarded path. Writing the
+// *Sent flag back via the stale in-memory `bk` captured at the top of this
+// run would silently resurrect that concurrent change. So this re-acquires
+// the same per-booking lock api/sync.js uses, re-reads the current record,
+// and patches only the flag onto that fresh copy instead of overwriting the
+// whole booking with a stale snapshot.
+async function markReminderSent(kvUrl, kvToken, bookingId, flag) {
+  const locked = await acquireBookingLock(kvUrl, kvToken, bookingId);
+  if (!locked) {
+    console.error(`[REMINDER] Could not acquire lock to persist ${flag} for booking ${bookingId} — will retry next run.`);
+    return;
+  }
+  try {
+    const freshRaw = await kvCmd(kvUrl, kvToken, ['HGET', 'bookings', bookingId]);
+    if (!freshRaw) return;
+    let fresh;
+    try { fresh = JSON.parse(freshRaw); } catch { return; }
+    fresh[flag] = true;
+    await hsetBooking(kvUrl, kvToken, fresh);
+  } finally {
+    await releaseBookingLock(kvUrl, kvToken, bookingId);
+  }
 }
 
 export default async function handler(req, res) {
@@ -145,8 +171,7 @@ export default async function handler(req, res) {
       const salon = salons.find(s => s.id === bk.salonId);
       const firstName = (bk.name || '').trim().split(' ')[0] || 'cliente';
       await notifyBooking(bk, `Gentile ${firstName}! Ti ricordiamo che domani alle ore ${bk.time} hai un appuntamento prenotato con ${bk.workerName}, presso il salone ${salon ? salon.name : 'TRIMIO'}. Grazie per la fiducia!`);
-      bk.reminderSent = true;
-      await hsetBooking(kvUrl, kvToken, bk);
+      await markReminderSent(kvUrl, kvToken, bk.id, 'reminderSent');
     }
 
     for (const bk of dueToday) {
@@ -154,8 +179,7 @@ export default async function handler(req, res) {
       const salon = salons.find(s => s.id === bk.salonId);
       const firstName = (bk.name || '').trim().split(' ')[0] || 'cliente';
       await notifyBooking(bk, `Gentile ${firstName}! Ti ricordiamo il tuo appuntamento di oggi alle ore ${bk.time} con ${bk.workerName}, presso il salone ${salon ? salon.name : 'TRIMIO'}. A presto!`);
-      bk.sameDayReminderSent = true;
-      await hsetBooking(kvUrl, kvToken, bk);
+      await markReminderSent(kvUrl, kvToken, bk.id, 'sameDayReminderSent');
     }
 
     if (deadEndpoints.size > 0) {
