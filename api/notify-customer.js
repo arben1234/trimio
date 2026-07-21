@@ -49,6 +49,18 @@ export default async function handler(req, res) {
     const bk = bookingsMap.get(bookingId);
     if (!bk) return res.status(404).json({ error: 'Booking not found' });
 
+    const salons = await getSalonsDb(kvUrl, kvToken);
+    const salon = salons.find(s => s.id === bk.salonId);
+
+    // A barber's session token stays cryptographically valid for up to 30
+    // days with no revocation list (see api/sync.js's barberStillEmployed /
+    // api/subscribe.js) — unlike those endpoints, this one never re-checked
+    // that the barber is still actually in the salon's current worker list,
+    // so a fired barber could keep triggering real SMS/push sends to their
+    // old customers using their old token. Re-verified fresh on every call.
+    const barberStillEmployed = session.role !== 'barber'
+      || !!(salon && (salon.workers || []).some(w => w.id === session.workerId));
+
     // A barber is scoped to their OWN bookings only, same as every other
     // staff action on a booking (api/sync.js's isStaffForThisBooking) —
     // this endpoint only checked salonId, missing the workerId check applied
@@ -57,7 +69,7 @@ export default async function handler(req, res) {
     // that isn't theirs.
     const isAuthorizedForBooking = session.role === 'admin'
       || (session.role === 'owner' && session.salonId === bk.salonId)
-      || (session.role === 'barber' && session.salonId === bk.salonId && session.workerId === bk.workerId);
+      || (session.role === 'barber' && barberStillEmployed && session.salonId === bk.salonId && session.workerId === bk.workerId);
     if (!isAuthorizedForBooking) {
       return res.status(403).json({ error: 'forbidden' });
     }
@@ -89,8 +101,6 @@ export default async function handler(req, res) {
       }
     }
 
-    const salons = await getSalonsDb(kvUrl, kvToken);
-    const salon = salons.find(s => s.id === bk.salonId);
     const firstName = (bk.name || '').trim().split(' ')[0] || 'cliente';
     const msgBody = `Gentile ${firstName}! Ti ricordiamo il tuo appuntamento il ${bk.dateLabel || bk.dateISO} alle ore ${bk.time} con ${bk.workerName}, presso il salone ${salon ? salon.name : 'TRIMIO'}. Grazie per la fiducia!`;
 

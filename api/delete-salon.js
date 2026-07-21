@@ -55,6 +55,7 @@ export default async function handler(req, res) {
       return res.status(503).json({ error: 'busy', message: 'Salone occupato da un\'altra operazione, riprova.' });
     }
     let salon;
+    let paypalCancelFailed = false;
     try {
       const salons = await getSalonsDb(kvUrl, kvToken);
       salon = salons.find(s => s.id === salonId);
@@ -65,10 +66,20 @@ export default async function handler(req, res) {
       // Deleting a salon that still has a live PayPal subscription must stop
       // it from continuing to charge the customer every month for a service
       // that no longer exists — this used to be a pure gap, nothing here ever
-      // told PayPal the salon was gone. Best-effort: the delete proceeds
-      // either way even if this call fails.
+      // told PayPal the salon was gone. The delete proceeds either way even
+      // if this call fails (an admin explicitly asking to delete a salon
+      // shouldn't be blocked by a transient PayPal-side failure) — but unlike
+      // before, the failure is now surfaced in the response instead of
+      // silently discarded: once this salon record is deleted, its
+      // paypalSubscriptionId is gone from TRIMIO forever, so this is the
+      // last moment that id is ever visible anywhere outside PayPal's own
+      // dashboard for manual cleanup.
       if (salon.billing && salon.billing.autopay && salon.billing.paypalSubscriptionId) {
-        await cancelPaypalSubscription(salon.billing.paypalSubscriptionId, 'Salone eliminato su TRIMIO');
+        const cancelled = await cancelPaypalSubscription(salon.billing.paypalSubscriptionId, 'Salone eliminato su TRIMIO');
+        if (!cancelled) {
+          paypalCancelFailed = true;
+          console.error(`[DELETE-SALON] PayPal cancel failed for deleted salon ${salonId} "${salon.name}" (subscription ${salon.billing.paypalSubscriptionId}) — it may still be active and charging the owner; this id will no longer exist anywhere in TRIMIO after this delete completes.`);
+        }
       }
 
       const remaining = salons.filter(s => s.id !== salonId);
@@ -128,7 +139,7 @@ export default async function handler(req, res) {
     }
 
     console.log(`[DELETE-SALON] Deleted salon "${salon.name}" (${salonId}) and ${removedBookings} booking(s)`);
-    return res.status(200).json({ success: true, salonId, removedBookings });
+    return res.status(200).json({ success: true, salonId, removedBookings, paypalCancelFailed });
   } catch (error) {
     console.error('[DELETE-SALON] Error:', error);
     return res.status(500).json({ error: 'Errore del server, riprova.' });

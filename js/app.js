@@ -3722,9 +3722,22 @@ function renderServizi(){
   $('serviziList').querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click',()=>{editSrv=b.dataset.edit;renderServizi();}));
   $('serviziList').querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',async()=>{
     if(!confirm('Eliminare?'))return;
-    const liveSalon=STATE.salons.find(x=>x.id===editSalonId);if(!liveSalon)return;
-    liveSalon.services=liveSalon.services.filter(x=>x.id!==b.dataset.del);
-    await saveState();renderServizi();
+    // Deletion goes through a dedicated action that acts on the current
+    // server-side record directly (like delete_worker), instead of the
+    // generic bulk salons[] save inferring a deletion from a service simply
+    // being MISSING from this device's local snapshot — that snapshot can be
+    // stale (a backgrounded tab, or another device's concurrent edit), and
+    // treating "missing" as "delete" used to silently drop a service another
+    // device had just added.
+    let result;
+    try{
+      const resp=await fetch('/api/sync',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify({action:'delete_service',salonId:editSalonId,serviceId:b.dataset.del})});
+      result=await resp.json().catch(()=>({}));
+    }catch(e){alert('Errore di connessione al server: '+e.message);return;}
+    if(!result.success){alert('Errore durante l\'eliminazione: '+(result.error||'sconosciuto'));return;}
+    const liveSalon=STATE.salons.find(x=>x.id===editSalonId);
+    if(liveSalon)liveSalon.services=liveSalon.services.filter(x=>x.id!==b.dataset.del);
+    renderServizi();
   }));
   $('serviziList').querySelectorAll('[data-x]').forEach(b=>b.addEventListener('click',async()=>{
     if(b.dataset.x==='cancel'){editSrv=null;renderServizi();return;}
@@ -4335,6 +4348,9 @@ function renderSaloni(){
           // Also save to localStorage
           try { localStorage.setItem(SK, JSON.stringify(STATE)); } catch(e){}
           renderSaloni();
+          if (result.paypalCancelFailed) {
+            alert('Salone disattivato, ma la cancellazione dell\'abbonamento PayPal è fallita: potrebbe continuare ad addebitare il proprietario. Riprova più tardi o cancellalo manualmente da PayPal.');
+          }
         } else {
           alert('Errore nel salvare lo stato: ' + (result.error || 'Sconosciuto'));
         }
@@ -4363,6 +4379,10 @@ function renderSaloni(){
         const err = await resp.json().catch(() => ({}));
         alert('Errore durante l\'eliminazione: ' + (err.message || err.error || 'sconosciuto'));
         return;
+      }
+      const delResult = await resp.json().catch(() => ({}));
+      if (delResult.paypalCancelFailed) {
+        alert('Salone eliminato, ma la cancellazione del suo abbonamento PayPal è fallita: potrebbe continuare ad addebitare il proprietario. Vai su paypal.com per cancellarlo manualmente, il salone eliminato non conserva più questo dato.');
       }
     } catch (err) {
       alert('Errore di connessione al server: ' + err.message);
@@ -4529,6 +4549,12 @@ async function suSubmit(){
 }
 
 let salonEditId=null;
+// Bumped on every openSalonModal() call and on closing salonModal — lets a
+// call whose network refetch is still in flight recognize it's been
+// superseded (by a faster second click, or the modal being dismissed) and
+// bail out instead of clobbering a different salon's form with stale data
+// or popping the modal back open after the user already closed it.
+let salonModalReqSeq=0;
 // Galleria del salone in modifica: copia di lavoro finché non si salva.
 let smGalleryTemp=[];
 // Colore tema del salone in modifica: copia di lavoro finché non si salva.
@@ -4558,6 +4584,7 @@ function renderSmGallery(){
 
 async function openSalonModal(sid){
   clearErr('smErr');salonEditId=sid;
+  const myReq=++salonModalReqSeq;
 
   // saveState() always resends this device's ENTIRE local snapshot of
   // every salon, not just the one being edited — if this tab's copy of
@@ -4577,13 +4604,19 @@ async function openSalonModal(sid){
         const data=await resp.json().catch(()=>null);
         if(data&&Array.isArray(data.salons)&&data.salons.length>0){
           const fresh=data.salons.find(x=>x.id===sid);
-          if(fresh){
+          if(fresh&&myReq===salonModalReqSeq){
             STATE.salons=STATE.salons.map(x=>x.id===sid?fresh:x);
           }
         }
       }
     }catch(e){/* best-effort — fall back to whatever's already cached locally */}
   }
+
+  // A newer call (rapid second click on a different/same salon) or a close
+  // of this modal superseded this one while the fetch above was in flight —
+  // stop here instead of populating the form with the wrong salon's data or
+  // re-showing a modal the user already dismissed.
+  if(myReq!==salonModalReqSeq)return;
 
   // Reset tabs to default active 'Dati Principali'
   document.querySelectorAll('.modal-tab').forEach(t => t.classList.remove('active'));
@@ -4936,7 +4969,7 @@ async function saveManualAppt(){
 /* ---- SIDEBAR & MODALS ---- */
 function openSide(){$('side').classList.add('show');$('ov').classList.add('show');}
 function closeSide(){$('side').classList.remove('show');$('ov').classList.remove('show');}
-function closeModal(id){$(id).classList.remove('show');}
+function closeModal(id){$(id).classList.remove('show');if(id==='salonModal')salonModalReqSeq++;}
 
 /* ---- ERRORS ---- */
 function showErr(el,msg){const e=$(el);e.textContent=msg;e.classList.add('show');e.scrollIntoView({behavior:'smooth',block:'center'});return false;}
@@ -4994,7 +5027,7 @@ function renderHomepage(){
     const addressDisplay = s.address ? `📍 ${escapeHtml(s.address)}, ${escapeHtml(s.city || '—')}` : `📍 ${escapeHtml(s.city || '—')}`;
     const phoneDisplay = s.phone ? `
       <div style="font-size:12.5px; color:#444; margin-top:5px; display:flex; align-items:center; gap:5px;" onclick="event.stopPropagation();">
-        📞 <a href="tel:${s.phone}" style="color:#4f46e5; text-decoration:none; font-weight:700;">${s.phone}</a>
+        📞 <a href="tel:${escapeHtml(s.phone)}" style="color:#4f46e5; text-decoration:none; font-weight:700;">${escapeHtml(s.phone)}</a>
       </div>` : '';
       
     const promoDisplay = s.promo ? `
@@ -5009,7 +5042,7 @@ function renderHomepage(){
       </div>` : '';
 
     return`<div class="hp-salon-card" data-slug="${s.slug}">
-      <div class="hsc-image" style="height: 130px; background-image: url('${s.bgImage || 'https://images.unsplash.com/photo-1503951914875-452162b0f3f1?w=500&q=70&fit=crop'}'); background-size: cover; background-position: center; border-radius: 18px 18px 0 0; position: relative;">
+      <div class="hsc-image" style="height: 130px; background-image: url('${escapeHtml(s.bgImage || 'https://images.unsplash.com/photo-1503951914875-452162b0f3f1?w=500&q=70&fit=crop')}'); background-size: cover; background-position: center; border-radius: 18px 18px 0 0; position: relative;">
         <div style="position: absolute; bottom: 0; left: 0; right: 0; padding: 12px; background: linear-gradient(to top, rgba(0,0,0,0.85), transparent); display: flex; align-items: center; gap: 10px;">
           <div class="hsc-av" style="width:36px; height:36px; font-size:14px; border-radius:8px; border:1.5px solid #e5c158; background:rgba(0,0,0,0.9);">${escapeHtml(s.name.slice(0,2).toUpperCase())}</div>
           <div class="hsc-name" style="color:#fff; font-size:17px; text-shadow: 0 2px 4px rgba(0,0,0,0.5);">${escapeHtml(s.name)}</div>

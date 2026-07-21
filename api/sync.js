@@ -604,6 +604,39 @@ async function handleDeleteWorker(body, kvUrl, kvToken, req) {
   }
 }
 
+// A service can no longer be removed by omitting it from the generic bulk
+// save (see the services restore-loop above) — this is the one path that
+// actually deletes one, acting on the current server-side record directly
+// instead of inferring deletion from a client array that might just be
+// stale. Unlike handleDeleteWorker, no admin password is required: deleting
+// a service has no cascading effect on existing bookings/customers, and
+// CLAUDE.md already documents an owner as fully managing their own salon's
+// services — this only mirrors that existing authority onto a safer,
+// race-free endpoint instead of introducing a new restriction.
+async function handleDeleteService(body, kvUrl, kvToken, req) {
+  const session = getVerifiedSession(req);
+  const { salonId, serviceId } = body;
+  if (!salonId || !serviceId) return { status: 400, json: { success: false, error: 'missing_fields' } };
+  const isAuthorized = session && (session.role === 'admin' || (session.role === 'owner' && session.salonId === salonId));
+  if (!isAuthorized) return { status: 403, json: { success: false, error: 'forbidden' } };
+
+  const locked = await acquireBillingLock(kvUrl, kvToken, salonId);
+  if (!locked) return { status: 503, json: { success: false, error: 'busy' } };
+  try {
+    const salons = await getSalonsDb(kvUrl, kvToken);
+    const salon = salons.find(s => s.id === salonId);
+    if (!salon) return { status: 404, json: { success: false, error: 'salon_not_found' } };
+    const service = (salon.services || []).find(sv => sv.id === serviceId);
+    if (!service) return { status: 404, json: { success: false, error: 'service_not_found' } };
+
+    salon.services = salon.services.filter(sv => sv.id !== serviceId);
+    await setSalonsDb(kvUrl, kvToken, salons);
+    return { status: 200, json: { success: true } };
+  } finally {
+    await releaseBillingLock(kvUrl, kvToken, salonId);
+  }
+}
+
 // Admin-only: opts an admin-created salon (which has no billing object at
 // all by default — see CLAUDE.md) into the billing system on request, e.g.
 // an owner who wants automatic PayPal billing but can't self-signup a whole
@@ -819,7 +852,17 @@ async function handleCreateBillingCheckoutSession(body, kvUrl, kvToken, req) {
         // No approve link for some reason — fall through and create fresh.
       } else if (staleStatus) {
         // SUSPENDED or any other cancellable-but-not-pending/active state.
-        await cancelPaypalSubscription(staleId, 'Superseded by a new checkout attempt');
+        // PayPal can auto-resume a SUSPENDED subscription once the owner
+        // fixes their card — it is NOT dead just because it's suspended, so
+        // the cancel call actually succeeding is load-bearing, not
+        // best-effort: proceeding to create a second subscription while this
+        // one is still merely suspended (rather than genuinely cancelled) is
+        // the exact double-billing race this whole check exists to close.
+        const cancelled = await cancelPaypalSubscription(staleId, 'Superseded by a new checkout attempt');
+        if (!cancelled) {
+          console.error('[BILLING] Could not cancel stale', staleStatus, 'subscription', staleId, '— aborting rather than risk a second live subscription.');
+          return { status: 502, json: { success: false, error: 'paypal_error' } };
+        }
       }
       // staleStatus === null here only means a confirmed 404 — genuinely
       // gone at PayPal — nothing to reuse or cancel, proceed below.
@@ -1259,6 +1302,10 @@ export default async function handler(req, res) {
         }
         if (newData && newData.action === 'delete_worker') {
           const r = await handleDeleteWorker(newData, kvUrl, kvToken, req);
+          return res.status(r.status).json(r.json);
+        }
+        if (newData && newData.action === 'delete_service') {
+          const r = await handleDeleteService(newData, kvUrl, kvToken, req);
           return res.status(r.status).json(r.json);
         }
         if (newData && newData.action === 'enable_salon_billing') {
@@ -1805,8 +1852,17 @@ export default async function handler(req, res) {
               // password fields below). Salon ids aren't secret (the
               // sanitized GET response includes every salon), so this was a
               // real cross-tenant tampering hole, not just a theoretical one.
+              // An owner session may only ever EDIT (never create) through
+              // this path — `existing` must already be present. Without the
+              // `!!existing` guard, an owner whose salon was deleted via
+              // api/delete-salon.js could use their still-valid (up to
+              // 30-day, non-revocable) session token to fall into the
+              // "brand-new salon" branch below and silently resurrect the
+              // salon live, with no admin review and no billing object,
+              // fully bypassing the deletion. New-salon creation stays
+              // admin-only (or via the dedicated handleSignupSalon action).
               const isAuthorizedEditor = session && (session.role === 'admin'
-                || (session.role === 'owner' && session.salonId === incoming.id));
+                || (session.role === 'owner' && session.salonId === incoming.id && !!existing));
               // A barber sets their own lunch break / weekly rest days /
               // vacation dates from "Le mie Pause" (saveBreak() in js/app.js)
               // through this same bulk endpoint, but was never in the
@@ -1869,6 +1925,23 @@ export default async function handler(req, res) {
               if (typeof incoming.promo === 'string') incoming.promo = incoming.promo.slice(0, 300);
               if (typeof incoming.city === 'string') incoming.city = incoming.city.slice(0, 60);
               if (typeof incoming.address === 'string') incoming.address = incoming.address.slice(0, 200);
+              if (typeof incoming.bgImage === 'string') incoming.bgImage = incoming.bgImage.slice(0, 2000);
+              // Unlike a brand-new salon (isValidNewSalon below), an EXISTING
+              // salon's phone was never format-checked on this path — an
+              // owner (or admin) session could set it to an arbitrary string.
+              // The homepage renders it unescaped-adjacent (js/app.js's
+              // renderHomepage, now also escaped there as defense in depth),
+              // so an invalid-shaped value here was a stored-XSS vector that
+              // would fire in an ADMIN's session the next time they viewed
+              // the salon list. Truncate always; for an edit to an existing
+              // salon, silently keep the last-known-good value instead of
+              // rejecting the whole save over one malformed field.
+              if (typeof incoming.phone === 'string') {
+                incoming.phone = incoming.phone.slice(0, 30);
+                if (existing && !isValidItalianPhone(incoming.phone)) incoming.phone = existing.phone;
+              } else if (existing) {
+                incoming.phone = existing.phone;
+              }
               if (Array.isArray(incoming.gallery) && incoming.gallery.length > 30) incoming.gallery = incoming.gallery.slice(0, 30);
               if (Array.isArray(incoming.workers)) {
                 for (const w of incoming.workers) {
@@ -2028,6 +2101,24 @@ export default async function handler(req, res) {
                   for (const ew of existingWorkersById.values()) {
                     if (!incomingIds.has(ew.id)) incoming.workers.push(ew);
                   }
+                }
+                // Same class of bug as the worker restore-loop above, for
+                // services: renderServizi() in js/app.js mutates a service
+                // in place off this device's (possibly stale) local
+                // STATE.salons and calls saveState(), which resends the
+                // salon's ENTIRE services array. A service added by another
+                // device/tab after this one last polled would be silently
+                // absent from that array and — with no restore protection —
+                // permanently dropped by the very next unrelated save
+                // (a price edit, a new worker, anything). Restored here for
+                // every role, same as workers; genuine deletion is now only
+                // ever done via the dedicated delete_service action below,
+                // which acts on the current server-side record directly.
+                if (!Array.isArray(incoming.services)) incoming.services = [];
+                const existingServicesById = new Map((existing.services || []).map(sv => [sv.id, sv]));
+                const incomingServiceIds = new Set(incoming.services.filter(sv => sv && sv.id).map(sv => sv.id));
+                for (const esv of existingServicesById.values()) {
+                  if (!incomingServiceIds.has(esv.id)) incoming.services.push(esv);
                 }
               }
               salonMap.set(incoming.id, incoming);

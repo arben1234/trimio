@@ -1067,6 +1067,165 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
   }
 });
 
+section('api/sync.js — HARDENING: a deleted salon cannot be resurrected by its former owner\'s still-valid session token (post-deletion resurrection regression)');
+await withFakeKv(makeFakeRedis(), async (fake) => {
+  const prevSecret = process.env.SESSION_SECRET;
+  process.env.SESSION_SECRET = 'test-only-secret-for-session-tokens';
+  try {
+    // The salon no longer exists server-side (e.g. an admin deleted it via
+    // api/delete-salon.js) — but the former owner's session token, issued
+    // before the deletion, is still cryptographically valid for up to 30
+    // days (no revocation list).
+    fake.strings.set('salons_db', JSON.stringify([]));
+    const handler = await freshImport('api/sync.js');
+    const ownerToken = issueSessionToken({ role: 'owner', salonId: 'deletedSalon' });
+
+    const r1 = mkRes();
+    await handler({ method: 'POST', headers: { authorization: `Bearer ${ownerToken}` }, body: { bookings: [], salons: [{
+      id: 'deletedSalon', name: 'Resurrected Salon', slug: 'RESURRECTED', city: 'Roma', address: 'Via Roma 1',
+      phone: '3331234567', ownerUsername: 'ownerx', ownerPassword: 'newpass1', workers: []
+    }] } }, r1.obj);
+    ok(r1.status === 200, 'the request itself does not error');
+
+    const salonsAfter = JSON.parse(fake.strings.get('salons_db'));
+    eq(salonsAfter.length, 0, "the deleted salon's own former owner cannot recreate it using their still-valid session token — new-salon creation stays admin-only");
+  } finally {
+    restoreEnv('SESSION_SECRET', prevSecret);
+  }
+});
+
+section('api/sync.js — HARDENING: a service can only be deleted via the explicit delete_service action, never inferred from a stale bulk-save payload (concurrent-service-loss regression)');
+await withFakeKv(makeFakeRedis(), async (fake) => {
+  const prevSecret = process.env.SESSION_SECRET;
+  process.env.SESSION_SECRET = 'test-only-secret-for-session-tokens';
+  try {
+    fake.strings.set('salons_db', JSON.stringify([{
+      id: 'salonSvc', name: 'Salon Svc', slug: 'SALON_SVC',
+      services: [{ id: 'svcA', name: 'Taglio', price: 20, dur: '30 min' }, { id: 'svcB', name: 'Barba', price: 10, dur: '15 min' }]
+    }]));
+    const handler = await freshImport('api/sync.js');
+    const ownerToken = issueSessionToken({ role: 'owner', salonId: 'salonSvc' });
+
+    // Owner's local snapshot is stale (svcB was added by another device
+    // after this tab's last poll) and they save an unrelated edit — svcB
+    // must survive, not be silently dropped for being absent from the payload.
+    const rStale = mkRes();
+    await handler({ method: 'POST', headers: { authorization: `Bearer ${ownerToken}` }, body: { bookings: [], salons: [{
+      id: 'salonSvc', name: 'Salon Svc', slug: 'SALON_SVC', services: [{ id: 'svcA', name: 'Taglio Rinominato', price: 25, dur: '30 min' }]
+    }] } }, rStale.obj);
+    const afterStale = JSON.parse(fake.strings.get('salons_db')).find(s => s.id === 'salonSvc');
+    eq(afterStale.services.length, 2, 'svcB (absent from the stale payload) is NOT deleted');
+    ok(afterStale.services.find(s => s.id === 'svcA').name === 'Taglio Rinominato', 'svcA is still updated with the fields the client actually sent');
+
+    // Genuine deletion goes through the dedicated action, acting on the
+    // current server-side record directly.
+    const rDel = mkRes();
+    await handler({ method: 'POST', headers: { authorization: `Bearer ${ownerToken}` }, body: { action: 'delete_service', salonId: 'salonSvc', serviceId: 'svcB' } }, rDel.obj);
+    ok(rDel.status === 200 && rDel.body.success === true, "delete_service succeeds for the salon's own owner");
+    const afterDel = JSON.parse(fake.strings.get('salons_db')).find(s => s.id === 'salonSvc');
+    eq(afterDel.services.length, 1, 'the targeted service is genuinely removed');
+    eq(afterDel.services[0].id, 'svcA', 'the other service is untouched');
+
+    // Cross-tenant: a different salon's owner cannot delete this salon's service.
+    const otherOwnerToken = issueSessionToken({ role: 'owner', salonId: 'someOtherSalon' });
+    const rForbidden = mkRes();
+    await handler({ method: 'POST', headers: { authorization: `Bearer ${otherOwnerToken}` }, body: { action: 'delete_service', salonId: 'salonSvc', serviceId: 'svcA' } }, rForbidden.obj);
+    eq(rForbidden.status, 403, 'delete_service rejects a session for a different salon');
+  } finally {
+    restoreEnv('SESSION_SECRET', prevSecret);
+  }
+});
+
+section('api/notify-customer.js — HARDENING: a removed worker\'s still-valid session token can no longer trigger a customer notification (revocation regression)');
+await withFakeKv(makeFakeRedis(), async (fake) => {
+  const prevSecret = process.env.SESSION_SECRET;
+  const prevSid = process.env.TWILIO_ACCOUNT_SID;
+  const prevAuthTok = process.env.TWILIO_AUTH_TOKEN;
+  const prevFrom = process.env.TWILIO_FROM;
+  process.env.SESSION_SECRET = 'test-only-secret-for-session-tokens';
+  // At least one send channel must be configured or the handler bails out
+  // with a generic "not_configured" before ever checking authorization —
+  // Twilio here purely to reach that code, intercepted below so no real
+  // network call happens.
+  process.env.TWILIO_ACCOUNT_SID = 'ACtest';
+  process.env.TWILIO_AUTH_TOKEN = 'tokentest';
+  process.env.TWILIO_FROM = 'TRIMIO';
+  const underlyingFetch = fake.fetchImpl;
+  globalThis.fetch = async (url, opts) => {
+    if (String(url).includes('api.twilio.com')) return { ok: true, text: async () => '' };
+    return underlyingFetch(url, opts);
+  };
+  try {
+    fake.strings.set('salons_db', JSON.stringify([{ id: 'salonN', name: 'Salon N', workers: [{ id: 'wN', name: 'Worker N' }] }]));
+    fake.hashes.set('bookings', new Map([['bkN', JSON.stringify({
+      id: 'bkN', salonId: 'salonN', workerId: 'wN', dateISO: '2099-01-01', time: '10:00', status: 'confirmed',
+      name: 'Client N', phone: '3339990000', dateLabel: 'oggi', workerName: 'Worker N'
+    })]]));
+    const handler = await freshImport('api/notify-customer.js');
+    const barberToken = issueSessionToken({ role: 'barber', salonId: 'salonN', workerId: 'wN' });
+
+    const r1 = mkRes();
+    await handler({ method: 'POST', headers: { authorization: `Bearer ${barberToken}` }, body: { bookingId: 'bkN' } }, r1.obj);
+    ok(r1.status !== 403, "a still-employed barber is authorized to notify their own booking's customer");
+
+    // Worker removed from the salon — the token is still cryptographically
+    // valid (no revocation list) but must no longer be able to trigger a
+    // real SMS/push send to that customer.
+    fake.strings.set('salons_db', JSON.stringify([{ id: 'salonN', name: 'Salon N', workers: [] }]));
+    const r2 = mkRes();
+    await handler({ method: 'POST', headers: { authorization: `Bearer ${barberToken}` }, body: { bookingId: 'bkN' } }, r2.obj);
+    eq(r2.status, 403, "a removed worker's still-valid token can no longer trigger a customer notification");
+  } finally {
+    restoreEnv('SESSION_SECRET', prevSecret);
+    restoreEnv('TWILIO_ACCOUNT_SID', prevSid);
+    restoreEnv('TWILIO_AUTH_TOKEN', prevAuthTok);
+    restoreEnv('TWILIO_FROM', prevFrom);
+  }
+});
+
+section('api/toggle-salon.js — HARDENING: a failed PayPal cancel is surfaced, not silently discarded as if it succeeded (orphaned-subscription regression)');
+await withFakeKv(makeFakeRedis(), async (fake) => {
+  fake.strings.set('salons_db', JSON.stringify([{
+    id: 'salonPP', name: 'Salon PP',
+    billing: { autopay: true, paypalSubscriptionId: 'sub-still-alive', declaredWorkerCount: 3, paidThroughMonth: '2026-01' }
+  }]));
+  fake.strings.set('admin_db', JSON.stringify({ username: 'admin', password: 'realSecret1' }));
+  const handler = await freshImport('api/toggle-salon.js');
+
+  // PAYPAL_CLIENT_ID/SECRET are unset in the test environment, so
+  // cancelPaypalSubscription() always fails (paypalConfigured() === false)
+  // — a deterministic stand-in for a real PayPal-side failure, without
+  // needing to mock PayPal's own REST API.
+  const r1 = mkRes();
+  await handler({ method: 'POST', body: { salonId: 'salonPP', inactive: true, adminPassword: 'realSecret1' } }, r1.obj);
+  ok(r1.status === 200 && r1.body.success === true, 'the salon is still deactivated even when the PayPal cancel fails');
+  eq(r1.body.paypalCancelFailed, true, 'the failed cancel is surfaced in the response instead of silently reported as success');
+
+  const salonAfter = JSON.parse(fake.strings.get('salons_db')).find(s => s.id === 'salonPP');
+  eq(salonAfter.inactive, true, 'salon is genuinely deactivated');
+  eq(salonAfter.billing.autopay, true, 'autopay is NOT cleared on a failed cancel — nulling it would hide the still-live subscription from the daily billing cron, which skips any salon with billing.autopay');
+  eq(salonAfter.billing.paypalSubscriptionId, 'sub-still-alive', 'the subscription id is preserved (not nulled) so the failure stays visible/retryable instead of becoming unrecoverable');
+  eq(salonAfter.billing.paypalCancelFailed, true, 'paypalCancelFailed flag persisted for admin visibility');
+});
+
+section('api/delete-salon.js — HARDENING: a failed PayPal cancel is surfaced before the salon (and its subscription id) is gone forever (orphaned-subscription regression)');
+await withFakeKv(makeFakeRedis(), async (fake) => {
+  fake.strings.set('salons_db', JSON.stringify([{
+    id: 'salonPP2', name: 'Salon PP2',
+    billing: { autopay: true, paypalSubscriptionId: 'sub-still-alive-2', declaredWorkerCount: 3, paidThroughMonth: '2026-01' }
+  }]));
+  fake.strings.set('admin_db', JSON.stringify({ username: 'admin', password: 'realSecret1' }));
+  const handler = await freshImport('api/delete-salon.js');
+
+  const r1 = mkRes();
+  await handler({ method: 'POST', body: { salonId: 'salonPP2', adminPassword: 'realSecret1' } }, r1.obj);
+  ok(r1.status === 200 && r1.body.success === true, 'the salon is still deleted even when the PayPal cancel fails');
+  eq(r1.body.paypalCancelFailed, true, 'the failed cancel is surfaced in the response so an admin can manually cancel it in the PayPal dashboard — this id will no longer exist anywhere in TRIMIO after this delete');
+
+  const salonsAfter = JSON.parse(fake.strings.get('salons_db'));
+  ok(!salonsAfter.some(s => s.id === 'salonPP2'), 'the salon is genuinely deleted regardless');
+});
+
 section('api/sync.js — HARDENING: an existing salon cannot steal another salon\'s slug or ownerUsername (URL/QR-hijack regression)');
 await withFakeKv(makeFakeRedis(), async (fake) => {
   const prevSecret = process.env.SESSION_SECRET;

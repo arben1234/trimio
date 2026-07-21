@@ -55,6 +55,7 @@ export default async function handler(req, res) {
     if (!locked) {
       return res.status(503).json({ error: 'busy', message: 'Salone occupato da un\'altra operazione, riprova.' });
     }
+    let paypalCancelFailed = false;
     try {
       const salons = await getSalonsDb(kvUrl, kvToken);
 
@@ -84,12 +85,28 @@ export default async function handler(req, res) {
       // Deactivating a salon that still has a live PayPal subscription must
       // stop it from continuing to charge the customer every month for a
       // service that's no longer being provided — this used to be a pure gap,
-      // nothing here ever told PayPal the salon went away. Best-effort: if the
-      // cancel call fails, the salon still gets deactivated either way.
+      // nothing here ever told PayPal the salon went away. The salon still
+      // gets deactivated either way even if the cancel call fails, but the
+      // return value now actually gates whether autopay/paypalSubscriptionId
+      // get cleared: nulling them out unconditionally used to make a FAILED
+      // cancel look identical to a successful one — the subscription stayed
+      // live at PayPal (still charging the owner every month) while TRIMIO's
+      // own record showed nothing wrong, since api/daily-health-check.js's
+      // billing cron explicitly skips any salon with billing.autopay. On
+      // failure the fields are left as-is (so the true state — "may still be
+      // live at PayPal" — stays visible/retryable) and paypalCancelFailed is
+      // set so this doesn't silently look handled.
       if (salon.inactive && salon.billing && salon.billing.autopay && salon.billing.paypalSubscriptionId) {
-        await cancelPaypalSubscription(salon.billing.paypalSubscriptionId, 'Salone disattivato su TRIMIO');
-        salon.billing.autopay = false;
-        salon.billing.paypalSubscriptionId = null;
+        const cancelled = await cancelPaypalSubscription(salon.billing.paypalSubscriptionId, 'Salone disattivato su TRIMIO');
+        if (cancelled) {
+          salon.billing.autopay = false;
+          salon.billing.paypalSubscriptionId = null;
+          salon.billing.paypalCancelFailed = false;
+        } else {
+          paypalCancelFailed = true;
+          salon.billing.paypalCancelFailed = true;
+          console.error(`[TOGGLE] PayPal cancel failed for deactivated salon ${salonId} (subscription ${salon.billing.paypalSubscriptionId}) — it may still be active and charging the owner.`);
+        }
       }
       console.log(`[TOGGLE] Found salon "${salon.name}", set inactive=${salon.inactive}`);
 
@@ -116,7 +133,7 @@ export default async function handler(req, res) {
       await releaseBillingLock(kvUrl, kvToken, salonId);
     }
 
-    return res.status(200).json({ success: true, salonId, inactive: setInactive });
+    return res.status(200).json({ success: true, salonId, inactive: setInactive, paypalCancelFailed });
   } catch (error) {
     console.error('[TOGGLE] Error:', error);
     return res.status(500).json({ error: 'Errore del server, riprova.' });
