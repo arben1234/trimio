@@ -915,6 +915,41 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
   ok(salonsAfter.some(s => s.id === 'sReal'), 'a malformed salons payload is rejected instead of overwriting salons_db with garbage');
 });
 
+section('api/sync.js — HARDENING: an anonymous booking\'s text fields are type/length-capped (storage-inflation DoS regression)');
+await withFakeKv(makeFakeRedis(), async (fake) => {
+  fake.strings.set('salons_db', JSON.stringify([{ id: 'sCap', name: 'Salon Cap', workers: [{ id: 'wCap', name: 'Worker Cap' }], services: [{ name: 'Taglio', price: 20, dur: '30 min' }] }]));
+  const handler = await freshImport('api/sync.js');
+
+  const oversizedBooking = {
+    id: 'cap-1', salonId: 'sCap', workerId: 'wCap', dateISO: '2030-06-06', time: '09:00', status: 'confirmed',
+    name: 'A'.repeat(5000), phone: '3'.repeat(5000), service: 'Taglio', workerName: 'W'.repeat(5000),
+    dateLabel: 'D'.repeat(5000), source: 'S'.repeat(5000)
+  };
+  const r1 = mkRes();
+  await handler({ method: 'POST', body: { bookings: [oversizedBooking], salons: [] } }, r1.obj);
+  ok(r1.status === 200 && r1.body.success === true, 'an anonymous booking with oversized text fields is still accepted (truncated, not rejected)');
+  const stored1 = JSON.parse(fake.hashes.get('bookings').get('cap-1'));
+  eq(stored1.name.length, 100, "an anonymous caller's oversized name is capped, not stored verbatim");
+  eq(stored1.phone.length, 30, "an anonymous caller's oversized phone is capped");
+  eq(stored1.workerName.length, 80, "an anonymous caller's oversized workerName is capped");
+  eq(stored1.dateLabel.length, 100, "an anonymous caller's oversized dateLabel is capped");
+  eq(stored1.source.length, 50, "an anonymous caller's oversized source is capped");
+
+  // Wrong-typed values (an object instead of a string) must not reach the
+  // KV write at all — normalized to an empty string instead of persisting
+  // a non-string value into the shared bookings Hash.
+  const wrongTypeBooking = {
+    id: 'cap-2', salonId: 'sCap', workerId: 'wCap', dateISO: '2030-06-06', time: '10:00', status: 'confirmed',
+    name: { evil: true }, phone: ['not', 'a', 'string'], service: 'Taglio'
+  };
+  const r2 = mkRes();
+  await handler({ method: 'POST', body: { bookings: [wrongTypeBooking], salons: [] } }, r2.obj);
+  ok(r2.status === 200 && r2.body.success === true, 'an anonymous booking with wrong-typed text fields is still accepted (normalized, not rejected)');
+  const stored2 = JSON.parse(fake.hashes.get('bookings').get('cap-2'));
+  eq(stored2.name, '', 'a non-string name is normalized to an empty string, never persisted as-is');
+  eq(stored2.phone, '', 'a non-string phone is normalized to an empty string, never persisted as-is');
+});
+
 section('api/toggle-salon.js — activate/deactivate a salon (fake KV, no live network)');
 await withFakeKv(makeFakeRedis(), async (fake) => {
   fake.strings.set('salons_db', JSON.stringify([{ id: 'salonX', name: 'Salon X' }]));
@@ -1065,6 +1100,50 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
   } finally {
     restoreEnv('SESSION_SECRET', prevSecret);
   }
+});
+
+section('api/sync.js — HARDENING: deleting a worker cannot silently overwrite a customer\'s own concurrent self-cancellation (staff-vs-customer stat corruption regression)');
+await withFakeKv(makeFakeRedis(), async (fake) => {
+  fake.strings.set('salons_db', JSON.stringify([{
+    id: 'salonM1', name: 'Salon M1', slug: 'SALON_M1',
+    workers: [{ id: 'wM1Gone', name: 'Departing M1' }]
+  }]));
+  fake.strings.set('admin_db', JSON.stringify({ username: 'admin', password: 'realSecret1' }));
+  const bk = { id: 'm1-bk-1', salonId: 'salonM1', workerId: 'wM1Gone', dateISO: '2099-01-01', time: '10:00', status: 'confirmed', name: 'Client M1', phone: '333' };
+  fake.hashes.set('bookings', new Map([['m1-bk-1', JSON.stringify(bk)]]));
+  const handler = await freshImport('api/sync.js');
+  const adminToken = issueSessionToken({ role: 'admin' });
+
+  // Simulates the customer's own self-cancel (through the normal
+  // booklock-guarded update path) landing exactly between this deletion's
+  // pre-loop snapshot and its own fresh re-read — injected right when
+  // cancelRemovedWorkerBookings goes to acquire ITS per-booking lock for
+  // this exact booking.
+  const underlyingFetch = fake.fetchImpl;
+  let raced = false;
+  globalThis.fetch = async (url, opts) => {
+    if (!raced && opts && typeof opts.body === 'string') {
+      try {
+        const parsed = JSON.parse(opts.body);
+        if (Array.isArray(parsed) && parsed[0] === 'SET' && parsed[1] === 'booklock:m1-bk-1') {
+          raced = true;
+          const h = fake.hashes.get('bookings');
+          const stale = JSON.parse(h.get('m1-bk-1'));
+          h.set('m1-bk-1', JSON.stringify({ ...stale, status: 'cancelled', cancelledBy: 'customer' }));
+        }
+      } catch { /* not the array-command form */ }
+    }
+    return underlyingFetch(url, opts);
+  };
+
+  const r1 = mkRes();
+  await handler({ method: 'POST', headers: { authorization: `Bearer ${adminToken}` }, body: { action: 'delete_worker', salonId: 'salonM1', workerId: 'wM1Gone', adminPassword: 'realSecret1' } }, r1.obj);
+  ok(raced, 'the simulated concurrent customer self-cancel was actually injected during this run');
+  ok(r1.status === 200 && r1.body.success === true, 'delete_worker still succeeds');
+
+  const finalBk = JSON.parse(fake.hashes.get('bookings').get('m1-bk-1'));
+  eq(finalBk.status, 'cancelled', 'the booking ends up cancelled either way');
+  eq(finalBk.cancelledBy, 'customer', "the customer's own concurrent self-cancellation is preserved, not overwritten back to 'staff'");
 });
 
 section('api/sync.js — HARDENING: a deleted salon cannot be resurrected by its former owner\'s still-valid session token (post-deletion resurrection regression)');
@@ -1534,6 +1613,53 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
 
     const finalBk = JSON.parse(fake.hashes.get('bookings').get('race-bk-1'));
     ok(finalBk.status === 'completed' || finalBk.status === 'cancelled', 'the booking ends up in exactly one deterministic, real final state');
+  } finally {
+    restoreEnv('SESSION_SECRET', prevSecret);
+  }
+});
+
+section('api/sync.js — HARDENING: a staff status-change write no longer discards other fields that changed concurrently (freshExisting merge-base regression)');
+await withFakeKv(makeFakeRedis(), async (fake) => {
+  const prevSecret = process.env.SESSION_SECRET;
+  process.env.SESSION_SECRET = 'test-only-secret-for-session-tokens';
+  try {
+    fake.strings.set('salons_db', JSON.stringify([{ id: 'salonM6', name: 'Salon M6', workers: [{ id: 'wM6', name: 'Worker M6' }] }]));
+    const bk = { id: 'm6-bk-1', salonId: 'salonM6', workerId: 'wM6', dateISO: '2020-01-01', time: '09:00', status: 'confirmed', name: 'Client', price: 20, dur: 30, reminderSent: false };
+    fake.hashes.set('bookings', new Map([['m6-bk-1', JSON.stringify(bk)]]));
+
+    // Simulates a concurrent write by another code path (e.g. the reminder
+    // cron patching reminderSent) landing exactly between this request's
+    // pre-loop snapshot and its own fresh re-read under the booklock — the
+    // precise window the freshExisting fix targets. Injected right when
+    // this request goes to acquire the per-booking lock, deterministically
+    // placing it after the pre-loop snapshot and before the fresh HGET.
+    const underlyingFetch = fake.fetchImpl;
+    let raced = false;
+    globalThis.fetch = async (url, opts) => {
+      if (!raced && opts && typeof opts.body === 'string') {
+        try {
+          const parsed = JSON.parse(opts.body);
+          if (Array.isArray(parsed) && parsed[0] === 'SET' && parsed[1] === 'booklock:m6-bk-1') {
+            raced = true;
+            const h = fake.hashes.get('bookings');
+            const stale = JSON.parse(h.get('m6-bk-1'));
+            h.set('m6-bk-1', JSON.stringify({ ...stale, reminderSent: true }));
+          }
+        } catch { /* not the array-command form */ }
+      }
+      return underlyingFetch(url, opts);
+    };
+
+    const handler = await freshImport('api/sync.js');
+    const ownerToken = issueSessionToken({ role: 'owner', salonId: 'salonM6' });
+    const r = mkRes();
+    await handler({ method: 'POST', headers: { authorization: `Bearer ${ownerToken}` }, body: { bookings: [{ ...bk, status: 'cancelled', cancelledBy: 'staff' }], salons: [] } }, r.obj);
+    ok(raced, 'the simulated concurrent write was actually injected during this run');
+    ok(r.body.conflicts.every(c => c.id !== 'm6-bk-1'), 'the status change itself still succeeds (status genuinely was unchanged)');
+
+    const finalBk = JSON.parse(fake.hashes.get('bookings').get('m6-bk-1'));
+    eq(finalBk.status, 'cancelled', 'the intended status change is applied');
+    eq(finalBk.reminderSent, true, "the concurrently-set reminderSent flag survives — the merge is built from this request's OWN fresh re-read, not the stale pre-loop snapshot");
   } finally {
     restoreEnv('SESSION_SECRET', prevSecret);
   }

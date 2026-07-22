@@ -554,14 +554,32 @@ async function cancelRemovedWorkerBookings(salon, removedWorker, bookingsMap, kv
     const bMin = timeToMin(b.time);
     const isFuture = b.dateISO > now.todayISO || (b.dateISO === now.todayISO && bMin !== null && bMin > now.minutes);
     if (!isFuture) continue;
-    const cancelled = { ...b, status: 'cancelled', cancelledBy: 'staff' };
-    await hsetBooking(kvUrl, kvToken, cancelled);
-    await releaseSlotLock(kvUrl, kvToken, cancelled);
-    bookingsMap.set(b.id, cancelled);
-    // Same idempotency guard the normal staff-cancel path uses, so a
-    // retried/duplicated request can't notify the same customer twice.
-    if (await claimCancellationNotifyOnce(kvUrl, kvToken, cancelled.id)) {
-      staffCancelledBks.push(cancelled);
+    // A customer can be self-cancelling this SAME booking (through the
+    // normal booklock-guarded update branch in the POST handler below) at
+    // the exact moment this worker is being deleted — without the same
+    // lock-and-fresh-re-read discipline, this loop's snapshot-based write
+    // could stomp a just-landed customer cancellation back to
+    // cancelledBy:'staff', corrupting the staff-vs-customer cancellation
+    // stat and firing an incorrect "cancelled by staff" notification for a
+    // booking the customer actually cancelled themselves.
+    const locked = await acquireBookingLock(kvUrl, kvToken, b.id);
+    if (!locked) continue; // couldn't get exclusive access in time — leave it; it's still confirmed for a departed worker, but not silently corrupted
+    try {
+      const freshRaw = await kvCmd(kvUrl, kvToken, ['HGET', 'bookings', b.id]);
+      let fresh = null;
+      try { fresh = freshRaw ? JSON.parse(freshRaw) : null; } catch { /* corrupt entry, treat as gone */ }
+      if (!fresh || fresh.status !== 'confirmed') continue; // already resolved by someone else in the meantime
+      const cancelled = { ...fresh, status: 'cancelled', cancelledBy: 'staff' };
+      await hsetBooking(kvUrl, kvToken, cancelled);
+      await releaseSlotLock(kvUrl, kvToken, cancelled);
+      bookingsMap.set(b.id, cancelled);
+      // Same idempotency guard the normal staff-cancel path uses, so a
+      // retried/duplicated request can't notify the same customer twice.
+      if (await claimCancellationNotifyOnce(kvUrl, kvToken, cancelled.id)) {
+        staffCancelledBks.push(cancelled);
+      }
+    } finally {
+      await releaseBookingLock(kvUrl, kvToken, b.id);
     }
   }
 }
@@ -1371,6 +1389,25 @@ export default async function handler(req, res) {
               conflicts.push({ id: nb && nb.id, error: 'invalid_booking' });
               continue;
             }
+            // This whole path is reachable with NO session (the public
+            // customer booking flow) — unlike every other user-controlled
+            // field elsewhere in this file (reviews, self-signup, salon
+            // edits all cap length/type), name/phone/service/workerName/
+            // dateLabel/source had no check at all. Every render site
+            // already escapes these (not an XSS vector), but with no cap a
+            // single anonymous request could stuff arbitrarily large or
+            // wrong-typed values into the shared bookings Hash — a cheap
+            // storage/bandwidth-inflation DoS, easily repeatable within the
+            // 20-per-10-min rate limit above. Normalized here for every
+            // booking (new or existing-update — for an update these are
+            // force-overwritten from the server's own record moments later
+            // anyway, so this is a no-op there, harmless either way).
+            if (typeof nb.name !== 'string') nb.name = ''; else nb.name = nb.name.slice(0, 100);
+            if (typeof nb.phone !== 'string') nb.phone = ''; else nb.phone = nb.phone.slice(0, 30);
+            if (typeof nb.service !== 'string') nb.service = ''; else nb.service = nb.service.slice(0, 100);
+            if (typeof nb.workerName !== 'string') nb.workerName = ''; else nb.workerName = nb.workerName.slice(0, 80);
+            if (typeof nb.dateLabel !== 'string') nb.dateLabel = ''; else nb.dateLabel = nb.dateLabel.slice(0, 100);
+            if (typeof nb.source !== 'string') nb.source = ''; else nb.source = nb.source.slice(0, 50);
 
             const existing = bookingsMap.get(nb.id);
             if (existing && JSON.stringify(existing) === JSON.stringify(nb)) {
@@ -1624,7 +1661,7 @@ export default async function handler(req, res) {
                 // 'completed' or 'cancelled', never back), so it's rejected
                 // outright rather than re-implementing the full booking-
                 // creation safety pipeline a second time here.
-                if (existing.status === 'cancelled' && nb.status !== 'cancelled') {
+                if (freshExisting.status === 'cancelled' && nb.status !== 'cancelled') {
                   conflicts.push({ id: nb.id, error: 'cannot_reactivate_cancelled_booking' });
                   continue;
                 }
@@ -1644,10 +1681,27 @@ export default async function handler(req, res) {
                 // request quietly deflate a booking's price/duration, e.g.
                 // to under-report revenue or shrink the window the overlap
                 // check thinks it occupies).
+                // Built from freshExisting (this same critical section's own
+                // re-read), not the pre-loop `existing` snapshot — otherwise
+                // this write would silently discard any OTHER field that
+                // changed between that snapshot and now (e.g. the reminder
+                // cron's reminderSent flag), even though the status check
+                // above only proves `.status` itself hasn't moved. That's
+                // the exact class of bug api/send-reminders.js was fixed for
+                // on the other side of this same race.
+                // reminderSent/sameDayReminderSent are pure server-side
+                // bookkeeping (api/send-reminders.js) the client never
+                // displays or intentionally edits — but saveState() always
+                // echoes this device's FULL locally-cached booking object as
+                // `nb`, so without forcing these back to freshExisting too,
+                // `...nb` above would silently overwrite a flag the cron set
+                // moments ago with this device's stale local copy, causing a
+                // duplicate reminder to go out later.
                 merged = {
-                  ...existing, ...nb,
-                  salonId: existing.salonId, workerId: existing.workerId, dateISO: existing.dateISO, time: existing.time,
-                  price: existing.price, dur: existing.dur, service: existing.service, name: existing.name, phone: existing.phone
+                  ...freshExisting, ...nb,
+                  salonId: freshExisting.salonId, workerId: freshExisting.workerId, dateISO: freshExisting.dateISO, time: freshExisting.time,
+                  price: freshExisting.price, dur: freshExisting.dur, service: freshExisting.service, name: freshExisting.name, phone: freshExisting.phone,
+                  reminderSent: freshExisting.reminderSent, sameDayReminderSent: freshExisting.sameDayReminderSent
                 };
                 // "Fatto"/completed must only ever apply to an appointment
                 // that has actually happened — js/app.js's
@@ -1655,7 +1709,7 @@ export default async function handler(req, res) {
                 // client-side; a direct POST could otherwise mark a future
                 // appointment as served, inflating revenue/stats before the
                 // client has even shown up.
-                if (merged.status === 'completed' && existing.status !== 'completed') {
+                if (merged.status === 'completed' && freshExisting.status !== 'completed') {
                   const now = romeNow();
                   const bookingMin = timeToMin(merged.time);
                   const isFuture = merged.dateISO > now.todayISO
@@ -1665,7 +1719,7 @@ export default async function handler(req, res) {
                     continue;
                   }
                 }
-              } else if (existing.status === 'confirmed' && nb.status === 'cancelled' && nb.cancelledBy !== 'staff'
+              } else if (freshExisting.status === 'confirmed' && nb.status === 'cancelled' && nb.cancelledBy !== 'staff'
                   // A booking id alone proves nothing — the anonymous GET
                   // response hands every id out to anyone viewing this
                   // salon's page (needed for slot-availability rendering),
@@ -1678,13 +1732,14 @@ export default async function handler(req, res) {
                   // cancelledBy:'customer'). Require the phone number used
                   // at booking time — never shipped by the anonymous GET —
                   // to prove the caller is actually the customer.
-                  && existing.phone && typeof nb.phone === 'string' && nb.phone.trim()
-                  && toE164(nb.phone) && toE164(nb.phone) === toE164(existing.phone)) {
+                  && freshExisting.phone && typeof nb.phone === 'string' && nb.phone.trim()
+                  && toE164(nb.phone) && toE164(nb.phone) === toE164(freshExisting.phone)) {
                 // Customer self-cancellation — only status/cancelledBy change,
                 // everything else on the booking (price, time, name...) is
-                // taken from the server's own record, never from the caller.
-                merged = { ...existing, status: 'cancelled', cancelledBy: 'customer' };
-              } else if (nb.status === 'cancelled' && existing.status !== 'confirmed') {
+                // taken from the server's own (freshly re-read) record, never
+                // from the caller.
+                merged = { ...freshExisting, status: 'cancelled', cancelledBy: 'customer' };
+              } else if (nb.status === 'cancelled' && freshExisting.status !== 'confirmed') {
                 // Not a phone-mismatch case — the booking was already
                 // resolved (staff already cancelled it, or it's already
                 // completed) by the time this request landed. Distinct from

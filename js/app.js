@@ -691,6 +691,16 @@ let isSaving = false;
 // isSaving alone can't catch that case since it's already false again by
 // the time the stale response arrives — see the pollStartedAt check below.
 let lastSaveStartedAt = 0;
+// Same "most-recently-STARTED request wins" discipline as lastSaveStartedAt
+// above, applied to STATE.salons specifically — openSalonModal() does its
+// own targeted single-salon refetch (see there) independently of the
+// recurring 6s poll below, and the two can resolve out of order (a slower
+// poll response landing after a faster modal-fetch response, or vice
+// versa). Whichever fetch STARTED later is presumed to reflect the newer
+// server state; a response whose request started before the last one
+// actually applied is discarded instead of blindly overwriting STATE.salons
+// with data that's older than what's already there.
+let lastSalonsFetchAppliedAt = 0;
 // Settles when the first /api/sync fetch completes (ok or not) — boot's
 // routing awaits it before deciding a salon slug is unknown, because a
 // fresh install has no local copy of the cloud salons yet.
@@ -966,8 +976,12 @@ function initCloudSync() {
           STATE.bookings = mergedBookings;
           
           // Safeguard: Only update salons if the response contains a non-empty list
-          if (data.salons && data.salons.length > 0) {
+          // — and only if no more-recently-STARTED fetch (e.g. openSalonModal's
+          // own targeted refetch) has already applied fresher data, since a
+          // slow/straggler poll can resolve after that faster fetch landed.
+          if (data.salons && data.salons.length > 0 && pollStartedAt >= lastSalonsFetchAppliedAt) {
             STATE.salons = data.salons;
+            lastSalonsFetchAppliedAt = pollStartedAt;
           }
 
           if (data.admin && typeof data.admin.username === 'string' && data.admin.username) {
@@ -3670,6 +3684,14 @@ function renderClienti(){
    Livello 3 (barber): NON ha questa sezione nel menu */
 let editSrvSalonId=null;
 function renderServizi(){
+  // renderDash() re-invokes this on every 6s poll that sees a new booking
+  // or a status change ANYWHERE in the salon — completely unrelated to
+  // whatever the user might be mid-typing in the inline service editor
+  // below. Capturing the live input values before the DOM is rebuilt and
+  // restoring them after (instead of always falling back to the
+  // service's/blank defaults) stops an in-progress edit from being
+  // silently wiped out by a poll landing at the wrong moment.
+  const editSrvInputVals=editSrv?{name:$('esName')?.value,min:$('esMin')?.value,price:$('esPrice')?.value}:null;
   const r=SESSION.role;
   let targetSalon=getSalon();
   if(r==='admin'){
@@ -3718,6 +3740,11 @@ function renderServizi(){
   }
   if(r==='admin')$('serviziList').innerHTML=html;
   else $('serviziList').innerHTML=html;
+  if(editSrvInputVals){
+    if(editSrvInputVals.name!==undefined&&$('esName'))$('esName').value=editSrvInputVals.name;
+    if(editSrvInputVals.min!==undefined&&$('esMin'))$('esMin').value=editSrvInputVals.min;
+    if(editSrvInputVals.price!==undefined&&$('esPrice'))$('esPrice').value=editSrvInputVals.price;
+  }
   $('addSrvBtn').style.display=(canEdit&&!editSrv)?'block':'none';
   $('serviziList').querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click',()=>{editSrv=b.dataset.edit;renderServizi();}));
   $('serviziList').querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',async()=>{
@@ -3871,6 +3898,26 @@ async function saveWorker(){
     if(!pwd)return showErr('wErr','Password obbligatoria per nuovo dipendente');
     salon.workers.push({id:'w'+Date.now(),name,username:usr,password:pwd,img,phone,role,desc,vacFrom,vacTo,reviews:[]});
   } else {
+    // Refetch this salon fresh before merging in the edited fields — this
+    // modal can sit open long enough (uploading a photo, fixing a typo) for
+    // another device/tab to have changed this SAME worker's break/rest-day
+    // settings in the meantime (the separate "Pause" modal, on another
+    // session). saveState() resends the whole worker object, so without
+    // this, an unrelated name/phone edit here would silently revert that
+    // concurrent change back to whatever this tab last happened to cache —
+    // same class of race openSalonModal's own refetch narrows.
+    try{
+      const resp=await fetch(syncUrl('/api/sync?t='+Date.now()),{cache:'no-store',headers:authHeaders()});
+      if(resp.ok){
+        const data=await resp.json().catch(()=>null);
+        const freshSalon=data&&Array.isArray(data.salons)&&data.salons.find(x=>x.id===workerEditSalonId);
+        const freshWorker=freshSalon&&(freshSalon.workers||[]).find(x=>x.id===editWorker);
+        if(freshWorker){
+          const idx=salon.workers.findIndex(x=>x.id===editWorker);
+          if(idx!==-1)salon.workers[idx]={...salon.workers[idx],...freshWorker};
+        }
+      }
+    }catch(e){/* best-effort — fall back to whatever's already cached locally */}
     const w=salon.workers.find(x=>x.id===editWorker);if(!w)return;
     w.name=name;w.username=usr;
     w.img=img;w.phone=phone;w.role=role;w.desc=desc;
@@ -4598,14 +4645,21 @@ async function openSalonModal(sid){
   // modal and clicking Salva" (seconds) — doesn't eliminate the race, but
   // meaningfully shrinks it for the single highest-risk entry point.
   if(sid!=='new'){
+    const myFetchStartedAt=Date.now();
     try{
       const resp=await fetch(syncUrl('/api/sync?t='+Date.now()),{cache:'no-store',headers:authHeaders()});
       if(resp.ok){
         const data=await resp.json().catch(()=>null);
         if(data&&Array.isArray(data.salons)&&data.salons.length>0){
           const fresh=data.salons.find(x=>x.id===sid);
-          if(fresh&&myReq===salonModalReqSeq){
+          // Also requires no more-recently-STARTED fetch (the 6s poll) to
+          // have already applied fresher salons data in the meantime — this
+          // modal's own fetch can be a straggler that resolves after a
+          // faster poll response, and merging it in regardless would revert
+          // whatever that poll just picked up.
+          if(fresh&&myReq===salonModalReqSeq&&myFetchStartedAt>=lastSalonsFetchAppliedAt){
             STATE.salons=STATE.salons.map(x=>x.id===sid?fresh:x);
+            lastSalonsFetchAppliedAt=myFetchStartedAt;
           }
         }
       }
