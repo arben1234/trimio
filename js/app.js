@@ -1,6 +1,6 @@
 /* ================================================================
    BARBERS BLOCK
-   4 livelli: Admin (1) · Proprietario (2) · Barbiere (3) · Cliente (4)
+   4 livelli: Admin (1) · Proprietario (2) · Operatore (3) · Cliente (4)
 ================================================================ */
 const DOW=['Dom','Lun','Mar','Mer','Gio','Ven','Sab'];
 const MON=['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'];
@@ -159,6 +159,42 @@ const DEFAULT_SERVICES=[
   {id:'sv1',name:'Barba',dur:'20 min',price:12},
   {id:'sv2',name:'Taglio + Barba',dur:'45 min',price:25},
   {id:'sv3',name:'Shampoo + Taglio',dur:'40 min',price:20}
+];
+// Master catalog offered when creating a brand-new salon (see the "Servizi"
+// step of the admin's "Nuovo salone" modal) — grouped by category so TRIMIO
+// reads as general-purpose for any kind of salon (barbershop, parrucchiere
+// donna, estetista...) rather than barber-only. An admin picks which of
+// these a given salon actually offers; nothing here restricts what can be
+// added/edited/removed afterward through the normal Servizi section.
+const SERVICE_CATALOG=[
+  {category:'Barbieria',services:[
+    {name:'Taglio',dur:'30 min',price:15},
+    {name:'Barba',dur:'20 min',price:12},
+    {name:'Taglio + Barba',dur:'45 min',price:25},
+    {name:'Shampoo + Taglio',dur:'40 min',price:20},
+    {name:'Rasatura',dur:'20 min',price:10},
+    {name:'Taglio Bambino',dur:'20 min',price:10}
+  ]},
+  {category:'Parrucchiere Donna',services:[
+    {name:'Taglio Donna',dur:'45 min',price:25},
+    {name:'Piega',dur:'30 min',price:18},
+    {name:'Colore',dur:'90 min',price:45},
+    {name:'Colpi di Sole / Meches',dur:'120 min',price:60},
+    {name:'Trattamento Ricostruttivo',dur:'45 min',price:30},
+    {name:'Extension',dur:'120 min',price:80}
+  ]},
+  {category:'Manicure & Pedicure',services:[
+    {name:'Manicure',dur:'30 min',price:15},
+    {name:'Pedicure',dur:'40 min',price:20},
+    {name:'Manicure + Pedicure',dur:'60 min',price:30},
+    {name:'Smalto Semipermanente',dur:'45 min',price:25},
+    {name:'Ricostruzione Unghie',dur:'60 min',price:35}
+  ]},
+  {category:'Estetica',services:[
+    {name:'Ceretta',dur:'20 min',price:12},
+    {name:'Trattamento Viso',dur:'40 min',price:25},
+    {name:'Massaggio',dur:'50 min',price:35}
+  ]}
 ];
 
 // Self-signup salons pay a monthly fee tiered by barber count: €50 (1-5),
@@ -2093,7 +2129,7 @@ async function customerCancelBooking(id,btn){
 
 function renderBarberGrid(){
   if(!custSalon.workers||!custSalon.workers.length){
-    $('barberGrid').innerHTML=`<div style="grid-column:1/-1;text-align:center;padding:24px 12px;color:#888;font-size:13px;">Nessun barbiere disponibile al momento. Riprova più tardi.</div>`;
+    $('barberGrid').innerHTML=`<div style="grid-column:1/-1;text-align:center;padding:24px 12px;color:#888;font-size:13px;">Nessun operatore disponibile al momento. Riprova più tardi.</div>`;
     return;
   }
   const iso=todayISO();
@@ -2117,8 +2153,8 @@ function renderBarberGrid(){
         <img src="${escapeHtml(w.img || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face')}" alt="${firstName}" class="bc-img">
       </div>
       <div class="bc-name">${firstName}</div>
-      <div class="bc-role">${escapeHtml(w.role || 'Senior Barber')}</div>
-      <div class="bc-desc">${escapeHtml(w.desc || 'Specialista in taglio e rasatura.')}</div>
+      <div class="bc-role">${escapeHtml(w.role || 'Professionista')}</div>
+      <div class="bc-desc">${escapeHtml(w.desc || 'Al tuo servizio per ogni esigenza.')}</div>
       <div class="bc-stars" onclick="event.stopPropagation(); showBarberReviews('${w.id}')">${starsHtml}</div>
       <div class="bc-status">${vac?'In ferie 🌴':offToday?'Riposo oggi':'Disponibile'}</div>
       ${vac&&w.vacTo?`<div class="bc-vac">Fino al ${w.vacTo}</div>`:''}
@@ -2162,8 +2198,8 @@ function renderCustTimes(){
   if(!times.length){
     const w=custSalon.workers.find(x=>x.id===custData.barberId);
     const restMsg=w&&isWeeklyOff(w,custData.dateISO)
-      ? `${custData.barberName.split(' ')[0]} riposa in questo giorno.<br>Scegli un altro giorno o un altro barbiere.`
-      : `Nessun orario disponibile per questo giorno.<br>Prova un altro giorno o un altro barbiere.`;
+      ? `${custData.barberName.split(' ')[0]} riposa in questo giorno.<br>Scegli un altro giorno o un altro operatore.`
+      : `Nessun orario disponibile per questo giorno.<br>Prova un altro giorno o un altro operatore.`;
     $('times').innerHTML=`<div class="empty" style="grid-column:1/-1"><div class="empty-t">${restMsg}</div></div>`;
     return;
   }
@@ -2254,7 +2290,7 @@ function custBack(){if(custStep>0){custStep--;renderCustStep();}}
 
 function validateCust(){
   const s=custStep;
-  if(s===0&&!custData.barberId)return showErr('cErr','Seleziona un barbiere');
+  if(s===0&&!custData.barberId)return showErr('cErr','Seleziona un operatore');
   if(s===1&&!custData.service)return showErr('cErr','Seleziona un servizio');
   if(s===2){
     if(!custData.dateISO)return showErr('cErr','Seleziona un giorno');
@@ -2359,7 +2395,7 @@ async function doSubmit(){
         // back to pick a barber fresh instead.
         custStep=0;renderCustStep();
         if(typeof renderBarberGrid==='function')renderBarberGrid();
-        showErr('cErr','Il barbiere selezionato non è più disponibile. Scegline un altro.');
+        showErr('cErr','L\'operatore selezionato non è più disponibile. Scegline un altro.');
         return;
       }
       if(conflict.error==='salon_inactive'){
@@ -2442,7 +2478,7 @@ async function doSubmit(){
 function showAltModal(busyName,time,freeB,reason){
   $('altSub').textContent=`${busyName} ${reason||`è occupato alle ${time}`}. Liberi in questo orario:`;
   $('altList').innerHTML=freeB.length===0
-    ?`<div style="padding:14px 0;color:#888;font-size:13px">Nessun altro barbiere libero in questo orario.</div>`
+    ?`<div style="padding:14px 0;color:#888;font-size:13px">Nessun altro operatore libero in questo orario.</div>`
     :freeB.map(w=>`<div class="alt-item" data-id="${w.id}" data-name="${escapeHtml(w.name)}">
       <div class="alt-av">${escapeHtml(initials(w.name))}</div>
       <div><div class="alt-name">${escapeHtml(w.name)}</div><div style="font-size:12px;color:#888;margin-top:2px">Libero alle ${time}</div></div>
@@ -2479,7 +2515,7 @@ function renderSalonModalWorkers(s) {
   if (!container) return;
   
   if (!s.workers || !s.workers.length) {
-    container.innerHTML = `<div style="text-align:center; padding:18px; color:#888; font-size:12px;">Nessun barbiere in questo salone.</div>`;
+    container.innerHTML = `<div style="text-align:center; padding:18px; color:#888; font-size:12px;">Nessun operatore in questo salone.</div>`;
     return;
   }
   
@@ -2575,6 +2611,33 @@ function renderSalonModalServices(s) {
   `).join('');
 }
 
+// The "Servizi" step for a brand-new (not yet created) salon — shown
+// instead of renderSalonModalServices above, which assumes a salon already
+// has its own services array to edit prices/durations for. Renders the
+// FULL master SERVICE_CATALOG grouped by category as a checklist: the
+// admin picks which services this specific salon will actually offer
+// (any mix, e.g. a barbershop, a women's salon, or both), and saveSalon()
+// reads the checked boxes to build the new salon's initial services array.
+// Nothing here restricts what can be added/edited/removed afterward
+// through the normal Servizi dashboard section once the salon exists.
+function renderNewSalonServiceCatalog() {
+  const container = $('smServicesList');
+  if (!container) return;
+  container.innerHTML = `
+    <div style="font-size:12px; color:#71717a; margin-bottom:10px;">Seleziona i servizi che questo salone offrirà (potrai aggiungerne/modificarne altri in qualsiasi momento dopo la creazione):</div>
+    ${SERVICE_CATALOG.map(cat => `
+      <div style="margin-bottom:14px;">
+        <div style="font-size:12px; font-weight:800; color:#18181b; margin-bottom:6px;">${escapeHtml(cat.category)}</div>
+        ${cat.services.map(s => `
+          <label style="display:flex; align-items:center; gap:8px; padding:6px 2px; font-size:13px; color:#3f3f46; cursor:pointer;">
+            <input type="checkbox" class="new-salon-svc-chk" data-name="${escapeHtml(s.name)}" data-dur="${escapeHtml(s.dur)}" data-price="${s.price}">
+            <span>${escapeHtml(s.name)} <span style="color:#a1a1aa;">· ${escapeHtml(s.dur)} · €${s.price}</span></span>
+          </label>
+        `).join('')}
+      </div>
+    `).join('')}
+  `;
+}
 
 // GET /api/sync sets sessionExpired:true when the caller presented an
 // Authorization token that the server rejected (expired/forged/malformed)
@@ -2677,7 +2740,7 @@ function updateNavMenu() {
         <option value="" disabled selected>☰ Menu: ${custSalon.name}</option>
         <option value="booking">📅 Prenota in questo Salone</option>
         <option value="login_owner">🔑 Login Proprietario (Owner)</option>
-        <option value="login_barber">🔑 Login Staf / Barbiere</option>
+        <option value="login_barber">🔑 Login Staff / Operatore</option>
       `;
     } else {
       // Main Homepage context — simplified to just the admin entry point;
@@ -2758,7 +2821,7 @@ function showView(view){
     if (loginTitle) {
       if (!loginSalonContext) loginTitle.textContent = loginRoleContext === 'owner' ? 'Accesso Proprietario' : 'Accesso Amministratore';
       else if (loginRoleContext === 'owner') loginTitle.textContent = 'Accesso Proprietario';
-      else if (loginRoleContext === 'barber') loginTitle.textContent = 'Accesso Barbiere';
+      else if (loginRoleContext === 'barber') loginTitle.textContent = 'Accesso Operatore';
       else loginTitle.textContent = 'Accesso Staff';
     }
     // The marketing content (hero/value cards/footer) only makes sense on
@@ -2977,7 +3040,7 @@ async function doLogin(){
       onLoginSuccess();
       return;
     }
-    return showErr('lErr', 'Accesso riservato agli amministratori. I proprietari e i barbieri accedono dalla pagina del proprio salone.');
+    return showErr('lErr', 'Accesso riservato agli amministratori. I proprietari e gli operatori accedono dalla pagina del proprio salone.');
   }
 
   // LIVELLO 2 — Proprietario salone (only when this screen was reached via
@@ -3094,7 +3157,7 @@ function initDash(){
   const rb=$('sideRoleBadge');
   if(r==='admin'){rb.textContent='Amministratore (Liv. 1)';rb.className='side-role-badge role-admin';}
   else if(r==='owner'){rb.textContent='Proprietario (Liv. 2)';rb.className='side-role-badge role-owner';}
-  else{rb.textContent='Barbiere (Liv. 3)';rb.className='side-role-badge role-barber';}
+  else{rb.textContent='Operatore (Liv. 3)';rb.className='side-role-badge role-barber';}
   $('sideAv').textContent=initials(SESSION.name);
   $('sideProfName').textContent=SESSION.name;
 
@@ -3376,7 +3439,7 @@ function renderFatturazione(){
       <button class="btn btn-ghost" id="fattCancelBtn">Disattiva pagamento automatico</button>`;
   } else {
     actionHtml=`
-      <p style="font-size:13px;color:#52525b;margin:10px 0 14px;">Attiva il pagamento automatico con PayPal per non doverti più preoccupare del bonifico mensile. La tariffa resta fissa a €${fee}/mese finché non disattivi il pagamento automatico, anche se il numero di barbieri cambia.</p>
+      <p style="font-size:13px;color:#52525b;margin:10px 0 14px;">Attiva il pagamento automatico con PayPal per non doverti più preoccupare del bonifico mensile. La tariffa resta fissa a €${fee}/mese finché non disattivi il pagamento automatico, anche se il numero di operatori cambia.</p>
       <button class="btn btn-main" id="fattActivateBtn">Attiva pagamento automatico</button>`;
   }
 
@@ -4088,11 +4151,11 @@ function renderStats(){
   if(r==='owner'&&served.length){
     const wMap={};
     served.forEach(b=>{wMap[b.workerName]=(wMap[b.workerName]||0)+1;});
-    html+=`<div class="chart-wrap"><div class="chart-title">Servizi realizzati per barbiere</div><div class="bar-chart">${barChart(wMap,'blue')}</div></div>`;
+    html+=`<div class="chart-wrap"><div class="chart-title">Servizi realizzati per operatore</div><div class="bar-chart">${barChart(wMap,'blue')}</div></div>`;
 
     const wRev={};
     served.forEach(b=>{wRev[b.workerName]=(wRev[b.workerName]||0)+(b.price||0);});
-    html+=`<div class="chart-wrap"><div class="chart-title">Incasso per barbiere (€, solo serviti)</div><div class="bar-chart">${barChart(wRev,'green')}</div></div>`;
+    html+=`<div class="chart-wrap"><div class="chart-title">Incasso per operatore (€, solo serviti)</div><div class="bar-chart">${barChart(wRev,'green')}</div></div>`;
 
     const svcRev={};
     served.forEach(b=>{svcRev[b.service]=(svcRev[b.service]||0)+(b.price||0);});
@@ -4105,14 +4168,14 @@ function renderStats(){
       return {name:w.name, count:wServed.length, rev:wRevTot};
     });
     html+=`<div class="chart-wrap">
-      <div class="chart-title">Riepilogo per barbiere</div>
-      ${statsTableHtml('Barbiere', workerRows, served.length, servedRev)}
+      <div class="chart-title">Riepilogo per operatore</div>
+      ${statsTableHtml('Operatore', workerRows, served.length, servedRev)}
     </div>`;
 
     lastStatsExport={
       title:salon.name,
       subtitle:`Riepilogo statistiche · ${periodLabel()}`,
-      colLabel:'Barbiere', rows:workerRows, servedCount:served.length, servedRev, period:periodLabel()
+      colLabel:'Operatore', rows:workerRows, servedCount:served.length, servedRev, period:periodLabel()
     };
   }
 
@@ -4258,7 +4321,7 @@ function renderPendingSaloni(){
         <div class="si-stats">
           Email: ${escapeHtml(s.email||'—')}<br>
           Indirizzo: ${escapeHtml(s.address||'—')}, ${escapeHtml(s.city||'—')} · Tel: ${escapeHtml(s.phone||'—')}<br>
-          Barbieri dichiarati: ${s.billing.declaredWorkerCount||1} · Canone stimato: €${feeForWorkerCount(s.billing.declaredWorkerCount||1)}/mese<br>
+          Operatori dichiarati: ${s.billing.declaredWorkerCount||1} · Canone stimato: €${feeForWorkerCount(s.billing.declaredWorkerCount||1)}/mese<br>
           Contratto firmato da: ${escapeHtml(s.billing.contractSignedName||'—')} il ${s.billing.contractSignedAt?new Date(s.billing.contractSignedAt).toLocaleString('it-IT'):'—'}
         </div>
       </div>
@@ -4325,7 +4388,7 @@ function renderSaloni(){
     }
     html+=`<div class="salon-item">
       <div style="width:40px;height:40px;border-radius:12px;background:#000;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px;flex-shrink:0">${escapeHtml(initials(s.name))}</div>
-      <div class="si-info"><div class="si-name">${escapeHtml(s.name)}${pendingBadge}</div><div class="si-slug">${locationString}</div><div class="si-stats">${s.workers.length} barbieri · ${tot} prenotazioni ${billingPill}</div></div>
+      <div class="si-info"><div class="si-name">${escapeHtml(s.name)}${pendingBadge}</div><div class="si-slug">${locationString}</div><div class="si-stats">${s.workers.length} operatori · ${tot} prenotazioni ${billingPill}</div></div>
       <div class="si-btns" style="display:flex; align-items:center; gap:8px;">
         ${statusBtn}
         <button class="iconbtn" data-sedit="${s.id}">✏️</button>
@@ -4447,7 +4510,7 @@ const SU_CONTRACT_HTML = `
   <b>CONTRATTO DI COLLABORAZIONE — TRIMIO</b><br>
   <i>(Modello standard — non sostituisce una consulenza legale.)</i><br><br>
   <b>1. Oggetto.</b> TRIMIO fornisce al Salone l'accesso alla piattaforma software di gestione prenotazioni online, inclusa assistenza tecnica e manutenzione della piattaforma 24 ore su 24, 7 giorni su 7.<br><br>
-  <b>2. Canone mensile.</b> Il Salone corrisponde un canone mensile calcolato in base al numero di barbieri registrati: €50 (1-5 barbieri), €100 (6-10), €150 (11-15), con incrementi proporzionali oltre questa soglia.<br><br>
+  <b>2. Canone mensile.</b> Il Salone corrisponde un canone mensile calcolato in base al numero di operatori registrati: €50 (1-5 operatori), €100 (6-10), €150 (11-15), con incrementi proporzionali oltre questa soglia.<br><br>
   <b>3. Termini di pagamento.</b> Il canone è dovuto il giorno 1 di ogni mese, tramite autorizzazione di pagamento automatico attivata dal Salone dal proprio pannello dopo l'approvazione. Il primo mese di utilizzo, dalla data di registrazione alla fine dello stesso mese solare, è gratuito.<br><br>
   <b>4. Mancato pagamento.</b> Se il pagamento non risulta registrato entro il giorno 5 del mese, il servizio viene sospeso; il Salone riceve un promemoria via email ogni giorno dal giorno 2 fino alla sospensione o al pagamento.<br><br>
   <b>5. Riattivazione.</b> Il servizio viene riattivato non appena TRIMIO conferma la ricezione del pagamento.<br><br>
@@ -4536,7 +4599,7 @@ function suNext1(){
   if(!isValidItalianPhone(formattedPhone))return showErr('suErr','Inserisci un numero di telefono del salone valido');
   $('suPhone').value=formattedPhone;
   const wc=parseInt($('suWorkerCount').value);
-  if(!wc||wc<1)return showErr('suErr','Inserisci il numero di barbieri');
+  if(!wc||wc<1)return showErr('suErr','Inserisci il numero di operatori');
   suStep=3;renderSuStep();
 }
 async function suSubmit(){
@@ -4583,7 +4646,7 @@ async function suSubmit(){
         invalid_city:'Inserisci la città del salone.',
         invalid_address:'Inserisci l\'indirizzo del salone.',
         invalid_salon_phone:'Numero di telefono del salone non valido.',
-        invalid_worker_count:'Inserisci un numero di barbieri valido.',
+        invalid_worker_count:'Inserisci un numero di operatori valido.',
         contract_not_accepted:'Devi accettare le condizioni del contratto.'
       };
       showErr('suErr',msgs[r.error]||'Errore durante l\'invio. Riprova.');
@@ -4687,9 +4750,13 @@ async function openSalonModal(sid){
     smGalleryTemp=[];renderSmGallery();
     smThemeColor='#e5c158';renderSmThemeSwatches();
 
-    // Hide staff and services tabs for new unsaved salons
+    // No workers yet for an unsaved salon — hide Staff. Services tab stays
+    // visible but shows the master-catalog checklist (renderNewSalonServiceCatalog)
+    // instead of renderSalonModalServices, which assumes an already-existing
+    // services array to edit prices/durations for.
     $('tabSalonStaff').style.display = 'none';
-    $('tabSalonServices').style.display = 'none';
+    $('tabSalonServices').style.display = '';
+    renderNewSalonServiceCatalog();
   } else {
     const s=STATE.salons.find(x=>x.id===sid);if(!s)return;
     $('salonModalH').textContent='Modifica · '+s.name;
@@ -4738,9 +4805,18 @@ async function saveSalon(){
   if(salonEditId==='new'){
     if(!oUser||!oPwd)return showErr('smErr','Username e password proprietario obbligatori');
     if(oPwd.length<6)return showErr('smErr','La password deve avere almeno 6 caratteri');
+    // Built from whichever master-catalog checkboxes the admin selected in
+    // the "Servizi" step (renderNewSalonServiceCatalog) instead of blindly
+    // cloning a fixed barber-only default list — a brand-new salon of ANY
+    // type only starts with what was actually chosen for it.
+    const selectedSvcs=[...document.querySelectorAll('.new-salon-svc-chk:checked')].map(chk=>({
+      id:'sv'+Date.now()+Math.random().toString(36).slice(2,6),
+      name:chk.dataset.name,dur:chk.dataset.dur,price:Number(chk.dataset.price)
+    }));
+    if(!selectedSvcs.length)return showErr('smErr','Seleziona almeno un servizio nella scheda "Servizi & Prezzi"');
     STATE.salons.push({
       id:'salon'+Date.now(),name,slug,city,address,phone,promo,bgImage:bgImg,gallery:smGalleryTemp.slice(),themeColor:smThemeColor,closedDays:[],bookingDays:30,
-      services:DEFAULT_SERVICES.map(s=>({...s})),workers:[],ownerUsername:oUser,ownerPassword:oPwd
+      services:selectedSvcs,workers:[],ownerUsername:oUser,ownerPassword:oPwd
     });
   } else {
     const s=STATE.salons.find(x=>x.id===salonEditId);if(!s)return;
@@ -4805,12 +4881,12 @@ function renderUtenti(){
       </div>
     </div>`;
   });
-  html+=`<div class="sub-sec-h">Barbieri / Dipendenti</div>`;
+  html+=`<div class="sub-sec-h">Operatori / Dipendenti</div>`;
   STATE.salons.forEach(s=>{
     s.workers.forEach(w=>{
       html+=`<div class="worker-card">
         <div class="av">${escapeHtml(initials(w.name))}</div>
-        <div class="wc-info"><div class="wc-name">${escapeHtml(w.name)}</div><div class="wc-meta">@${escapeHtml(w.username)} · ${escapeHtml(s.name)} · Barbiere (Liv. 3)</div></div>
+        <div class="wc-info"><div class="wc-name">${escapeHtml(w.name)}</div><div class="wc-meta">@${escapeHtml(w.username)} · ${escapeHtml(s.name)} · Operatore (Liv. 3)</div></div>
         <div class="wc-btns">
           <button class="iconbtn" data-utype="barber" data-usid="${s.id}" data-uwid="${w.id}" title="Reset password">🔑</button>
         </div>
@@ -5109,7 +5185,7 @@ function renderHomepage(){
           ${distanceDisplay}
         </div>
         <div class="hsc-stats" style="margin-top: 10px;">
-          <div class="hsc-stat">💈 ${s.workers.length} barbieri</div>
+          <div class="hsc-stat">👥 ${s.workers.length} operatori</div>
           <div class="hsc-stat">📅 Oggi: ${todayBks} prenotazioni</div>
           <div class="hsc-stat">📊 Totale: ${totBks}</div>
         </div>

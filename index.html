@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <meta name="description" content="TRIMIO — Sistema di prenotazione per barbieri">
+  <meta name="description" content="TRIMIO — Sistema di prenotazione per saloni">
   <meta name="theme-color" content="#000000">
   <title>TRIMIO</title>
   <!-- PWA Setup -->
@@ -115,12 +115,12 @@
           <div class="hp-value-card">
             <div class="hp-value-ic">🔎</div>
             <div class="hp-value-t">Tutti i saloni in un click</div>
-            <div class="hp-value-d">Un unico posto per trovare e confrontare i barbieri partner della tua zona, senza scaricare nessuna app.</div>
+            <div class="hp-value-d">Un unico posto per trovare e confrontare i saloni partner della tua zona, senza scaricare nessuna app.</div>
           </div>
           <div class="hp-value-card">
             <div class="hp-value-ic">📅</div>
             <div class="hp-value-t">Prenota in pochi secondi</div>
-            <div class="hp-value-d">Scegli barbiere, servizio e orario: la conferma è immediata, senza telefonate né attese.</div>
+            <div class="hp-value-d">Scegli operatore, servizio e orario: la conferma è immediata, senza telefonate né attese.</div>
           </div>
           <div class="hp-value-card">
             <div class="hp-value-ic">🔔</div>
@@ -342,7 +342,7 @@
       </div>
 
       <div class="step on" id="s0">
-        <div class="title">Chi vuoi come barbiere?</div>
+        <div class="title">Con chi vuoi prenotare?</div>
         <div class="barber-grid" id="barberGrid"></div>
       </div>
 
@@ -361,7 +361,7 @@
       <div class="step" id="s3">
         <div class="title">Conferma prenotazione</div>
         <div class="recap">
-          <div class="r-row"><span class="r-lbl">✂️ Barbiere</span><span class="r-val" id="rB">—</span></div>
+          <div class="r-row"><span class="r-lbl">✂️ Operatore</span><span class="r-val" id="rB">—</span></div>
           <div class="r-row"><span class="r-lbl">📅 Data</span><span class="r-val" id="rD">—</span></div>
           <div class="r-row"><span class="r-lbl">🕐 Ora</span><span class="r-val" id="rT">—</span></div>
           <div class="r-row"><span class="r-lbl">🔖 Servizio</span><span class="r-val" id="rS">—</span></div>
@@ -424,12 +424,18 @@
           <img src="/logo.png" alt="TRIMIO Logo" style="width: 110px; height: 110px; margin-bottom: 14px; border-radius: 50%; border: none; box-shadow: 0 8px 32px rgba(0,0,0,0.6); background:transparent; object-fit: cover;">
           <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin-bottom:18px;">
             <button type="button" id="vLoginTopLoginTrigger" style="background:#e5c158;color:#18181b;border:none;border-radius:10px;padding:10px 18px;cursor:pointer;font:inherit;font-size:13px;font-weight:800;">Accedi</button>
-            <button type="button" id="vLoginSignupTrigger" style="background:#e5c158;color:#18181b;border:none;border-radius:10px;padding:10px 18px;cursor:pointer;font:inherit;font-size:13px;font-weight:800;">📝 Registra il tuo salone</button>
+            <!-- Self-signup temporarily deactivated (2026-07-25): salon
+                 creation is admin-only for now, via the new catalog-based
+                 "Nuovo salone" service-selection step in js/app.js. The
+                 wizard/handler code (suGoto/suSubmit, handleSignupSalon,
+                 PayPal billing) is untouched — only this trigger is hidden,
+                 so it's a one-line revert to re-enable. -->
+            <button type="button" id="vLoginSignupTrigger" style="display:none;background:#e5c158;color:#18181b;border:none;border-radius:10px;padding:10px 18px;cursor:pointer;font:inherit;font-size:13px;font-weight:800;">📝 Registra il tuo salone</button>
           </div>
-          <div class="hp-title" style="font-size:26px;">La piattaforma che fa crescere<br>il tuo business da barbiere</div>
+          <div class="hp-title" style="font-size:26px;">La piattaforma che fa crescere<br>il tuo salone</div>
           <div class="hp-sub" style="margin-top:8px;">Prenotazioni online. Gestione semplice. Risultati reali.</div>
           <div class="hp-stats-row">
-            <div class="hp-stat"><span class="hp-stat-n">1.000+</span><span class="hp-stat-l">Barbieri</span></div>
+            <div class="hp-stat"><span class="hp-stat-n">1.000+</span><span class="hp-stat-l">Professionisti</span></div>
             <div class="hp-stat"><span class="hp-stat-n">5.000+</span><span class="hp-stat-l">Clienti</span></div>
           </div>
         </div>
@@ -455,7 +461,7 @@
              recensioni, pause, statistiche) — a fully fabricated demo salon,
              generated via a scripted Playwright pass, so no real customer
              data is ever shown. -->
-        <div class="hp-sec-title" style="margin-top:32px;">Guarda la gestione da barbiere</div>
+        <div class="hp-sec-title" style="margin-top:32px;">Guarda la gestione del salone</div>
         <div class="vlogin-demo-video-wrap">
           <video class="vlogin-demo-video" autoplay muted loop playsinline preload="auto" poster="/demo-gestione-poster.jpg">
             <source src="/demo-gestione.mp4" type="video/mp4">
@@ -472,7 +478,7 @@
           <div class="hp-value-card">
             <div class="hp-value-ic">📲</div>
             <div class="hp-value-t">I clienti prenotano da soli, 24 ore su 24</div>
-            <div class="hp-value-d">Niente più telefonate: ogni cliente sceglie barbiere, servizio e orario in totale autonomia.</div>
+            <div class="hp-value-d">Niente più telefonate: ogni cliente sceglie operatore, servizio e orario in totale autonomia.</div>
           </div>
           <div class="hp-value-card">
             <div class="hp-value-ic">📊</div>
@@ -507,7 +513,7 @@
 
         <div class="hp-cta-banner">
           <div class="hp-cta-t">Porta il tuo salone a un livello superiore.</div>
-          <div class="hp-cta-d">Unisciti alla community di barbieri che già lavora con TRIMIO.</div>
+          <div class="hp-cta-d">Unisciti alla community di saloni che già lavora con TRIMIO.</div>
         </div>
 
         <!-- Curated photos an admin uploads specifically for this page (see
@@ -589,13 +595,13 @@
 
           <div id="suStep1" style="display:none">
             <div class="login">
-              <div class="field"><label>Nome del salone *</label><input type="text" id="suSalonName" placeholder="Barber Art" required></div>
+              <div class="field"><label>Nome del salone *</label><input type="text" id="suSalonName" placeholder="Studio Bella" required></div>
               <div class="field"><label>Email del salone *</label><input type="email" id="suEmail" placeholder="info@ilmiosalone.it" required></div>
               <div class="field"><label>Conferma email *</label><input type="email" id="suEmailConfirm" placeholder="Ripeti l'indirizzo email" required></div>
               <div class="field"><label>Città *</label><input type="text" id="suCity" placeholder="Es. Milano" required></div>
               <div class="field"><label>Indirizzo *</label><input type="text" id="suAddress" placeholder="Via Roma 1" required></div>
               <div class="field"><label>Telefono del salone *</label><input type="text" id="suPhone" placeholder="+39 02 1234567" required></div>
-              <div class="field"><label>Numero di barbieri *</label><input type="number" id="suWorkerCount" min="1" value="1" required></div>
+              <div class="field"><label>Numero di operatori *</label><input type="number" id="suWorkerCount" min="1" value="1" required></div>
               <div style="font-size:13px; color:#a1a1aa; margin:-6px 0 4px;">Canone mensile stimato: <b id="suFeePreview" style="color:#e5c158;">€50</b>/mese — addebitato automaticamente ogni mese tramite autorizzazione di pagamento, da attivare dal tuo pannello dopo l'approvazione.</div>
               <div style="display:flex; gap:10px;">
                 <button class="btn btn-ghost" id="suBack1" style="flex:1">← Indietro</button>
@@ -898,7 +904,7 @@
           <label class="d-lbl">Cliente</label>
           <input class="minput" id="mName" placeholder="Nome cliente" style="margin-bottom:14px">
           <div id="mBarberWrap">
-            <label class="d-lbl">Barbiere</label>
+            <label class="d-lbl">Operatore</label>
             <select class="msel" id="mBarber"></select>
           </div>
           <label class="d-lbl">Data</label>
@@ -920,7 +926,7 @@
         <div class="modal-sheet">
           <div class="modal-h" id="workerModalH">Dipendente</div>
           <div class="err" id="wErr"></div>
-          <label class="d-lbl">Foto del Barbiere</label>
+          <label class="d-lbl">Foto dell'Operatore</label>
           <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px;">
             <img id="wImgPreview" src="" alt="" style="width:56px; height:56px; border-radius:50%; object-fit:cover; background:#f4f4f5; display:none; flex-shrink:0;">
             <div style="flex:1;">
@@ -938,7 +944,7 @@
           <label class="d-lbl">Telefono <span style="color:#e5484d">*</span></label>
           <input class="minput" id="wPhone" placeholder="Es. +39 333 123 4567" required style="margin-bottom:14px">
           <label class="d-lbl">Ruolo</label>
-          <input class="minput" id="wRole" placeholder="Es. Barber & Stylist" style="margin-bottom:14px">
+          <input class="minput" id="wRole" placeholder="Es. Senior Stylist" style="margin-bottom:14px">
           <label class="d-lbl">Descrizione</label>
           <textarea class="minput" id="wDesc" placeholder="Es. Specialista in colorazione dei capelli..." rows="3" style="margin-bottom:14px; resize:vertical; font-family:inherit;"></textarea>
           <label class="d-lbl">Ferie dal</label>
@@ -1002,16 +1008,16 @@
           <!-- TAB HEADER -->
           <div style="display:flex; border-bottom:1px solid #e4e4e7; margin-bottom:16px; gap:8px; overflow-x:auto;">
             <button id="tabSalonInfo" class="modal-tab active">Dati Principali</button>
-            <button id="tabSalonStaff" class="modal-tab">Staff & Barbieri</button>
+            <button id="tabSalonStaff" class="modal-tab">Staff & Operatori</button>
             <button id="tabSalonServices" class="modal-tab">Servizi & Prezzi</button>
           </div>
           
           <!-- TAB 1: DATI PRINCIPALI -->
           <div id="panelSalonInfo">
             <label class="d-lbl">Nome salone</label>
-            <input class="minput" id="smName" placeholder="Es. Barber Art" style="margin-bottom:14px">
+            <input class="minput" id="smName" placeholder="Es. Studio Bella" style="margin-bottom:14px">
             <label class="d-lbl">Slug / link (lettere, numeri, _)</label>
-            <input class="minput" id="smSlug" placeholder="BARBER_ART" style="margin-bottom:14px">
+            <input class="minput" id="smSlug" placeholder="STUDIO_BELLA" style="margin-bottom:14px">
             <label class="d-lbl">Città</label>
             <input class="minput" id="smCity" placeholder="Es. Milano" style="margin-bottom:14px">
             <label class="d-lbl">Indirizzo</label>
@@ -1021,7 +1027,7 @@
             <label class="d-lbl">Testo Promozione Salone (ADV)</label>
             <input class="minput" id="smPromo" placeholder="Es. Mostra questo banner per..." style="margin-bottom:14px">
             <label class="d-lbl">Username proprietario</label>
-            <input class="minput" id="smOwnerUser" placeholder="es. owner_barberart" style="margin-bottom:14px">
+            <input class="minput" id="smOwnerUser" placeholder="es. owner_studiobella" style="margin-bottom:14px">
             <label class="d-lbl">Password proprietario</label>
             <input class="minput" id="smOwnerPwd" placeholder="password" type="password" style="margin-bottom:14px">
             <label class="d-lbl">Foto Principale del Salone</label>
@@ -1041,11 +1047,11 @@
             <div id="smThemeSwatches" style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:14px;"></div>
           </div>
           
-          <!-- TAB 2: STAFF & BARBIERI -->
+          <!-- TAB 2: STAFF & OPERATORI -->
           <div id="panelSalonStaff" style="display:none;">
-            <div style="font-size:12px; color:#71717a; margin-bottom:10px;">Gestisci i barbieri di questo salone:</div>
+            <div style="font-size:12px; color:#71717a; margin-bottom:10px;">Gestisci gli operatori di questo salone:</div>
             <div id="smWorkersList" style="margin-bottom:14px; max-height:240px; overflow-y:auto; border:1px solid #e4e4e7; border-radius:12px; padding:6px; background:#fafafa;"></div>
-            <button class="add-srv" id="smAddWorkerBtn" style="margin-bottom:14px; width:100%; border-radius:10px; padding:12px;">+ Aggiungi Barbiere a questo salone</button>
+            <button class="add-srv" id="smAddWorkerBtn" style="margin-bottom:14px; width:100%; border-radius:10px; padding:12px;">+ Aggiungi Operatore a questo salone</button>
           </div>
           
           <!-- TAB 3: SERVIZI & LISTINO PREZZI -->
@@ -1090,11 +1096,11 @@
   </div>
 </div>
 
-<!-- Modal: Recensioni Barber -->
+<!-- Modal: Recensioni Operatore -->
 <div class="modal" id="reviewsModal">
   <div class="modal-ov" id="reviewsModalOv" onclick="closeModal('reviewsModal')"></div>
   <div class="modal-sheet">
-    <div class="modal-h" id="reviewsModalH">Recensioni Barber</div>
+    <div class="modal-h" id="reviewsModalH">Recensioni Operatore</div>
     <div class="err" id="revErr"></div>
     
     <div class="reviews-list" id="reviewsList">
@@ -1163,6 +1169,6 @@
      own "Save as PDF" print target produces a clean report. -->
 <div id="printableStats"></div>
 
-<script src="/js/app.min.js?v=20260721_0002"></script>
+<script src="/js/app.min.js?v=20260725_0001"></script>
 </body>
 </html>
