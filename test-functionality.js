@@ -948,6 +948,64 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
   const stored2 = JSON.parse(fake.hashes.get('bookings').get('cap-2'));
   eq(stored2.name, '', 'a non-string name is normalized to an empty string, never persisted as-is');
   eq(stored2.phone, '', 'a non-string phone is normalized to an empty string, never persisted as-is');
+
+  // dateISO/time end up colon-concatenated into the slot-lock key
+  // (lock:<salonId>:<workerId>:<dateISO>:<time>) — a value containing its
+  // own colons could resolve to the same key as a different, legitimate
+  // slot. Malformed shapes are now rejected outright as invalid_booking.
+  const badDateBooking = { id: 'cap-3', salonId: 'sCap', workerId: 'wCap', dateISO: '2030-06-06:10', time: '00', status: 'confirmed', service: 'Taglio' };
+  const r3 = mkRes();
+  await handler({ method: 'POST', body: { bookings: [badDateBooking], salons: [] } }, r3.obj);
+  ok(r3.body.conflicts.some(c => c.id === 'cap-3' && c.error === 'invalid_booking'), 'a dateISO containing a colon (lock-key collision shape) is rejected as invalid_booking');
+  ok(!fake.hashes.get('bookings')?.has('cap-3'), 'the malformed-date booking is never written to the bookings hash');
+
+  const badTimeBooking = { id: 'cap-4', salonId: 'sCap', workerId: 'wCap', dateISO: '2030-06-06', time: '9:0', status: 'confirmed', service: 'Taglio' };
+  const r4 = mkRes();
+  await handler({ method: 'POST', body: { bookings: [badTimeBooking], salons: [] } }, r4.obj);
+  ok(r4.body.conflicts.some(c => c.id === 'cap-4' && c.error === 'invalid_booking'), 'a non-HH:MM time is rejected as invalid_booking');
+
+  // A genuinely well-formed booking must still go through normally.
+  const goodBooking = { id: 'cap-5', salonId: 'sCap', workerId: 'wCap', dateISO: '2030-06-06', time: '11:00', status: 'confirmed', service: 'Taglio' };
+  const r5 = mkRes();
+  await handler({ method: 'POST', body: { bookings: [goodBooking], salons: [] } }, r5.obj);
+  ok(fake.hashes.get('bookings')?.has('cap-5'), 'a well-formed dateISO/time booking is still accepted');
+});
+
+section('api/upload-image.js — HARDENING: a removed worker/deleted salon\'s still-valid session can no longer upload (stale-session regression)');
+await withFakeKv(makeFakeRedis(), async (fake) => {
+  const prevSecret = process.env.SESSION_SECRET;
+  process.env.SESSION_SECRET = 'test-only-secret-for-session-tokens';
+  try {
+    fake.strings.set('salons_db', JSON.stringify([{ id: 'salonU', name: 'Salon U', workers: [{ id: 'wU', name: 'Worker U' }] }]));
+    const handler = await freshImport('api/upload-image.js');
+    const tinyPng = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0, 0, 0, 0, 0]);
+    const body = { filename: 'test.png', dataBase64: tinyPng.toString('base64'), contentType: 'image/png' };
+
+    const ownerToken = issueSessionToken({ role: 'owner', salonId: 'salonU' });
+    const rOwner = mkRes();
+    await handler({ method: 'POST', headers: { authorization: `Bearer ${ownerToken}` }, body }, rOwner.obj);
+    ok(rOwner.status !== 401, 'a valid owner session for an existing salon is authorized to upload');
+
+    const barberToken = issueSessionToken({ role: 'barber', salonId: 'salonU', workerId: 'wU' });
+    const rBarber = mkRes();
+    await handler({ method: 'POST', headers: { authorization: `Bearer ${barberToken}` }, body }, rBarber.obj);
+    ok(rBarber.status !== 401, 'a valid barber session for a still-employed worker is authorized to upload');
+
+    // Salon deleted — the owner's still-valid (up to 30-day) token can no
+    // longer upload.
+    fake.strings.set('salons_db', JSON.stringify([]));
+    const rDeletedSalon = mkRes();
+    await handler({ method: 'POST', headers: { authorization: `Bearer ${ownerToken}` }, body }, rDeletedSalon.obj);
+    eq(rDeletedSalon.status, 401, "a deleted salon's owner's still-valid token can no longer upload");
+
+    // Worker removed — their still-valid token can no longer upload either.
+    fake.strings.set('salons_db', JSON.stringify([{ id: 'salonU', name: 'Salon U', workers: [] }]));
+    const rRemovedWorker = mkRes();
+    await handler({ method: 'POST', headers: { authorization: `Bearer ${barberToken}` }, body }, rRemovedWorker.obj);
+    eq(rRemovedWorker.status, 401, "a removed worker's still-valid token can no longer upload");
+  } finally {
+    restoreEnv('SESSION_SECRET', prevSecret);
+  }
 });
 
 section('api/toggle-salon.js — activate/deactivate a salon (fake KV, no live network)');

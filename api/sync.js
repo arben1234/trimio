@@ -1004,13 +1004,26 @@ async function handleCancelBillingSubscription(body, kvUrl, kvToken, req) {
   }
 }
 
+// dateISO/time end up concatenated with salonId/workerId (colon-separated)
+// into the double-booking slot-lock key (lockKeyFor in lib/kv.js) — without
+// a format check, a crafted dateISO/time containing its own colons could
+// resolve to the SAME lock key as a different, legitimate slot (e.g.
+// dateISO:"2030-01-01:10", time:"00" colliding with the real
+// dateISO:"2030-01-01", time:"10:00"), letting a bogus booking pre-claim a
+// real slot's lock — a griefing vector against one specific appointment
+// time, not a way to bypass the lock's own atomicity. Real bookings are
+// always created (and their format re-derived server-side) through the
+// new-booking path below, so this can't reject any legitimately-stored
+// booking's own update/status-change.
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const HHMM_TIME_RE = /^\d{2}:\d{2}$/;
 function isValidBooking(b) {
   return !!b && typeof b === 'object'
     && typeof b.id === 'string' && b.id
     && typeof b.salonId === 'string' && b.salonId
     && typeof b.workerId === 'string' && b.workerId
-    && typeof b.dateISO === 'string' && b.dateISO
-    && typeof b.time === 'string' && b.time;
+    && typeof b.dateISO === 'string' && ISO_DATE_RE.test(b.dateISO)
+    && typeof b.time === 'string' && HHMM_TIME_RE.test(b.time);
 }
 function isValidSalonsArray(salons) {
   return Array.isArray(salons) && salons.length > 0
@@ -1550,11 +1563,24 @@ export default async function handler(req, res) {
                 // instead of sequentially shrinks how long this request holds
                 // the day-lock, so more bookings for the same busy barber+day
                 // can cycle through the lock within acquireBarberDayLock's
-                // wait budget instead of piling up behind it.
-                await Promise.all([
-                  hsetBooking(kvUrl, kvToken, nb),
-                  promoteLock(kvUrl, kvToken, nb)
-                ]);
+                // wait budget instead of piling up behind it. promoteLock is
+                // wrapped in its own try/catch: if hsetBooking succeeds but
+                // this PERSIST call has a transient failure, Promise.all
+                // rejecting the whole pair would fall through to the outer
+                // catch and report processing_failed for a booking that was
+                // actually already durably written — misleading the client
+                // into thinking it failed. A missed PERSIST here only means
+                // the slot lock's 15s TTL expires and re-opens the fast-path
+                // SET NX guard slightly early; overlapsExisting (the
+                // authoritative duration-aware check, re-run against real
+                // booking records on every new-booking attempt) still
+                // backstops against an actual double-booking either way.
+                await hsetBooking(kvUrl, kvToken, nb);
+                try {
+                  await promoteLock(kvUrl, kvToken, nb);
+                } catch (promoteErr) {
+                  console.error('[SYNC] promoteLock failed after a successful booking write (non-fatal, backstopped by overlapsExisting):', nb.id, promoteErr.message);
+                }
                 bookingsMap.set(nb.id, nb);
                 if (nb.status !== 'cancelled') addedBks.push(nb);
               } finally {

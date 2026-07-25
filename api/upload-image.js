@@ -1,6 +1,6 @@
 import { put } from '@vercel/blob';
 import { getVerifiedSession, getClientIp } from '../lib/auth.js';
-import { checkRateLimit } from '../lib/kv.js';
+import { checkRateLimit, getSalonsDb } from '../lib/kv.js';
 
 // Accepts { filename, dataBase64, contentType } and stores the decoded image
 // in Vercel Blob storage, returning its public URL. The client reads the
@@ -54,6 +54,28 @@ export default async function handler(req, res) {
 
   const kvUrl = process.env.KV_REST_API_URL;
   const kvToken = process.env.KV_REST_API_TOKEN;
+
+  // A deleted salon's owner, or a fired barber, keeps a cryptographically
+  // valid session token for up to 30 days (no revocation list) — every
+  // other salon/worker-scoped endpoint (api/sync.js, api/subscribe.js,
+  // api/notify-customer.js) re-verifies the session still corresponds to a
+  // real, current salon/worker before doing anything; this one didn't,
+  // letting a terminated account keep consuming real Blob storage/bandwidth
+  // and this endpoint's rate-limit budget for no legitimate reason (low
+  // standalone impact — an orphaned upload can't be attached to any salon
+  // record without a properly-authorized write elsewhere — but cheap to
+  // close along with the same pattern everywhere else).
+  if (session.role === 'owner' || session.role === 'barber') {
+    if (!kvUrl || !kvToken) {
+      return res.status(403).json({ error: 'database_suspended' });
+    }
+    const salons = await getSalonsDb(kvUrl, kvToken);
+    const salon = salons.find(s => s.id === session.salonId);
+    const stillValid = !!salon && (session.role === 'owner' || (salon.workers || []).some(w => w.id === session.workerId));
+    if (!stillValid) {
+      return res.status(401).json({ error: 'invalid_session' });
+    }
+  }
   // Any verified session (owner/barber/admin) could otherwise loop real
   // (magic-byte-valid) uploads indefinitely with no throttle at all,
   // consuming real Vercel Blob storage/bandwidth cost — a single
