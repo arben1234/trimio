@@ -1,43 +1,57 @@
-# BARBERS BLOCK
-Sistema di prenotazione online per barbieri — single-page app, nessun backend richiesto.
+# TRIMIO
+
+Sistema di prenotazione online multi-tenant per saloni (barbieri, parrucchieri, centri estetici) — single-page app in vanilla JS con backend Vercel serverless e database Upstash Redis (Vercel KV).
 
 ## Struttura cartella
 
 ```
-barbers-block/
-├── index.html        ← pagina principale
-├── css/
-│   └── style.css     ← tutti gli stili
-├── js/
-│   └── app.js        ← tutta la logica applicativa
-└── README.md
+trimio/
+├── index.html        ← pagina principale (carica js/app.min.js)
+├── css/style.css      ← tutti gli stili
+├── js/app.js           ← logica applicativa (sorgente)
+├── js/app.min.js       ← bundle minificato servito in produzione (generato, non modificare a mano)
+├── api/                ← funzioni serverless Vercel (backend)
+├── lib/                ← moduli condivisi lato backend (KV, auth, email, SMS, PayPal...)
+└── build.cjs            ← build/minificazione di js/app.js
 ```
 
-## 4 Livelli utente
+Guida completa per sviluppatori/AI: vedi `CLAUDE.md`.
 
-| Livello | Ruolo          | Accesso               | Credenziali demo   |
-|---------|----------------|-----------------------|--------------------|
-| 1       | Amministratore | Tutti i saloni        | admin / admin123   |
-| 2       | Proprietario   | Il proprio salone     | owner / owner123   |
-| 3       | Barbiere       | Il proprio calendario | shqipe / barber123 |
-| 4       | Cliente        | Prenotazione online   | (nessuna password) |
+## 4 livelli utente
 
-## Installazione sul server
+| Livello | Ruolo          | Accesso                    |
+|---------|----------------|-----------------------------|
+| 1       | Amministratore | Tutti i saloni              |
+| 2       | Proprietario   | Il proprio salone           |
+| 3       | Operatore      | Il proprio calendario       |
+| 4       | Cliente        | Prenotazione online (nessun login) |
 
-1. Carica l'intera cartella `barbers-block/` sul tuo server tramite FTP/SFTP/cPanel
-2. Il file `index.html` deve trovarsi nella root pubblica (es. `public_html/`)
-3. Apri il browser:
-   - `https://tuodominio.com/` → homepage con tutti i saloni
-   - `https://tuodominio.com/#BARBER_ART` → salone diretto
+## Sviluppo locale
 
-## Link per Instagram / WhatsApp
+```
+node dev-server.js
+```
 
-Dalla homepage, usa il pulsante **Copia** accanto a ogni salone.
-Formato: `https://tuodominio.com/#NOME_SALONE`
+Serve l'app su `:3000`, leggendo le credenziali da `.env.local`. ⚠️ Si collega allo stesso database di produzione — non esiste un ambiente sandbox separato.
 
-## Requisiti server
+Dopo ogni modifica a `js/app.js`, rigenera il bundle e aggiorna la versione in `index.html`:
 
-- Qualsiasi hosting web (Apache, Nginx, cPanel, Plesk...)
-- Nessun PHP, Node.js o database necessario
-- HTTPS raccomandato (serve per il pulsante "Copia link")
-- Nessuna dipendenza esterna — tutto funziona offline dopo il primo caricamento
+```
+node build.cjs
+```
+
+## Test
+
+```
+node test-functionality.js
+```
+
+Suite di test read-only, non tocca mai il database live.
+
+## Deploy
+
+```
+vercel --prod
+```
+
+Il push su GitHub **non** effettua il deploy automatico.

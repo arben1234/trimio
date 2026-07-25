@@ -20,6 +20,17 @@ body{background:#f1f5f9;min-height:100vh;display:flex;align-items:center;justify
   background-attachment:fixed;
 }
 @media(min-width:500px){body{padding:20px}.app{min-height:auto;height:92vh;border-radius:20px;box-shadow:0 20px 60px rgba(0,0,0,.4);overflow-y:auto;}}
+/* The public homepage (#vLogin) is the one screen meant to be browsed like
+   a real website, not a phone mockup floating in the middle of a desktop
+   screen — override the generic "card" treatment above so it fills the
+   whole viewport edge-to-edge instead. Kept in its own query (same 500px
+   breakpoint the card treatment itself starts at) rather than folded into
+   the 860px block below, since :has() already gives this enough
+   specificity to win regardless of source order. */
+@media(min-width:500px){
+  body:has(#vLogin.on){padding:0;align-items:stretch;justify-content:stretch;}
+  .app:has(#vLogin.on){max-width:100%;width:100%;height:auto;min-height:100vh;border-radius:0;box-shadow:none;}
+}
 /* HEAD */
 .head{background:linear-gradient(135deg,#ffffff,#f4f4f5);color:#18181b;padding:22px 24px 18px;text-align:center;flex-shrink:0;position:relative;border-bottom:1px solid #e4e4e7;}
 .head-actions{position:absolute;top:16px;right:14px;display:flex;gap:8px;}
@@ -1300,8 +1311,18 @@ body{
   margin:-24px -24px 0;
   padding:52px 24px 40px;
   min-height:78vh;
+  /* Percentage positions are relative to #vLogin's OWN box, which is as
+     tall as the whole marketing page (hero, demo videos, both value-card
+     sections, gallery) — so these extra low-opacity color washes land at
+     different points as the page scrolls instead of one flat black panel
+     top to bottom. Same accent colors already used on the value cards'
+     --accent (indigo/emerald/pink) rather than introducing a new palette. */
   background:
     radial-gradient(circle at 25% 0%, rgba(229,193,88,.28) 0%, transparent 55%),
+    radial-gradient(circle at 88% 20%, rgba(99,102,241,.18) 0%, transparent 42%),
+    radial-gradient(circle at 8% 48%, rgba(16,185,129,.14) 0%, transparent 40%),
+    radial-gradient(circle at 92% 70%, rgba(236,72,153,.15) 0%, transparent 42%),
+    radial-gradient(circle at 15% 92%, rgba(245,158,11,.13) 0%, transparent 40%),
     linear-gradient(165deg,#0a0a0c 0%,#1c1c20 60%,#0a0a0c 100%);
   border-radius:0 0 36px 36px;
   color:#fff;
@@ -1517,11 +1538,11 @@ body{
   #vHome .gallery-filter-container{padding:0 32px;margin-left:0;margin-right:0;}
   #vHome .gallery-grid{grid-template-columns:repeat(auto-fill,minmax(230px,1fr));padding:0 32px;}
 
-  /* Login screen as marketing page (generic entry point): same phone-card
-     problem as the other views, plus room to let the 4 value cards sit
-     2-across instead of stacked, and the actual form narrow down to a
-     normal login-card width instead of stretching edge to edge. */
-  .app:has(#vLogin.on){max-width:900px;width:92vw;}
+  /* Login screen as marketing page (generic entry point): the shell itself
+     is full-width now (see the 500px query above) — room here is just for
+     the 4 value cards to sit 2-across instead of stacked, and the actual
+     login form to narrow down to a normal login-card width instead of
+     stretching edge to edge. */
   #vLogin .hp-value-grid{grid-template-columns:repeat(2,1fr);margin-left:32px;margin-right:32px;gap:18px;}
   #vLogin .hp-title{font-size:34px;}
   #vLogin .login-form-wrap{max-width:380px;margin:24px auto 0;}
@@ -1546,4 +1567,15 @@ body{
      column. */
   .app:has(#vCustomer.on){max-width:640px;width:90vw;}
   #vCustomer .barber-grid{grid-template-columns:repeat(auto-fit,minmax(240px,1fr));}
+}
+
+/* #vLogin's shell is full-viewport-width now (see the 500px query above),
+   but its content (hero text, value cards, gallery) has no cap of its own
+   — on a genuinely wide monitor that would stretch a single readable
+   column across 2000px+. The background keeps bleeding edge to edge;
+   only the content column re-centers with a sane max width, same pattern
+   as any real marketing site. */
+@media(min-width:1300px){
+  #vLoginMarketing,#vLoginFooter{max-width:1180px;margin-left:auto;margin-right:auto;}
+  #vLogin .hp-value-grid{grid-template-columns:repeat(4,1fr);}
 }

@@ -71,7 +71,3 @@ Admin-created salons carry no `billing` object at all by default (not billed) �
 `index.html` → `<script src="/js/app.min.js">` only. `js/app.js` is the real source of truth; `app.min.js` is a generated artifact (`build.cjs`, Terser) — never hand-edit it. The minified build also injects anti-debugging/right-click-blocking/devtools-detection code (copyright protection), so don't be surprised finding it only in `app.min.js`, not the source.
 
 `vercel.json` also sets a global `no-store`/`no-cache` header on every response except `/api/image` (which is cached forever, since image ids are content-addressed).
-
-### Legacy/exploratory files
-
-`test-npoint.js`, `test-npoint-create.js` are leftover scripts from an earlier npoint.io-based backend, no longer relevant. `test-run.js` is a older CommonJS smoke test (`eval`s `app.js` in a mocked global scope); prefer `test-functionality.js` for anything new.
