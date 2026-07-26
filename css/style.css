@@ -1884,6 +1884,27 @@ body{
 #vLogin .tv-quote-name{ font-weight:700;font-size:0.88rem;color:var(--tv-ink); }
 #vLogin .tv-quote-tag{ color:var(--tv-ink-soft);font-size:0.8rem; }
 
+/* ---- Support (a fake-name-free stand-in for a "team" section) ---- */
+#vLogin .tv-team-grid{
+  display:grid;gap:1.4rem;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));
+}
+#vLogin .tv-team-card{
+  background:var(--tv-surface);border:1px solid var(--tv-line);border-radius:3px;
+  padding:1.6rem;display:flex;flex-direction:column;gap:0.5rem;
+}
+#vLogin .tv-team-ic{
+  width:2.9rem;height:2.9rem;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;font-size:1.3rem;
+  background:linear-gradient(155deg,var(--tv-accent-soft),var(--tv-accent-soft-bg));
+  border:1px solid var(--tv-line);margin-bottom:0.4rem;
+}
+#vLogin .tv-team-card h3{ font-size:1.02rem;font-weight:700;color:var(--tv-ink); }
+#vLogin .tv-team-role{
+  color:var(--tv-accent);font-size:0.76rem;font-weight:700;
+  letter-spacing:0.03em;text-transform:uppercase;
+}
+#vLogin .tv-team-desc{ color:var(--tv-ink-soft);font-size:0.9rem;line-height:1.5; }
+
 /* ---- Section-alt background band ---- */
 #vLogin .tv-section{ padding-block:clamp(2.75rem,6vw,4.5rem); }
 #vLogin .tv-section-alt{ background:var(--tv-surface);border-block:1px solid var(--tv-line); }

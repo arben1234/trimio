@@ -41,7 +41,7 @@
     l.href='/api/manifest?start='+encodeURIComponent(start);
   })();
   </script>
-  <link rel="stylesheet" href="/css/style.css?v=202607261200">
+  <link rel="stylesheet" href="/css/style.css?v=202607261300">
   <!-- Firebase Compatibility SDKs -->
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
@@ -429,6 +429,7 @@
               <a href="#tvFilozofia">Chi siamo</a>
               <a href="#tvServizi">Servizi</a>
               <a href="#tvComeFunziona">Come funziona</a>
+              <a href="#tvSupporto">Supporto</a>
               <a href="#tvSaloniPartner">Saloni partner</a>
               <a href="#vLoginFooter">Contatti</a>
             </nav>
@@ -452,6 +453,7 @@
             <a href="#tvFilozofia">Chi siamo</a>
             <a href="#tvServizi">Servizi</a>
             <a href="#tvComeFunziona">Come funziona</a>
+            <a href="#tvSupporto">Supporto</a>
             <a href="#tvSaloniPartner">Saloni partner</a>
             <a href="#vLoginFooter">Contatti</a>
             <button type="button" class="tv-btn tv-btn-primary tv-btn-block" data-tv-login>Accedi</button>
@@ -613,6 +615,44 @@
                 <div class="tv-service-row"><div><div class="tv-service-name">Trattamento Viso</div><div class="tv-service-desc">40 min</div></div><span class="tv-service-price">da €25</span></div>
                 <div class="tv-service-row"><div><div class="tv-service-name">Massaggio</div><div class="tv-service-desc">50 min</div></div><span class="tv-service-price">da €35</span></div>
               </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- SUPPORTO — a deliberately honest stand-in for a "team" section:
+             TRIMIO serves many independent salons rather than running one
+             of its own, so naming/photographing fictional "staff" here
+             would be misleading. This describes what support actually
+             covers instead, by function rather than by invented person. -->
+        <section class="tv-section" id="tvSupporto" aria-labelledby="tvSupportoTitle">
+          <div class="tv-container">
+            <div class="tv-section-head tv-section-head--center">
+              <span class="tv-eyebrow">Assistenza</span>
+              <h2 class="tv-title" id="tvSupportoTitle">Un supporto sempre raggiungibile</h2>
+              <p class="tv-lede" style="margin-inline:auto;text-align:center">Niente volti di fantasia — solo un contatto diretto per ogni fase, dall'attivazione del tuo salone alla gestione quotidiana.</p>
+            </div>
+            <div class="tv-team-grid">
+              <div class="tv-team-card">
+                <div class="tv-team-ic" aria-hidden="true">💬</div>
+                <h3>Assistenza Clienti</h3>
+                <p class="tv-team-role">Email diretta</p>
+                <p class="tv-team-desc">Domande su prenotazioni, account o funzionamento della piattaforma: scrivici, rispondiamo di norma entro 24 ore.</p>
+              </div>
+              <div class="tv-team-card">
+                <div class="tv-team-ic" aria-hidden="true">🛠️</div>
+                <h3>Attivazione Salone</h3>
+                <p class="tv-team-role">Onboarding</p>
+                <p class="tv-team-desc">Ti aiutiamo a impostare servizi, orari, staff e pagina di prenotazione del tuo salone, passo dopo passo.</p>
+              </div>
+              <div class="tv-team-card">
+                <div class="tv-team-ic" aria-hidden="true">💳</div>
+                <h3>Fatturazione</h3>
+                <p class="tv-team-role">Abbonamento & pagamenti</p>
+                <p class="tv-team-desc">Domande sul canone mensile, sulle fatture o sul pagamento automatico: siamo raggiungibili via email.</p>
+              </div>
+            </div>
+            <div style="text-align:center;margin-top:2rem">
+              <a class="tv-btn tv-btn-ghost" href="mailto:support@trimio.org">✉ support@trimio.org</a>
             </div>
           </div>
         </section>
