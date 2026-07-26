@@ -41,7 +41,7 @@
     l.href='/api/manifest?start='+encodeURIComponent(start);
   })();
   </script>
-  <link rel="stylesheet" href="/css/style.css?v=202607261700">
+  <link rel="stylesheet" href="/css/style.css?v=202607261800">
   <!-- Firebase Compatibility SDKs -->
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
@@ -365,8 +365,8 @@
           <div class="r-div"></div>
           <div class="r-row r-total"><span class="r-lbl">Totale</span><span class="r-val" id="rP">€0</span></div>
         </div>
-        <div class="field" style="margin-bottom:0"><label>Il tuo nome <span style="color:#e5c158">*</span></label><input type="text" id="cname" placeholder="Es. Marco" autocomplete="name" required></div>
-        <div class="field" style="margin-top:12px; margin-bottom:0"><label>Numero di telefono <span style="color:#e5c158">*</span></label><input type="tel" id="cphone" placeholder="Es. +39 345 678 9012" autocomplete="tel" required></div>
+        <div class="field" style="margin-bottom:0"><label>Il tuo nome <span style="color:var(--gold)">*</span></label><input type="text" id="cname" placeholder="Es. Marco" autocomplete="name" required></div>
+        <div class="field" style="margin-top:12px; margin-bottom:0"><label>Numero di telefono <span style="color:var(--gold)">*</span></label><input type="tel" id="cphone" placeholder="Es. +39 345 678 9012" autocomplete="tel" required></div>
       </div>
 
       <div class="step" id="sDone">
@@ -938,7 +938,7 @@
             <span>🔊</span>
             <span style="font-size: 11px;">Abilita gli avvisi sonori per le nuove prenotazioni in tempo reale</span>
           </div>
-          <button id="audioUnlockBtn" style="background:#e5c158; color:#000; border:none; border-radius:6px; padding:6px 12px; font-size:11.5px; font-weight:700; cursor:pointer; flex-shrink:0;">Attiva</button>
+          <button id="audioUnlockBtn" style="background:var(--gold); color:#000; border:none; border-radius:6px; padding:6px 12px; font-size:11.5px; font-weight:700; cursor:pointer; flex-shrink:0;">Attiva</button>
         </div>
 
         <!-- Push Notifications Status Banner (Proprietario) -->
@@ -947,7 +947,7 @@
             <span id="pushNotifIcon">🔔</span>
             <span id="pushNotifMsg" style="font-size: 11px;">Notifiche push per le nuove prenotazioni</span>
           </div>
-          <button id="pushNotifBtn" style="background:#e5c158; color:#000; border:none; border-radius:6px; padding:6px 12px; font-size:11.5px; font-weight:700; cursor:pointer; flex-shrink:0;">Attiva</button>
+          <button id="pushNotifBtn" style="background:var(--gold); color:#000; border:none; border-radius:6px; padding:6px 12px; font-size:11.5px; font-weight:700; cursor:pointer; flex-shrink:0;">Attiva</button>
         </div>
 
         <!-- New Bookings Inbox Panel -->
@@ -1158,7 +1158,7 @@
               </div>
             </div>
           </div>
-          <button id="sideQrBtn" style="display:none; margin-top:10px; background:#e5c158; color:#000; border:none; border-radius:8px; padding:8px 14px; font-size:12px; font-weight:700; cursor:pointer; width:100%;">📲 QR Code del salone</button>
+          <button id="sideQrBtn" style="display:none; margin-top:10px; background:var(--gold); color:#000; border:none; border-radius:8px; padding:8px 14px; font-size:12px; font-weight:700; cursor:pointer; width:100%;">📲 QR Code del salone</button>
         </div>
         <nav class="side-nav" id="sideNav"></nav>
         <div class="side-bot">
@@ -1453,6 +1453,6 @@
      own "Save as PDF" print target produces a clean report. -->
 <div id="printableStats"></div>
 
-<script src="/js/app.min.js?v=20260726_0004"></script>
+<script src="/js/app.min.js?v=20260726_0005"></script>
 </body>
 </html>

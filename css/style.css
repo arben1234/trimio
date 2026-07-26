@@ -1143,7 +1143,7 @@ body{background:#f1f5f9;min-height:100vh;display:flex;align-items:center;justify
   --shadow-sm:0 2px 10px rgba(0,0,0,.07);
   --shadow-md:0 10px 28px rgba(0,0,0,.12);
   --shadow-lg:0 24px 60px rgba(0,0,0,.22);
-  --shadow-gold:0 10px 30px rgba(229,193,88,.28);
+  --shadow-gold:0 10px 30px rgba(var(--gold-rgb,229,193,88),.28);
   --ease:cubic-bezier(.4,0,.2,1);
 }
 
@@ -1238,7 +1238,7 @@ body{
 .side-slug{color:#a1a1aa;}
 .side-item{color:#d4d4d8;}
 .side-item:hover{background:rgba(255,255,255,.06);}
-.side-item.active{background:linear-gradient(135deg,var(--gold),#c9a04a);color:#0a0a0c;box-shadow:var(--shadow-gold);}
+.side-item.active{background:linear-gradient(135deg,var(--gold),var(--gold-dark));color:#0a0a0c;box-shadow:var(--shadow-gold);}
 .side-bot{border-top-color:rgba(255,255,255,.08);}
 .side-av{background:rgba(255,255,255,.08);color:#fff;}
 .side-prof .n{color:#fff;}
@@ -1943,3 +1943,57 @@ body{
 @media(min-width:860px){
   #vLogin .tv-container{ padding-inline:2.5rem; }
 }
+
+/* ================================================================
+   CATEGORY THEMES (Uomini/Donne) — a plain --gold/--gold-rgb cascade
+   turned out too thin a hook on its own: the app's actual primary
+   button (.btn-main, used everywhere in the booking flow and every
+   dashboard form) and the dashboard's own chrome (.d-new, .d-top,
+   .side) are hardcoded black, never referencing --gold at all — so a
+   category theme was only visible in a couple of thin accents (the
+   sidebar's active item, a 3px KPI border). These rules recolor the
+   actual identity surfaces AND vary corner shape (sharp for Uomini,
+   soft/pill for Donne) so the two read as genuinely different, not
+   just a different accent dot on an identical layout.
+   Strictly opt-in via [data-cat] (only ever set by applyCategoryTheme
+   in js/app.js when a salon's category is 'uomini' or 'donne') — a
+   salon with no category, or 'unisex', matches none of this and keeps
+   today's exact black+gold look, unchanged.
+================================================================ */
+#vDash[data-cat] .btn-main,
+#vCustomer[data-cat] .btn-main{
+  background:var(--gold) !important;
+  color:#fff !important;
+  border-color:transparent !important;
+}
+#vDash[data-cat] .d-new{ background:var(--gold); color:#fff; }
+#vDash[data-cat] .d-top{
+  background:color-mix(in srgb, var(--gold) 12%, rgba(255,255,255,.95));
+}
+#vDash[data-cat] .d-hamb{
+  background:color-mix(in srgb, var(--gold) 16%, #f0f0f0);
+}
+#vDash[data-cat] .side{
+  background:linear-gradient(180deg, color-mix(in srgb, var(--gold) 38%, #0a0a0c), #0a0a0c);
+}
+#vCustomer[data-cat] #custHero{ position:relative; }
+#vCustomer[data-cat] #custHero::after{
+  content:'';position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(155deg, color-mix(in srgb, var(--gold) 30%, transparent), transparent 65%);
+}
+
+/* Uomini: sharp, modern-barbershop corners. */
+#vDash[data-cat="uomini"] .btn-main,
+#vCustomer[data-cat="uomini"] .btn-main,
+#vDash[data-cat="uomini"] .d-new{ border-radius:6px; }
+#vDash[data-cat="uomini"] .kpi-big,
+#vDash[data-cat="uomini"] .acard,
+#vDash[data-cat="uomini"] .d-hamb{ border-radius:8px; }
+
+/* Donne: soft, generous pill corners. */
+#vDash[data-cat="donne"] .btn-main,
+#vCustomer[data-cat="donne"] .btn-main,
+#vDash[data-cat="donne"] .d-new{ border-radius:999px; }
+#vDash[data-cat="donne"] .kpi-big,
+#vDash[data-cat="donne"] .acard{ border-radius:24px; }
+#vDash[data-cat="donne"] .d-hamb{ border-radius:50%; }

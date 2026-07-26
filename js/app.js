@@ -188,6 +188,16 @@ function applyCategoryTheme(salon,el){
   el.style.setProperty('--gold-dark',t?t.dark:'#b8933f');
   if(t)el.style.setProperty('--font-heading',t.font);
   else el.style.removeProperty('--font-heading');
+  // Only --gold/--gold-rgb/etc alone turned out too thin a hook — most of
+  // the actual dashboard/booking-flow chrome (the primary black .btn-main
+  // button, the "+ Nuovo" button, the top bar, the sidebar) never
+  // referenced --gold at all, so a category theme was barely visible
+  // outside the sidebar's active nav item. data-cat drives real
+  // #vDash[data-cat="…"]/#vCustomer[data-cat="…"] overrides in style.css
+  // for those instead — explicitly opt-in per category, so a salon with no
+  // category (or 'unisex') keeps today's exact black+gold look untouched.
+  if(salon&&(salon.category==='uomini'||salon.category==='donne'))el.dataset.cat=salon.category;
+  else delete el.dataset.cat;
 }
 const DEFAULT_SLOTS=['09:00','09:30','10:00','10:30','11:00','11:30','12:00','12:30','13:00','13:30','14:00','14:30','15:00','15:30','16:00','16:30','17:00','17:30','18:00','18:30','19:00','19:30','20:00','20:30','21:00'];
 const DEFAULT_SERVICES=[
