@@ -1728,6 +1728,21 @@ body{
 }
 #vLogin .tv-nav-links a:hover::after{ right:0; }
 #vLogin .tv-nav-actions{ display:flex;align-items:center;gap:0.6rem; }
+/* Admin login — deliberately understated next to the owner/barber "Accedi"
+   CTA, same relationship it had as a small corner button in the old shared
+   header. Hidden on the narrowest phones (mobile panel has its own, larger,
+   labeled copy of the same trigger instead). */
+#vLogin .tv-admin-link{
+  display:none;background:transparent;border:none;cursor:pointer;
+  font-size:0.76rem;font-weight:700;color:var(--tv-ink-faint);
+  padding:0.5em 0.3em;white-space:nowrap;
+}
+#vLogin .tv-admin-link:hover{ color:var(--tv-ink); }
+@media(min-width:640px){ #vLogin .tv-admin-link{ display:inline-flex; } }
+#vLogin .tv-admin-link--mobile{
+  display:flex;justify-content:center;margin-top:0.6rem;
+  font-size:0.82rem;padding:0.7em;
+}
 #vLogin .tv-nav-toggle{
   display:inline-flex;align-items:center;justify-content:center;
   width:2.4rem;height:2.4rem;border-radius:999px;
@@ -1811,6 +1826,63 @@ body{
 #vLogin .tv-process-item .tv-index{ font-family:var(--tv-font-display);font-size:1.5rem;color:var(--tv-brass); }
 #vLogin .tv-process-item h3{ font-size:1.02rem;font-weight:800;color:var(--tv-ink); }
 #vLogin .tv-process-item p{ color:var(--tv-ink-soft);font-size:0.92rem;line-height:1.5; }
+
+/* ---- About / stats ---- */
+#vLogin .tv-about-grid{ display:grid;gap:clamp(2rem,5vw,3.5rem);grid-template-columns:1fr; }
+@media(min-width:860px){ #vLogin .tv-about-grid{ grid-template-columns:1.1fr .9fr; } }
+#vLogin .tv-about-text p{ color:var(--tv-ink-soft);font-size:1rem;line-height:1.6; }
+#vLogin .tv-about-text p + p{ margin-top:1rem; }
+#vLogin .tv-stat-grid{
+  display:grid;grid-template-columns:repeat(2,1fr);gap:1px;
+  background:var(--tv-line);border:1px solid var(--tv-line);
+}
+#vLogin .tv-stat{ background:var(--tv-surface);padding:1.4rem 1.2rem;display:flex;flex-direction:column;gap:0.3rem; }
+#vLogin .tv-stat-num{ font-family:var(--tv-font-display);font-size:clamp(1.5rem,2.6vw,2rem);color:var(--tv-accent); }
+#vLogin .tv-stat-label{ font-size:0.8rem;color:var(--tv-ink-soft); }
+
+/* ---- Services tabs ---- */
+#vLogin .tv-tabs-wrap{ display:flex;flex-direction:column;align-items:center; }
+#vLogin .tv-tabs{
+  display:inline-flex;flex-wrap:wrap;gap:0.35rem;justify-content:center;
+  background:var(--tv-bg);border:1px solid var(--tv-line);padding:0.3rem;
+  border-radius:999px;margin-bottom:2rem;
+}
+#vLogin .tv-tab{
+  border:0;background:transparent;cursor:pointer;
+  padding:0.6rem 1.25rem;border-radius:999px;
+  font-size:0.86rem;font-weight:700;color:var(--tv-ink-soft);
+  transition:background .2s ease,color .2s ease;
+}
+#vLogin .tv-tab[aria-selected="true"]{ background:var(--tv-accent);color:#F7F4EF; }
+#vLogin .tv-tab:hover:not([aria-selected="true"]){ color:var(--tv-ink); }
+#vLogin .tv-service-list{ display:flex;flex-direction:column;width:100%;max-width:44rem; }
+#vLogin .tv-service-list[hidden]{ display:none; }
+#vLogin .tv-service-row{
+  display:flex;justify-content:space-between;align-items:baseline;gap:1.2rem;
+  padding:1.1rem 0;border-bottom:1px solid var(--tv-line);
+}
+#vLogin .tv-service-row:first-child{ border-top:1px solid var(--tv-line); }
+#vLogin .tv-service-name{ font-weight:700;font-size:0.98rem;color:var(--tv-ink); }
+#vLogin .tv-service-desc{ color:var(--tv-ink-soft);font-size:0.85rem;margin-top:0.15rem; }
+#vLogin .tv-service-price{
+  white-space:nowrap;font-family:var(--tv-font-display);color:var(--tv-accent);
+  font-size:1rem;
+}
+
+/* ---- Testimonials ---- */
+#vLogin .tv-quote-grid{
+  display:grid;gap:1.4rem;grid-template-columns:repeat(auto-fit,minmax(16rem,1fr));
+}
+#vLogin .tv-quote-card{
+  background:var(--tv-surface);border:1px solid var(--tv-line);border-radius:3px;
+  padding:1.75rem;display:flex;flex-direction:column;gap:1.2rem;
+}
+#vLogin .tv-quote-card p{
+  font-family:var(--tv-font-display);font-size:1.05rem;line-height:1.45;color:var(--tv-ink);
+}
+#vLogin .tv-quote-card figcaption{ display:flex;flex-direction:column;gap:0.15rem; }
+#vLogin .tv-quote-name{ font-weight:700;font-size:0.88rem;color:var(--tv-ink); }
+#vLogin .tv-quote-tag{ color:var(--tv-ink-soft);font-size:0.8rem; }
 
 /* ---- Section-alt background band ---- */
 #vLogin .tv-section{ padding-block:clamp(2.75rem,6vw,4.5rem); }

@@ -41,7 +41,7 @@
     l.href='/api/manifest?start='+encodeURIComponent(start);
   })();
   </script>
-  <link rel="stylesheet" href="/css/style.css?v=202607261000">
+  <link rel="stylesheet" href="/css/style.css?v=202607261200">
   <!-- Firebase Compatibility SDKs -->
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
@@ -72,10 +72,6 @@
     <!-- Right: Slug & Menu -->
     <div style="display:flex; align-items:center; gap:8px;">
       <div class="salon-slug" id="hSlug" style="font-size:10px; color:#a1a1aa; background:#27272a; padding:3px 6px; border-radius:4px; font-weight:700; display:none; letter-spacing:0.5px;"></div>
-      <!-- Admin login trigger for the marketing page (vLogin) — sits on the
-           same line as the TRIMIO logo/brand at the left. Hidden everywhere
-           else; see the isLogin branch in js/app.js's showView(). -->
-      <button type="button" id="vLoginAdminTrigger" class="head-admin-trigger" style="display:none;">🔒 Accesso Admin</button>
       <select id="navMenu" class="nav-select" style="margin-bottom:0; max-width:210px; min-width:130px;"></select>
     </div>
   </div>
@@ -430,12 +426,20 @@
           <div class="tv-container tv-nav-row">
             <a class="tv-brand" href="#tvTop">TRIMIO <small>Gestionale Saloni</small></a>
             <nav class="tv-nav-links" aria-label="Menu principale">
-              <a href="#tvDemo">Come funziona</a>
-              <a href="#tvPercheNoi">Perché noi</a>
+              <a href="#tvFilozofia">Chi siamo</a>
+              <a href="#tvServizi">Servizi</a>
+              <a href="#tvComeFunziona">Come funziona</a>
               <a href="#tvSaloniPartner">Saloni partner</a>
               <a href="#vLoginFooter">Contatti</a>
             </nav>
             <div class="tv-nav-actions">
+              <!-- Staff login (owner/barber) is the primary marketing CTA;
+                   admin login is a separate, deliberately low-key entry
+                   point — same as it always was, just relocated out of the
+                   shared app .head bar (now hidden on this page) and into
+                   this header. tryLogin()'s role checks in js/app.js key off
+                   loginRoleContext, set by each trigger's own handler. -->
+              <button type="button" class="tv-admin-link" id="vLoginAdminTrigger">🔒 Admin</button>
               <button type="button" class="tv-btn tv-btn-primary" id="vLoginTopLoginTrigger">Accedi</button>
               <button type="button" id="vLoginSignupTrigger" style="display:none">📝 Registra il tuo salone</button>
               <button type="button" class="tv-nav-toggle" id="tvNavToggle" aria-expanded="false" aria-controls="tvMobilePanel" aria-label="Apri il menu">
@@ -445,11 +449,13 @@
             </div>
           </div>
           <nav class="tv-mobile-panel tv-container" id="tvMobilePanel" aria-label="Menu mobile">
-            <a href="#tvDemo">Come funziona</a>
-            <a href="#tvPercheNoi">Perché noi</a>
+            <a href="#tvFilozofia">Chi siamo</a>
+            <a href="#tvServizi">Servizi</a>
+            <a href="#tvComeFunziona">Come funziona</a>
             <a href="#tvSaloniPartner">Saloni partner</a>
             <a href="#vLoginFooter">Contatti</a>
             <button type="button" class="tv-btn tv-btn-primary tv-btn-block" data-tv-login>Accedi</button>
+            <button type="button" class="tv-admin-link tv-admin-link--mobile" data-tv-admin-login>🔒 Accesso Amministratore</button>
           </nav>
         </header>
 
@@ -472,6 +478,28 @@
                 <div class="tv-row"><dt>Disponibilità</dt><dd>24/7 online</dd></div>
               </dl>
               <button type="button" class="tv-btn tv-btn-ghost tv-btn-block" data-tv-login>Accedi al pannello</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- CHI SIAMO / FILOSOFIA -->
+        <section class="tv-section" id="tvFilozofia" aria-labelledby="tvFilozofiaTitle">
+          <div class="tv-container tv-about-grid">
+            <div>
+              <div class="tv-section-head" style="margin-bottom:1.25rem">
+                <span class="tv-eyebrow">Filosofia Nostra</span>
+                <h2 class="tv-title" id="tvFilozofiaTitle">Un solo posto, ogni tipo di salone.</h2>
+              </div>
+              <div class="tv-about-text">
+                <p>TRIMIO nasce da un'idea semplice: gestire un salone non dovrebbe passare per telefonate, agende di carta e messaggi sparsi su WhatsApp. Un'unica piattaforma riunisce prenotazioni, calendario, staff e clienti — pensata per barbieri, parrucchieri, centri estetici e ogni salone che lavora con appuntamenti.</p>
+                <p>Ogni salone che entra su TRIMIO ottiene una propria pagina di prenotazione online, raggiungibile in pochi secondi da un link o da un QR code, più una dashboard per gestire tutto il resto. Il nostro obiettivo è semplice: farti risparmiare tempo, ogni giorno.</p>
+              </div>
+            </div>
+            <div class="tv-stat-grid">
+              <div class="tv-stat"><span class="tv-stat-num">1.000+</span><span class="tv-stat-label">Professionisti attivi</span></div>
+              <div class="tv-stat"><span class="tv-stat-num">5.000+</span><span class="tv-stat-label">Clienti serviti</span></div>
+              <div class="tv-stat"><span class="tv-stat-num">24/7</span><span class="tv-stat-label">Prenotazioni online</span></div>
+              <div class="tv-stat"><span class="tv-stat-num">100%</span><span class="tv-stat-label">Cloud, nessuna installazione</span></div>
             </div>
           </div>
         </section>
@@ -515,7 +543,7 @@
         </section>
 
         <!-- COME FUNZIONA -->
-        <section class="tv-section" aria-labelledby="tvComeFunzionaTitle">
+        <section class="tv-section" id="tvComeFunziona" aria-labelledby="tvComeFunzionaTitle">
           <div class="tv-container">
             <div class="tv-section-head tv-section-head--center">
               <span class="tv-eyebrow">Come Funziona</span>
@@ -536,6 +564,54 @@
                 <span class="tv-index">03</span>
                 <h3>Tu gestisci tutto da un'unica dashboard</h3>
                 <p>Calendario, statistiche, recensioni e promemoria automatici, sempre sotto controllo.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- SERVIZI — esempi presi dal catalogo di partenza (SERVICE_CATALOG
+             in js/app.js) che ogni nuovo salone può usare come base e poi
+             personalizzare liberamente in nome, durata e prezzo. -->
+        <section class="tv-section tv-section-alt" id="tvServizi" aria-labelledby="tvServiziTitle">
+          <div class="tv-container">
+            <div class="tv-section-head tv-section-head--center">
+              <span class="tv-eyebrow">Catalogo Servizi</span>
+              <h2 class="tv-title" id="tvServiziTitle">Servizi per ogni tipo di salone</h2>
+              <p class="tv-lede" style="margin-inline:auto;text-align:center">Un catalogo di partenza pronto all'uso — ogni salone lo personalizza liberamente in nomi, durate e prezzi.</p>
+            </div>
+
+            <div class="tv-tabs-wrap">
+              <div class="tv-tabs" role="tablist" aria-label="Categorie di servizi">
+                <button class="tv-tab" role="tab" id="tvTabDonna" aria-controls="tvPanelDonna" aria-selected="true">Per Donne</button>
+                <button class="tv-tab" role="tab" id="tvTabUomo" aria-controls="tvPanelUomo" aria-selected="false" tabindex="-1">Per Uomini</button>
+                <button class="tv-tab" role="tab" id="tvTabUnisex" aria-controls="tvPanelUnisex" aria-selected="false" tabindex="-1">Unisex</button>
+              </div>
+
+              <div class="tv-service-list" id="tvPanelDonna" role="tabpanel" aria-labelledby="tvTabDonna" tabindex="0">
+                <div class="tv-service-row"><div><div class="tv-service-name">Taglio Donna</div><div class="tv-service-desc">45 min · consulenza inclusa</div></div><span class="tv-service-price">da €25</span></div>
+                <div class="tv-service-row"><div><div class="tv-service-name">Piega</div><div class="tv-service-desc">30 min</div></div><span class="tv-service-price">da €18</span></div>
+                <div class="tv-service-row"><div><div class="tv-service-name">Colore</div><div class="tv-service-desc">90 min</div></div><span class="tv-service-price">da €45</span></div>
+                <div class="tv-service-row"><div><div class="tv-service-name">Colpi di Sole / Meches</div><div class="tv-service-desc">120 min</div></div><span class="tv-service-price">da €60</span></div>
+                <div class="tv-service-row"><div><div class="tv-service-name">Trattamento Ricostruttivo</div><div class="tv-service-desc">45 min</div></div><span class="tv-service-price">da €30</span></div>
+                <div class="tv-service-row"><div><div class="tv-service-name">Extension</div><div class="tv-service-desc">120 min</div></div><span class="tv-service-price">da €80</span></div>
+              </div>
+
+              <div class="tv-service-list" id="tvPanelUomo" role="tabpanel" aria-labelledby="tvTabUomo" tabindex="0" hidden>
+                <div class="tv-service-row"><div><div class="tv-service-name">Taglio</div><div class="tv-service-desc">30 min</div></div><span class="tv-service-price">da €15</span></div>
+                <div class="tv-service-row"><div><div class="tv-service-name">Barba</div><div class="tv-service-desc">20 min</div></div><span class="tv-service-price">da €12</span></div>
+                <div class="tv-service-row"><div><div class="tv-service-name">Taglio + Barba</div><div class="tv-service-desc">45 min</div></div><span class="tv-service-price">da €25</span></div>
+                <div class="tv-service-row"><div><div class="tv-service-name">Shampoo + Taglio</div><div class="tv-service-desc">40 min</div></div><span class="tv-service-price">da €20</span></div>
+                <div class="tv-service-row"><div><div class="tv-service-name">Rasatura</div><div class="tv-service-desc">20 min</div></div><span class="tv-service-price">da €10</span></div>
+                <div class="tv-service-row"><div><div class="tv-service-name">Taglio Bambino</div><div class="tv-service-desc">20 min</div></div><span class="tv-service-price">da €10</span></div>
+              </div>
+
+              <div class="tv-service-list" id="tvPanelUnisex" role="tabpanel" aria-labelledby="tvTabUnisex" tabindex="0" hidden>
+                <div class="tv-service-row"><div><div class="tv-service-name">Manicure</div><div class="tv-service-desc">30 min</div></div><span class="tv-service-price">da €15</span></div>
+                <div class="tv-service-row"><div><div class="tv-service-name">Pedicure</div><div class="tv-service-desc">40 min</div></div><span class="tv-service-price">da €20</span></div>
+                <div class="tv-service-row"><div><div class="tv-service-name">Smalto Semipermanente</div><div class="tv-service-desc">45 min</div></div><span class="tv-service-price">da €25</span></div>
+                <div class="tv-service-row"><div><div class="tv-service-name">Ceretta</div><div class="tv-service-desc">20 min</div></div><span class="tv-service-price">da €12</span></div>
+                <div class="tv-service-row"><div><div class="tv-service-name">Trattamento Viso</div><div class="tv-service-desc">40 min</div></div><span class="tv-service-price">da €25</span></div>
+                <div class="tv-service-row"><div><div class="tv-service-name">Massaggio</div><div class="tv-service-desc">50 min</div></div><span class="tv-service-price">da €35</span></div>
               </div>
             </div>
           </div>
@@ -606,6 +682,30 @@
               <h2 class="tv-title" id="tvSaloniTitle">I nostri saloni partner</h2>
             </div>
             <div class="vlp-grid" id="vLoginSalonPhotos"></div>
+          </div>
+        </section>
+
+        <!-- TESTIMONIANZE -->
+        <section class="tv-section" aria-labelledby="tvDeshmiTitle">
+          <div class="tv-container">
+            <div class="tv-section-head tv-section-head--center">
+              <span class="tv-eyebrow">Testimonianze</span>
+              <h2 class="tv-title" id="tvDeshmiTitle">Cosa dicono di TRIMIO</h2>
+            </div>
+            <div class="tv-quote-grid">
+              <figure class="tv-quote-card">
+                <p>«Ho prenotato il mio appuntamento in trenta secondi, direttamente dal telefono. Niente più telefonate o attese: scelgo l'orario e ricevo subito la conferma.»</p>
+                <figcaption><span class="tv-quote-name">Giulia R.</span><span class="tv-quote-tag">Cliente TRIMIO</span></figcaption>
+              </figure>
+              <figure class="tv-quote-card">
+                <p>«Cambio spesso città per lavoro e su TRIMIO trovo sempre la disponibilità aggiornata in tempo reale, salone per salone. Praticissimo per chi si sposta spesso.»</p>
+                <figcaption><span class="tv-quote-name">Marco T.</span><span class="tv-quote-tag">Cliente TRIMIO</span></figcaption>
+              </figure>
+              <figure class="tv-quote-card">
+                <p>«Taglio, colore, trattamento viso: su TRIMIO trovo tutto quello che mi serve per la cura di me stessa, in un'unica app, senza girare tra mille numeri di telefono.»</p>
+                <figcaption><span class="tv-quote-name">Elena B.</span><span class="tv-quote-tag">Cliente TRIMIO</span></figcaption>
+              </figure>
+            </div>
           </div>
         </section>
       </div>
@@ -1263,6 +1363,6 @@
      own "Save as PDF" print target produces a clean report. -->
 <div id="printableStats"></div>
 
-<script src="/js/app.min.js?v=20260726_0001"></script>
+<script src="/js/app.min.js?v=20260726_0002"></script>
 </body>
 </html>

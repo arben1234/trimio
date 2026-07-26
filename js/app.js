@@ -5561,6 +5561,9 @@ async function boot(){
   document.querySelectorAll('#vLoginMarketing [data-tv-login]').forEach(btn => {
     btn.addEventListener('click', () => $('vLoginTopLoginTrigger')?.click());
   });
+  document.querySelectorAll('#vLoginMarketing [data-tv-admin-login]').forEach(btn => {
+    btn.addEventListener('click', () => $('vLoginAdminTrigger')?.click());
+  });
 
   // ---- Public homepage header: scroll shadow + mobile nav toggle ----
   const tvHeader = $('tvHeader');
@@ -5579,6 +5582,33 @@ async function boot(){
       tvPanel.classList.toggle('is-open', !open);
     });
     tvPanel.addEventListener('click', e => { if (e.target.tagName === 'A') closeTvPanel(); });
+  }
+  // Services tabs (WAI-ARIA tabs pattern) on the "Servizi" section.
+  const tvTabs = Array.prototype.slice.call(document.querySelectorAll('#vLoginMarketing [role="tab"]'));
+  if (tvTabs.length) {
+    const selectTvTab = tab => {
+      tvTabs.forEach(t => {
+        const selected = t === tab;
+        t.setAttribute('aria-selected', String(selected));
+        t.tabIndex = selected ? 0 : -1;
+        const panelEl = $(t.getAttribute('aria-controls'));
+        if (panelEl) panelEl.hidden = !selected;
+      });
+    };
+    tvTabs.forEach((tab, i) => {
+      tab.addEventListener('click', () => selectTvTab(tab));
+      tab.addEventListener('keydown', e => {
+        let idx = i;
+        if (e.key === 'ArrowRight') idx = (i + 1) % tvTabs.length;
+        else if (e.key === 'ArrowLeft') idx = (i - 1 + tvTabs.length) % tvTabs.length;
+        else if (e.key === 'Home') idx = 0;
+        else if (e.key === 'End') idx = tvTabs.length - 1;
+        else return;
+        e.preventDefault();
+        tvTabs[idx].focus();
+        selectTvTab(tvTabs[idx]);
+      });
+    });
   }
 
   $('vLoginSignupTrigger')?.addEventListener('click', () => {
