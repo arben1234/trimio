@@ -284,6 +284,13 @@ async function handleSignupSalon(body, kvUrl, kvToken, req) {
   const city = (typeof body.city === 'string' ? body.city.trim() : '').slice(0, 60);
   const address = (typeof body.address === 'string' ? body.address.trim() : '').slice(0, 200);
   const contractSignedName = (typeof body.contractSignedName === 'string' ? body.contractSignedName.trim() : '').slice(0, 100);
+  // Both optional — logo is uploaded (Blob or KV fallback, see
+  // uploadImageFile in js/app.js) before this endpoint is ever called, so
+  // this just receives back the already-hosted URL. Category defaults to
+  // 'unisex' (the original black+gold TRIMIO look) for anything not one of
+  // the three known values, rather than rejecting the whole signup over it.
+  const logo = (typeof body.logo === 'string' ? body.logo.trim() : '').slice(0, 2000);
+  const category = ['uomini', 'donne', 'unisex'].includes(body.category) ? body.category : 'unisex';
 
   // Every field below is mandatory in the signup wizard — reject a bare
   // API call that skips the client-side checks the same way, rather than
@@ -394,7 +401,7 @@ async function handleSignupSalon(body, kvUrl, kvToken, req) {
       id: 'salon' + Date.now(),
       name: salonName, slug,
       city, address, phone: salonPhone, promo: '',
-      bgImage: '', gallery: [], themeColor: '#e5c158',
+      bgImage: '', logo, gallery: [], themeColor: '#e5c158', category,
       closedDays: [], bookingDays: 30,
       services: DEFAULT_SERVICES.map(s => ({ ...s })),
       workers: [],
@@ -2007,6 +2014,8 @@ export default async function handler(req, res) {
               if (typeof incoming.city === 'string') incoming.city = incoming.city.slice(0, 60);
               if (typeof incoming.address === 'string') incoming.address = incoming.address.slice(0, 200);
               if (typeof incoming.bgImage === 'string') incoming.bgImage = incoming.bgImage.slice(0, 2000);
+              if (typeof incoming.logo === 'string') incoming.logo = incoming.logo.slice(0, 2000);
+              if (!['uomini', 'donne', 'unisex'].includes(incoming.category)) delete incoming.category;
               // Unlike a brand-new salon (isValidNewSalon below), an EXISTING
               // salon's phone was never format-checked on this path — an
               // owner (or admin) session could set it to an arbitrary string.

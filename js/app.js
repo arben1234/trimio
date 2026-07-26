@@ -153,6 +153,42 @@ const SALON_THEME_PALETTE=[
   {name:'Turchese',hex:'#2dd4bf',rgb:'45,212,191'},
   {name:'Argento',hex:'#94a3b8',rgb:'148,163,184'}
 ];
+// A salon's declared audience — deliberately gives each category a full,
+// distinct visual identity (accent color family + heading font), not just
+// a different hex like the free themeColor swatch above. Applied to BOTH
+// the salon's own customer booking page and its owner/barber dashboard
+// (applyCategoryTheme, called from applyCustomerTheme/initDash) — 'unisex'
+// and legacy salons with no category set intentionally have no entry here,
+// which keeps the original black+gold/Cinzel TRIMIO identity unchanged.
+const SALON_CATEGORIES=[
+  {id:'unisex',label:'Unisex',ic:'⚪'},
+  {id:'uomini',label:'Uomini',ic:'🔵'},
+  {id:'donne',label:'Donne',ic:'🌸'}
+];
+const CATEGORY_THEMES={
+  uomini:{gold:'#4A6FA5',rgb:'74,111,165',light:'#7B9AC9',dark:'#32517D',font:"'Oswald',sans-serif"},
+  donne:{gold:'#C97B8C',rgb:'201,123,140',light:'#E3A7B4',dark:'#A15468',font:"'Playfair Display',serif"}
+};
+// Sets (or, with no category/theme, clears) the category-driven accent +
+// heading-font custom properties directly on the given view element —
+// mirrors applyCustomerTheme's existing --gold/--gold-rgb inline-style
+// pattern, just extended to --gold-light/--gold-dark/--font-heading and
+// reusable for both #vCustomer and #vDash. A salon's own explicit
+// themeColor pick (if it's ever been changed from the '#e5c158' default)
+// still wins for the base accent hex — category only supplies the default.
+function applyCategoryTheme(salon,el){
+  if(!el)return;
+  const t=salon&&CATEGORY_THEMES[salon.category];
+  const hex=(salon&&salon.themeColor&&salon.themeColor!=='#e5c158')?salon.themeColor:(t?t.gold:'#e5c158');
+  const preset=SALON_THEME_PALETTE.find(c=>c.hex===hex);
+  const rgb=preset?preset.rgb:(t&&hex===t.gold?t.rgb:'229,193,88');
+  el.style.setProperty('--gold',hex);
+  el.style.setProperty('--gold-rgb',rgb);
+  el.style.setProperty('--gold-light',t?t.light:'#ffe08a');
+  el.style.setProperty('--gold-dark',t?t.dark:'#b8933f');
+  if(t)el.style.setProperty('--font-heading',t.font);
+  else el.style.removeProperty('--font-heading');
+}
 const DEFAULT_SLOTS=['09:00','09:30','10:00','10:30','11:00','11:30','12:00','12:30','13:00','13:30','14:00','14:30','15:00','15:30','16:00','16:30','17:00','17:30','18:00','18:30','19:00','19:30','20:00','20:30','21:00'];
 const DEFAULT_SERVICES=[
   {id:'sv0',name:'Taglio',dur:'30 min',price:15},
@@ -1997,12 +2033,7 @@ function renderCustGalleryStrip(realPhotos){
 // initCustomer()), or a salon's theme color would never show up until the
 // customer manually reloads the page.
 function applyCustomerTheme(salon){
-  const hex=salon.themeColor||'#e5c158';
-  const preset=SALON_THEME_PALETTE.find(c=>c.hex===hex);
-  const rgb=preset?preset.rgb:'229,193,88';
-  const el=$('vCustomer');
-  el.style.setProperty('--gold', hex);
-  el.style.setProperty('--gold-rgb', rgb);
+  applyCategoryTheme(salon,$('vCustomer'));
 }
 
 function initCustomer(salon){
@@ -2019,6 +2050,11 @@ function initCustomer(salon){
   // Set Salon booking page hero elements
   $('custHeroTitle').textContent = salon.name;
   $('custHeroAddress').textContent = salon.address ? `📍 ${salon.address}, ${salon.city || '—'}` : `📍 ${salon.city || '—'}`;
+  const heroLogo=$('custHeroLogo');
+  if(heroLogo){
+    if(salon.logo){heroLogo.src=salon.logo;heroLogo.style.display='block';}
+    else heroLogo.style.display='none';
+  }
   initCustHero(salon);
 
   custStep=0;Object.keys(custData).forEach(k=>custData[k]=null);
@@ -3144,6 +3180,12 @@ function initDash(){
     doLogout();
     return;
   }
+  // Owner/barber dashboards pick up their salon's category theme (color
+  // family + heading font) the same way the customer booking page does —
+  // admin's dashboard isn't scoped to one salon, so it always stays on the
+  // default TRIMIO black+gold identity regardless of which salon was last
+  // viewed elsewhere.
+  applyCategoryTheme(r!=='admin'?salon:null,$('vDash'));
   // A removed barber's session token stays valid up to 30 days (stateless,
   // no revocation list) — an already-open tab wouldn't otherwise notice
   // they'd been let go until something else broke. The server already
@@ -4511,6 +4553,17 @@ function renderSaloni(){
 /* ---- REGISTRAZIONE SALONE (self-signup dalla vLogin pubblica) ---- */
 let suStep=0;
 const SU_STEPS=['suStep0','suStepOtp','suStep1','suStep2'];
+let suCategory='unisex';
+function renderSuCategoryPicker(){
+  const wrap=$('suCategoryPicker');
+  if(!wrap)return;
+  wrap.innerHTML=SALON_CATEGORIES.map(c=>`
+    <button type="button" data-cat="${c.id}" style="padding:9px 14px; border-radius:10px; cursor:pointer; font-size:12.5px; font-weight:700; font-family:inherit; border:1.5px solid ${c.id===suCategory?'#e5c158':'rgba(255,255,255,.16)'}; background:${c.id===suCategory?'rgba(229,193,88,.16)':'rgba(255,255,255,.06)'}; color:${c.id===suCategory?'#fff':'#d4d4d8'};">${c.ic} ${c.label}</button>
+  `).join('');
+  wrap.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{
+    suCategory=b.dataset.cat;renderSuCategoryPicker();
+  }));
+}
 const SU_CONTRACT_HTML = `
   <b>CONTRATTO DI COLLABORAZIONE — TRIMIO</b><br>
   <i>(Modello standard — non sostituisce una consulenza legale.)</i><br><br>
@@ -4620,6 +4673,8 @@ async function suSubmit(){
     username:$('suUsername').value.trim(),
     password:$('suPassword').value,
     salonName:$('suSalonName').value.trim(),
+    logo:$('suLogo').value.trim(),
+    category:suCategory,
     email:$('suEmail').value.trim(),
     city:$('suCity').value.trim(),
     address:$('suAddress').value.trim(),
@@ -4674,6 +4729,18 @@ let salonModalReqSeq=0;
 let smGalleryTemp=[];
 // Colore tema del salone in modifica: copia di lavoro finché non si salva.
 let smThemeColor='#e5c158';
+// Categoria del salone in modifica: copia di lavoro finché non si salva.
+let smCategory='unisex';
+function renderSmCategoryPicker(){
+  const wrap=$('smCategoryPicker');
+  if(!wrap)return;
+  wrap.innerHTML=SALON_CATEGORIES.map(c=>`
+    <button type="button" data-cat="${c.id}" style="padding:8px 14px; border-radius:10px; cursor:pointer; font-size:12.5px; font-weight:700; font-family:inherit; border:1.5px solid ${c.id===smCategory?'#18181b':'#e4e4e7'}; background:${c.id===smCategory?'#18181b':'#fafafa'}; color:${c.id===smCategory?'#fff':'#3f3f46'};">${c.ic} ${c.label}</button>
+  `).join('');
+  wrap.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{
+    smCategory=b.dataset.cat;renderSmCategoryPicker();
+  }));
+}
 function renderSmThemeSwatches(){
   const wrap=$('smThemeSwatches');
   if(!wrap)return;
@@ -4748,12 +4815,15 @@ async function openSalonModal(sid){
 
   $('smBgImageStatus').textContent='';
   if($('smGalleryStatus'))$('smGalleryStatus').textContent='';
+  if($('smLogoStatus'))$('smLogoStatus').textContent='';
   if(sid==='new'){
     $('salonModalH').textContent='Nuovo salone';
-    ['smName','smSlug','smCity','smAddress','smPhone','smPromo','smOwnerUser','smOwnerPwd','smBgImage'].forEach(id=>$(id).value='');
+    ['smName','smSlug','smCity','smAddress','smPhone','smPromo','smOwnerUser','smOwnerPwd','smBgImage','smLogo'].forEach(id=>$(id).value='');
     $('smBgImagePreview').style.display='none';
+    if($('smLogoPreview'))$('smLogoPreview').style.display='none';
     smGalleryTemp=[];renderSmGallery();
     smThemeColor='#e5c158';renderSmThemeSwatches();
+    smCategory='unisex';renderSmCategoryPicker();
 
     // No workers yet for an unsaved salon — hide Staff. Services tab stays
     // visible but shows the master-catalog checklist (renderNewSalonServiceCatalog)
@@ -4772,8 +4842,14 @@ async function openSalonModal(sid){
     $('smBgImage').value=s.bgImage||'';
     if(s.bgImage){$('smBgImagePreview').src=s.bgImage;$('smBgImagePreview').style.display='block';}
     else{$('smBgImagePreview').style.display='none';}
+    if($('smLogo'))$('smLogo').value=s.logo||'';
+    if($('smLogoPreview')){
+      if(s.logo){$('smLogoPreview').src=s.logo;$('smLogoPreview').style.display='block';}
+      else{$('smLogoPreview').style.display='none';}
+    }
     smGalleryTemp=(s.gallery||[]).slice();renderSmGallery();
     smThemeColor=s.themeColor||'#e5c158';renderSmThemeSwatches();
+    smCategory=s.category||'unisex';renderSmCategoryPicker();
 
     // Show tabs for existing salons
     $('tabSalonStaff').style.display = '';
@@ -4800,6 +4876,7 @@ async function saveSalon(){
   const promo=$('smPromo').value.trim();
   const oUser=$('smOwnerUser').value.trim(),oPwd=$('smOwnerPwd').value.trim();
   const bgImg=$('smBgImage').value.trim();
+  const logoImg=$('smLogo')?$('smLogo').value.trim():'';
   if(name.length<2)return showErr('smErr','Inserisci il nome del salone');
   if(!slug)return showErr('smErr','Inserisci lo slug');
   if(city.length<2)return showErr('smErr','Inserisci la città del salone');
@@ -4820,13 +4897,14 @@ async function saveSalon(){
     }));
     if(!selectedSvcs.length)return showErr('smErr','Seleziona almeno un servizio nella scheda "Servizi & Prezzi"');
     STATE.salons.push({
-      id:'salon'+Date.now(),name,slug,city,address,phone,promo,bgImage:bgImg,gallery:smGalleryTemp.slice(),themeColor:smThemeColor,closedDays:[],bookingDays:30,
+      id:'salon'+Date.now(),name,slug,city,address,phone,promo,bgImage:bgImg,logo:logoImg,gallery:smGalleryTemp.slice(),themeColor:smThemeColor,category:smCategory,closedDays:[],bookingDays:30,
       services:selectedSvcs,workers:[],ownerUsername:oUser,ownerPassword:oPwd
     });
   } else {
     const s=STATE.salons.find(x=>x.id===salonEditId);if(!s)return;
     s.name=name;s.slug=slug;s.city=city;s.address=address;s.phone=phone;s.promo=promo;s.bgImage=bgImg;
-    s.gallery=smGalleryTemp.slice();s.themeColor=smThemeColor;
+    s.logo=logoImg;
+    s.gallery=smGalleryTemp.slice();s.themeColor=smThemeColor;s.category=smCategory;
     if(oUser)s.ownerUsername=oUser;
     // Owner password lives only server-side now — changing it goes through
     // the verified admin_set endpoint, never the generic bulk save.
@@ -5616,12 +5694,17 @@ async function boot(){
     if($('suContractText'))$('suContractText').innerHTML=SU_CONTRACT_HTML;
     if($('suAccept'))$('suAccept').checked=false;
     if($('suWebsite'))$('suWebsite').value='';
+    if($('suLogo'))$('suLogo').value='';
+    if($('suLogoPreview'))$('suLogoPreview').style.display='none';
+    if($('suLogoStatus'))$('suLogoStatus').textContent='';
+    suCategory='unisex';renderSuCategoryPicker();
     renderSuStep();
     if($('suStepDone'))$('suStepDone').style.display='none';
     $('vLoginSignupOverlay')?.classList.add('show');
   });
   $('vLoginSignupOv')?.addEventListener('click', () => $('vLoginSignupOverlay')?.classList.remove('show'));
   $('signupModalClose')?.addEventListener('click', () => $('vLoginSignupOverlay')?.classList.remove('show'));
+  wireImagePicker('suLogoFile','suLogo','suLogoPreview','suLogoStatus');
   $('suNext0')?.addEventListener('click', suNext0);
   $('suBackOtp')?.addEventListener('click', suBack);
   $('suOtpVerify')?.addEventListener('click', suOtpVerifyClick);
@@ -5942,6 +6025,7 @@ async function boot(){
   $('smCancel').addEventListener('click',()=>closeModal('salonModal'));
   $('smSave').addEventListener('click',saveSalon);
   wireImagePicker('smBgImageFile','smBgImage','smBgImagePreview','smBgImageStatus');
+  wireImagePicker('smLogoFile','smLogo','smLogoPreview','smLogoStatus');
   // Galleria del salone: più file in una volta, ognuno compresso e caricato.
   $('smGalleryFile')?.addEventListener('change',async e=>{
     const files=Array.from(e.target.files||[]);

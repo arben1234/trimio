@@ -41,7 +41,7 @@
     l.href='/api/manifest?start='+encodeURIComponent(start);
   })();
   </script>
-  <link rel="stylesheet" href="/css/style.css?v=202607261500">
+  <link rel="stylesheet" href="/css/style.css?v=202607261600">
   <!-- Firebase Compatibility SDKs -->
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
@@ -309,7 +309,8 @@
       <div id="custHero" class="hp-hero" style="min-height: 160px; margin-bottom: 20px; padding: 24px 16px; border-radius: 0 0 24px 24px; position:relative; overflow:hidden;">
         <div id="custHeroBg" class="hp-hero-bg" style="opacity: 0.20; position:absolute; inset:0; background-size:cover; background-position:center;"></div>
         <div class="hp-hero-content" style="position:relative; z-index:1; text-align: center;">
-          <h2 id="custHeroTitle" style="font-family: 'Cinzel', serif; font-size: 28px; font-weight: 800; color: #ffffff; margin-bottom: 4px; text-shadow: 0 2px 14px rgba(0,0,0,0.7); text-transform:uppercase;">—</h2>
+          <img id="custHeroLogo" src="" alt="" style="display:none; width:64px; height:64px; border-radius:50%; object-fit:cover; margin:0 auto 10px; border:2px solid rgba(255,255,255,.7); box-shadow:0 4px 16px rgba(0,0,0,.5);">
+          <h2 id="custHeroTitle" style="font-family: var(--font-heading, 'Cinzel', serif); font-size: 28px; font-weight: 800; color: #ffffff; margin-bottom: 4px; text-shadow: 0 2px 14px rgba(0,0,0,0.7); text-transform:uppercase;">—</h2>
           <p id="custHeroAddress" style="font-size: 13px; color: #fff; text-shadow: 0 1px 4px rgba(0,0,0,0.6); font-weight: 700;">📍 —</p>
         </div>
         <div id="custHeroDots" style="position:absolute; bottom:8px; left:0; right:0; display:none; justify-content:center; gap:6px; z-index:2;"></div>
@@ -441,7 +442,6 @@
                    loginRoleContext, set by each trigger's own handler. -->
               <button type="button" class="tv-admin-link" id="vLoginAdminTrigger">🔒 Admin</button>
               <button type="button" class="tv-btn tv-btn-primary" id="vLoginTopLoginTrigger">Accedi</button>
-              <button type="button" id="vLoginSignupTrigger" style="display:none">📝 Registra il tuo salone</button>
               <button type="button" class="tv-nav-toggle" id="tvNavToggle" aria-expanded="false" aria-controls="tvMobilePanel" aria-label="Apri il menu">
                 <svg class="tv-icon-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
                 <svg class="tv-icon-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/></svg>
@@ -479,6 +479,24 @@
                 <div class="tv-row"><dt>Disponibilità</dt><dd>24/7 online</dd></div>
               </dl>
               <button type="button" class="tv-btn tv-btn-ghost tv-btn-block" data-tv-login>Accedi al pannello</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- CREA IL TUO SALONE — self-signup entry point. #vLoginSignupTrigger
+             keeps its existing click handler in js/app.js (opens the wizard
+             overlay below, unchanged); the "we create it for you" option is
+             just a mailto to support. -->
+        <section class="tv-section tv-section-alt" id="tvCreaSalone" aria-labelledby="tvCreaSaloneTitle">
+          <div class="tv-container" style="text-align:center">
+            <div class="tv-section-head tv-section-head--center">
+              <span class="tv-eyebrow">Il Tuo Salone</span>
+              <h2 class="tv-title" id="tvCreaSaloneTitle">Crea il tuo salone su TRIMIO</h2>
+              <p class="tv-lede" style="margin-inline:auto;text-align:center">Puoi creare tu stesso il tuo salone sulla piattaforma, con il tuo logo e la categoria che preferisci. Se vuoi, clicca su "Crea il tuo salone" — oppure contattaci e lo creiamo noi per te.</p>
+            </div>
+            <div class="tv-hero-actions" style="justify-content:center">
+              <button type="button" class="tv-btn tv-btn-primary" id="vLoginSignupTrigger">Crea il tuo Salone</button>
+              <a class="tv-btn tv-btn-ghost" href="mailto:support@trimio.org">Lo creiamo noi per te</a>
             </div>
           </div>
         </section>
@@ -578,7 +596,7 @@
             <div class="tv-section-head tv-section-head--center">
               <span class="tv-eyebrow">Catalogo Servizi</span>
               <h2 class="tv-title" id="tvServiziTitle">Servizi per ogni tipo di salone</h2>
-              <p class="tv-lede" style="margin-inline:auto;text-align:center">Un catalogo di partenza pronto all'uso — ogni salone lo personalizza liberamente in nomi, durate e prezzi.</p>
+              <p class="tv-lede" style="margin-inline:auto;text-align:center">Un catalogo di partenza pronto all'uso — ogni salone decide liberamente nomi, durate e prezzi dei propri servizi.</p>
             </div>
 
             <div class="tv-tabs-wrap">
@@ -589,30 +607,30 @@
               </div>
 
               <div class="tv-service-list" id="tvPanelDonna" role="tabpanel" aria-labelledby="tvTabDonna" tabindex="0">
-                <div class="tv-service-row"><div><div class="tv-service-name">Taglio Donna</div><div class="tv-service-desc">45 min · consulenza inclusa</div></div><span class="tv-service-price">da €25</span></div>
-                <div class="tv-service-row"><div><div class="tv-service-name">Piega</div><div class="tv-service-desc">30 min</div></div><span class="tv-service-price">da €18</span></div>
-                <div class="tv-service-row"><div><div class="tv-service-name">Colore</div><div class="tv-service-desc">90 min</div></div><span class="tv-service-price">da €45</span></div>
-                <div class="tv-service-row"><div><div class="tv-service-name">Colpi di Sole / Meches</div><div class="tv-service-desc">120 min</div></div><span class="tv-service-price">da €60</span></div>
-                <div class="tv-service-row"><div><div class="tv-service-name">Trattamento Ricostruttivo</div><div class="tv-service-desc">45 min</div></div><span class="tv-service-price">da €30</span></div>
-                <div class="tv-service-row"><div><div class="tv-service-name">Extension</div><div class="tv-service-desc">120 min</div></div><span class="tv-service-price">da €80</span></div>
+                <span class="tv-service-chip">Taglio Donna</span>
+                <span class="tv-service-chip">Piega</span>
+                <span class="tv-service-chip">Colore</span>
+                <span class="tv-service-chip">Colpi di Sole / Meches</span>
+                <span class="tv-service-chip">Trattamento Ricostruttivo</span>
+                <span class="tv-service-chip">Extension</span>
               </div>
 
               <div class="tv-service-list" id="tvPanelUomo" role="tabpanel" aria-labelledby="tvTabUomo" tabindex="0" hidden>
-                <div class="tv-service-row"><div><div class="tv-service-name">Taglio</div><div class="tv-service-desc">30 min</div></div><span class="tv-service-price">da €15</span></div>
-                <div class="tv-service-row"><div><div class="tv-service-name">Barba</div><div class="tv-service-desc">20 min</div></div><span class="tv-service-price">da €12</span></div>
-                <div class="tv-service-row"><div><div class="tv-service-name">Taglio + Barba</div><div class="tv-service-desc">45 min</div></div><span class="tv-service-price">da €25</span></div>
-                <div class="tv-service-row"><div><div class="tv-service-name">Shampoo + Taglio</div><div class="tv-service-desc">40 min</div></div><span class="tv-service-price">da €20</span></div>
-                <div class="tv-service-row"><div><div class="tv-service-name">Rasatura</div><div class="tv-service-desc">20 min</div></div><span class="tv-service-price">da €10</span></div>
-                <div class="tv-service-row"><div><div class="tv-service-name">Taglio Bambino</div><div class="tv-service-desc">20 min</div></div><span class="tv-service-price">da €10</span></div>
+                <span class="tv-service-chip">Taglio</span>
+                <span class="tv-service-chip">Barba</span>
+                <span class="tv-service-chip">Taglio + Barba</span>
+                <span class="tv-service-chip">Shampoo + Taglio</span>
+                <span class="tv-service-chip">Rasatura</span>
+                <span class="tv-service-chip">Taglio Bambino</span>
               </div>
 
               <div class="tv-service-list" id="tvPanelUnisex" role="tabpanel" aria-labelledby="tvTabUnisex" tabindex="0" hidden>
-                <div class="tv-service-row"><div><div class="tv-service-name">Manicure</div><div class="tv-service-desc">30 min</div></div><span class="tv-service-price">da €15</span></div>
-                <div class="tv-service-row"><div><div class="tv-service-name">Pedicure</div><div class="tv-service-desc">40 min</div></div><span class="tv-service-price">da €20</span></div>
-                <div class="tv-service-row"><div><div class="tv-service-name">Smalto Semipermanente</div><div class="tv-service-desc">45 min</div></div><span class="tv-service-price">da €25</span></div>
-                <div class="tv-service-row"><div><div class="tv-service-name">Ceretta</div><div class="tv-service-desc">20 min</div></div><span class="tv-service-price">da €12</span></div>
-                <div class="tv-service-row"><div><div class="tv-service-name">Trattamento Viso</div><div class="tv-service-desc">40 min</div></div><span class="tv-service-price">da €25</span></div>
-                <div class="tv-service-row"><div><div class="tv-service-name">Massaggio</div><div class="tv-service-desc">50 min</div></div><span class="tv-service-price">da €35</span></div>
+                <span class="tv-service-chip">Manicure</span>
+                <span class="tv-service-chip">Pedicure</span>
+                <span class="tv-service-chip">Smalto Semipermanente</span>
+                <span class="tv-service-chip">Ceretta</span>
+                <span class="tv-service-chip">Trattamento Viso</span>
+                <span class="tv-service-chip">Massaggio</span>
               </div>
             </div>
           </div>
@@ -814,6 +832,21 @@
           <div id="suStep1" style="display:none">
             <div class="login">
               <div class="field"><label>Nome del salone *</label><input type="text" id="suSalonName" placeholder="Studio Bella" required></div>
+              <div class="field">
+                <label>Logo del salone (opzionale)</label>
+                <div style="display:flex; align-items:center; gap:12px;">
+                  <img id="suLogoPreview" src="" alt="" style="width:56px; height:56px; border-radius:50%; object-fit:cover; background:rgba(255,255,255,.08); display:none; flex-shrink:0;">
+                  <div style="flex:1;">
+                    <input type="file" id="suLogoFile" accept="image/*" style="display:block; margin-bottom:6px; font-size:12px;">
+                    <div id="suLogoStatus" style="font-size:11px; color:#a1a1aa;"></div>
+                  </div>
+                </div>
+                <input type="hidden" id="suLogo" value="">
+              </div>
+              <div class="field">
+                <label>Categoria del salone *</label>
+                <div id="suCategoryPicker" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
+              </div>
               <div class="field"><label>Email del salone *</label><input type="email" id="suEmail" placeholder="info@ilmiosalone.it" required></div>
               <div class="field"><label>Conferma email *</label><input type="email" id="suEmailConfirm" placeholder="Ripeti l'indirizzo email" required></div>
               <div class="field"><label>Città *</label><input type="text" id="suCity" placeholder="Es. Milano" required></div>
@@ -1276,6 +1309,18 @@
             <div id="smGalleryList" style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:8px;"></div>
             <input type="file" id="smGalleryFile" accept="image/*" multiple style="display:block; margin-bottom:4px; font-size:12px;">
             <div id="smGalleryStatus" style="font-size:11px; color:#71717a; margin-bottom:14px;"></div>
+            <label class="d-lbl">Logo del Salone</label>
+            <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px;">
+              <img id="smLogoPreview" src="" alt="" style="width:64px; height:64px; border-radius:50%; object-fit:cover; background:#f4f4f5; display:none; flex-shrink:0;">
+              <div style="flex:1;">
+                <input type="file" id="smLogoFile" accept="image/*" style="display:block; margin-bottom:6px; font-size:12px;">
+                <input class="minput" id="smLogo" placeholder="...oppure incolla un URL immagine" style="margin-bottom:0;">
+                <div id="smLogoStatus" style="font-size:11px; color:#71717a; margin-top:4px;"></div>
+              </div>
+            </div>
+            <label class="d-lbl">Categoria</label>
+            <div style="font-size:11px; color:#71717a; margin-bottom:8px;">Determina i colori e lo stile della pagina del salone e della dashboard.</div>
+            <div id="smCategoryPicker" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px;"></div>
             <label class="d-lbl">Colore Tema (pagina del cliente)</label>
             <div id="smThemeSwatches" style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:14px;"></div>
           </div>
@@ -1402,6 +1447,6 @@
      own "Save as PDF" print target produces a clean report. -->
 <div id="printableStats"></div>
 
-<script src="/js/app.min.js?v=20260726_0002"></script>
+<script src="/js/app.min.js?v=20260726_0003"></script>
 </body>
 </html>
