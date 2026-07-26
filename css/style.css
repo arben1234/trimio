@@ -286,6 +286,30 @@ body{background:#f1f5f9;min-height:100vh;display:flex;align-items:center;justify
 .hp-value-t{font-size:15px;font-weight:800;color:#18181b;margin-bottom:6px;}
 .hp-value-d{font-size:12.5px;color:#555;line-height:1.55;}
 
+/* On the public homepage the value cards sit inside .tv-container (which
+   already provides side padding/max-width), and reuse the warm editorial
+   palette instead of the black+gold per-card accent colors. */
+#vLogin .hp-value-grid{margin:0;grid-template-columns:1fr;gap:14px;}
+#vLogin .hp-value-card{
+  --accent:var(--tv-accent);
+  background:var(--tv-surface);
+  backdrop-filter:none;-webkit-backdrop-filter:none;
+  border:1px solid var(--tv-line);
+  border-top:1px solid var(--tv-line);
+  border-radius:3px;
+  box-shadow:none;
+}
+#vLogin .hp-value-grid .hp-value-card:nth-child(1),
+#vLogin .hp-value-grid .hp-value-card:nth-child(2),
+#vLogin .hp-value-grid .hp-value-card:nth-child(3),
+#vLogin .hp-value-grid .hp-value-card:nth-child(4){--accent:var(--tv-accent);}
+#vLogin .hp-value-ic{
+  background:linear-gradient(155deg,var(--tv-accent-soft),var(--tv-accent-soft-bg));
+  box-shadow:none;color:var(--tv-accent-ink);
+}
+#vLogin .hp-value-t{color:var(--tv-ink);}
+#vLogin .hp-value-d{color:var(--tv-ink-soft);}
+
 /* ── Footer contact line ── */
 .hp-footer-contact{
   display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:8px;
@@ -858,6 +882,28 @@ body{background:#f1f5f9;min-height:100vh;display:flex;align-items:center;justify
   border: none;
   cursor: pointer;
 }
+/* Public homepage: same sponsor card, restyled into the warm editorial
+   palette instead of the black+gold dashboard look. */
+#vLogin .hp-ad-banner{
+  background: var(--tv-surface);
+  color: var(--tv-ink);
+  border: 1px solid var(--tv-line);
+  border-radius: 3px;
+  margin: 0;
+  box-shadow: none;
+}
+#vLogin .hp-ad-banner .ad-glow{
+  background: radial-gradient(circle, rgba(165,122,63,0.18) 0%, transparent 70%);
+}
+#vLogin .hp-ad-banner .ad-tag{
+  background: var(--tv-accent-soft-bg); color: var(--tv-accent-ink);
+  border: 1px solid var(--tv-accent-soft);
+}
+#vLogin .hp-ad-banner h3{ font-family: var(--tv-font-display); color: var(--tv-ink); font-weight: 400; }
+#vLogin .hp-ad-banner p{ color: var(--tv-ink-soft); opacity: 1; }
+#vLogin .ad-btn{ background: var(--tv-accent); color: #F7F4EF; border-radius: 999px; }
+#vLogin .ad-btn:hover{ background: var(--tv-accent-ink); }
+
 .ad-btn:hover {
   background: #ffd05b;
   transform: translateY(-1px);
@@ -1302,83 +1348,103 @@ body{
 .side-item.active{transform:scale(1.02);}
 .act:active,.iconbtn:active,.filter-tab:active{transform:scale(.94);}
 
-/* ---- Login / staff access: full dark branded takeover ----
-   This used to be a plain white form under the black header — now
-   the whole screen continues the same black+gold identity, with a
-   gold headline CTA so "Accedi" is unmistakably the hero action. */
+/* ---- Login / public homepage: warm editorial theme ----
+   The generic marketing entry point (and the plain salon-scoped staff
+   login that reuses the same #vLogin view) now share one light, editorial
+   palette instead of the black+gold dashboard identity — this is the one
+   screen meant to be browsed like a real marketing website, not a phone
+   app screen, so it gets its own design language entirely. Every token is
+   scoped on #vLogin itself so it cascades to the login/signup modals
+   (DOM descendants of #vLogin) without leaking into #vHome/#vDash. */
 #vLogin{
+  --tv-bg:#F0E8E1;
+  --tv-bg-deep:#E6DAD0;
+  --tv-surface:#FBF7F3;
+  --tv-line:#DDD0C4;
+  --tv-ink:#262019;
+  --tv-ink-soft:#6E6255;
+  --tv-ink-faint:#948674;
+  --tv-accent:#3B6357;
+  --tv-accent-ink:#1F3A32;
+  --tv-accent-soft:#C7D9CF;
+  --tv-accent-soft-bg:#E4EBE6;
+  --tv-brass:#A57A3F;
+  --tv-focus:#B0522E;
+  --tv-font-display:Georgia,'Iowan Old Style','Palatino Linotype','Book Antiqua','Noto Serif',serif;
   position:relative;
   margin:-24px -24px 0;
-  padding:52px 24px 40px;
+  padding:0;
   min-height:78vh;
-  /* Percentage positions are relative to #vLogin's OWN box, which is as
-     tall as the whole marketing page (hero, demo videos, both value-card
-     sections, gallery) — so these extra low-opacity color washes land at
-     different points as the page scrolls instead of one flat black panel
-     top to bottom. Same accent colors already used on the value cards'
-     --accent (indigo/emerald/pink) rather than introducing a new palette. */
-  background:
-    radial-gradient(circle at 25% 0%, rgba(229,193,88,.28) 0%, transparent 55%),
-    radial-gradient(circle at 88% 20%, rgba(99,102,241,.18) 0%, transparent 42%),
-    radial-gradient(circle at 8% 48%, rgba(16,185,129,.14) 0%, transparent 40%),
-    radial-gradient(circle at 92% 70%, rgba(236,72,153,.15) 0%, transparent 42%),
-    radial-gradient(circle at 15% 92%, rgba(245,158,11,.13) 0%, transparent 40%),
-    linear-gradient(165deg,#0a0a0c 0%,#1c1c20 60%,#0a0a0c 100%);
-  border-radius:0 0 36px 36px;
-  color:#fff;
+  background:var(--tv-bg);
+  border-radius:0;
+  color:var(--tv-ink);
 }
 #vLogin .title,#vLogin .login{position:relative;z-index:1;}
-#vLogin .title{color:#fff;font-size:26px;padding-bottom:12px;margin-bottom:26px;position:relative;}
+#vLogin .title{color:var(--tv-ink);font-size:26px;padding-bottom:12px;margin-bottom:26px;position:relative;}
 #vLogin .title::after{
   content:'';position:absolute;left:0;bottom:0;width:38px;height:3px;border-radius:3px;
-  background:linear-gradient(90deg,var(--gold),var(--gold-dark));
+  background:linear-gradient(90deg,var(--tv-accent),var(--tv-brass));
 }
-#vLogin .field label{color:var(--gold);font-weight:700;}
+#vLogin .field label{color:var(--tv-accent-ink);font-weight:700;}
 #vLogin .field input{
-  background:rgba(255,255,255,.07);
-  border:1.5px solid rgba(255,255,255,.16);
-  color:#fff;
+  background:var(--tv-surface);
+  border:1.5px solid var(--tv-line);
+  color:var(--tv-ink);
 }
-#vLogin .field input::placeholder{color:rgba(255,255,255,.35);}
-#vLogin .field input:focus{background:rgba(255,255,255,.11);}
-#vLogin .link{color:rgba(255,255,255,.55);}
-#vLogin .err{background:rgba(239,68,68,.16);color:#fca5a5;}
+#vLogin .field input::placeholder{color:var(--tv-ink-faint);}
+#vLogin .field input:focus{background:#fff;border-color:var(--tv-accent);}
+#vLogin .link{color:var(--tv-ink-soft);}
+#vLogin .err{background:rgba(176,82,46,.12);color:#8a3a1f;}
 #vLogin .btn-main{
-  background:linear-gradient(135deg,var(--gold-light),var(--gold) 60%,var(--gold-dark)) !important;
-  color:#0a0a0c !important;
+  background:var(--tv-accent) !important;
+  color:#F7F4EF !important;
   border-color:transparent !important;
-  box-shadow:0 12px 32px rgba(229,193,88,.4);
+  box-shadow:0 12px 32px rgba(59,99,87,.3);
+}
+#vLogin .btn-main:hover{background:var(--tv-accent-ink) !important;}
+#vLogin .btn-ghost{
+  background:transparent !important;
+  color:var(--tv-ink) !important;
+  border:1.5px solid var(--tv-ink-faint) !important;
 }
 
 /* ---- Login screen as a marketing page (generic entry point only) ----
-   #vLoginMarketing/#vLoginFooter sit on the same dark gradient #vLogin
-   already provides, so they reuse .hp-title/.hp-sub/.hp-value-grid as-is
-   and only need a few dark-context tweaks + new stat/CTA components. */
-#vLogin .hp-sec-title{color:#c4c4c8;text-align:center;}
+   #vLoginMarketing/#vLoginFooter sit on the light #vLogin theme above, and
+   reuse .hp-sec-title/.hp-value-grid restyled for it below + new
+   header/hero/section/footer components further down this file. */
+#vLogin .hp-sec-title{color:var(--tv-ink-soft);text-align:center;}
 .hp-lead{position:relative;z-index:1;text-align:center;display:flex;flex-direction:column;align-items:center;}
 .hp-stats-row{display:flex;gap:28px;justify-content:center;margin-top:20px;}
 .hp-stat{display:flex;flex-direction:column;align-items:center;}
 .hp-stat-n{font-size:22px;font-weight:900;letter-spacing:-.5px;}
-.hp-stat:nth-child(1) .hp-stat-n{color:#818cf8;}
-.hp-stat:nth-child(2) .hp-stat-n{color:#34d399;}
+#vLogin .hp-stat-n{color:var(--tv-accent);font-family:var(--tv-font-display);}
 .hp-stat-l{font-size:11px;color:#a1a1aa;text-transform:uppercase;letter-spacing:1px;margin-top:2px;}
+#vLogin .hp-stat-l{color:var(--tv-ink-faint);}
 .hp-cta-banner{
   text-align:center;margin:8px 16px 32px;padding:22px 20px;border-radius:18px;
   background:linear-gradient(135deg,rgba(229,193,88,.16),rgba(229,193,88,.05));
   border:1px solid rgba(229,193,88,.3);
 }
+#vLogin .hp-cta-banner{
+  background:var(--tv-accent);
+  border:1px solid var(--tv-accent-ink);
+  border-radius:3px;
+  margin:0 0 clamp(2.75rem,6vw,4.5rem);
+}
 .hp-cta-t{font-size:16px;font-weight:800;color:#fff;margin-bottom:4px;}
 .hp-cta-d{font-size:12.5px;color:#c4c4c8;}
+#vLogin .hp-cta-t{color:#F7F4EF;font-family:var(--tv-font-display);font-size:22px;font-weight:400;}
+#vLogin .hp-cta-d{color:var(--tv-accent-soft);}
 
 /* Booking-flow demo clip — framed like a phone screen so a silent, looping
    screen capture reads as a deliberate product shot, not a stray video. */
 .vlogin-demo-video-wrap{
-  display:flex;justify-content:center;margin:0 16px 8px;
+  display:flex;justify-content:center;margin:0 0 8px;
 }
 .vlogin-demo-video{
-  width:100%;max-width:280px;border-radius:22px;display:block;
-  border:1px solid rgba(229,193,88,.35);
-  box-shadow:0 16px 40px rgba(0,0,0,.5),0 0 0 6px rgba(255,255,255,.03);
+  width:100%;max-width:280px;border-radius:3px;display:block;
+  border:1px solid var(--tv-line, rgba(229,193,88,.35));
+  box-shadow:0 16px 40px rgba(38,32,25,.18);
 }
 
 /* Admin login trigger — sits inline in the shared header, on the same row
@@ -1404,13 +1470,15 @@ body{
 
 /* Real salon photos (pure social proof — no links) replacing the old
    inline login section at the bottom of the marketing page. */
-.vlp-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:0 16px 8px;}
+.vlp-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:0 0 8px;}
 .vlp-card{position:relative;border-radius:14px;overflow:hidden;aspect-ratio:4/3;background:#18181b;}
 .vlp-card img{width:100%;height:100%;object-fit:cover;display:block;}
+#vLogin .vlp-grid{margin:0;}
+#vLogin .vlp-card{border-radius:3px;border:1px solid var(--tv-line);background:var(--tv-bg-deep);}
 
 /* Admin login modal — the form used to sit inline at the bottom of this
    page; it's the same markup, but for the generic marketing entry point
-   it's now only reached via .head-admin-trigger, presented as an
+   it's now only reached via a header trigger, presented as an
    overlay instead of a permanent section. A staff/owner login reached
    from a specific salon's own page never gets the .as-modal class, so it
    still renders inline exactly as before — see showView() in app.js. */
@@ -1421,7 +1489,7 @@ body{
 }
 .login-modal-ov{display:none;}
 .login-form-overlay.as-modal.show .login-modal-ov{
-  display:block;position:absolute;inset:0;background:rgba(0,0,0,.72);
+  display:block;position:absolute;inset:0;background:rgba(38,32,25,.55);
 }
 .login-modal-close{display:none;}
 .login-form-overlay.as-modal.show .login-modal-close{
@@ -1437,11 +1505,26 @@ body{
   padding:32px 24px 24px;box-shadow:0 30px 80px rgba(0,0,0,.6);
   max-height:85vh;overflow-y:auto;
 }
-#vLogin .login-form-wrap{position:relative;z-index:1;padding-top:8px;border-top:1px solid rgba(255,255,255,.1);}
+#vLogin .login-form-overlay.as-modal.show .login-modal-close{
+  background:rgba(38,32,25,.5);color:#F7F4EF;
+}
+#vLogin .login-form-overlay.as-modal.show .login-modal-close:hover{background:rgba(38,32,25,.7);}
+#vLogin .login-form-overlay.as-modal.show .login-form-wrap{
+  background:var(--tv-surface);
+  border:1px solid var(--tv-line);
+  box-shadow:0 30px 80px rgba(38,32,25,.28);
+  border-radius:3px;
+}
+#vLogin .login-form-wrap{position:relative;z-index:1;padding-top:8px;border-top:1px solid var(--tv-line);}
 #vLogin .login-form-wrap .title{margin-top:24px;}
+/* Plain inline rendering (no .as-modal): a specific salon's own staff/owner
+   login page, reached with #vLoginMarketing/#vLoginFooter hidden — #vLogin
+   itself has no padding of its own any more (the marketing sections each
+   carry their own via .tv-container), so this bare case needs its own. */
+#vLogin .login-form-overlay:not(.as-modal){padding:44px 24px 40px;}
 .login-form-overlay.as-modal.show .login-form-wrap{border-top:none;padding-top:32px;}
 .login-form-overlay.as-modal.show .login-form-wrap .title{margin-top:0;}
-#vLoginFooter{margin-left:-24px;margin-right:-24px;border-radius:0 0 36px 36px;}
+#vLoginFooter{margin-left:-24px;margin-right:-24px;}
 
 /* ---- Stats table export/print button + printable PDF view ---- */
 .stats-export-btn{
@@ -1543,12 +1626,12 @@ body{
      the 4 value cards to sit 2-across instead of stacked, and the actual
      login form to narrow down to a normal login-card width instead of
      stretching edge to edge. */
-  #vLogin .hp-value-grid{grid-template-columns:repeat(2,1fr);margin-left:32px;margin-right:32px;gap:18px;}
-  #vLogin .hp-title{font-size:34px;}
+  #vLogin .hp-value-grid{grid-template-columns:repeat(2,1fr);gap:18px;}
   #vLogin .login-form-wrap{max-width:380px;margin:24px auto 0;}
+  #vLogin .login-form-overlay:not(.as-modal) .login-form-wrap{margin-left:auto;margin-right:auto;}
   #vLogin .login-form-wrap .title{text-align:center;}
   #vLogin .login-form-wrap .title::after{left:50%;transform:translateX(-50%);}
-  #vLogin .vlp-grid{grid-template-columns:repeat(4,1fr);margin-left:32px;margin-right:32px;}
+  #vLogin .vlp-grid{grid-template-columns:repeat(4,1fr);}
 
   /* Dashboard (owner/barber/admin): same phone-card problem as vHome — a
      720px-viewport UI centered inside a 480px card on a wide desktop
@@ -1569,13 +1652,192 @@ body{
   #vCustomer .barber-grid{grid-template-columns:repeat(auto-fit,minmax(240px,1fr));}
 }
 
-/* #vLogin's shell is full-viewport-width now (see the 500px query above),
-   but its content (hero text, value cards, gallery) has no cap of its own
-   — on a genuinely wide monitor that would stretch a single readable
-   column across 2000px+. The background keeps bleeding edge to edge;
-   only the content column re-centers with a sane max width, same pattern
-   as any real marketing site. */
 @media(min-width:1300px){
-  #vLoginMarketing,#vLoginFooter{max-width:1180px;margin-left:auto;margin-right:auto;}
   #vLogin .hp-value-grid{grid-template-columns:repeat(4,1fr);}
+}
+
+/* ================================================================
+   PUBLIC HOMEPAGE (#vLogin) — editorial redesign
+   New components only: nothing here removes or renames a selector
+   app.js depends on. Every rule is scoped under #vLogin so #vHome/#vDash
+   keep the original black+gold identity untouched. Content itself (hero,
+   value cards, ad banner, demo videos, salon gallery) still sits inside
+   #vLoginMarketing exactly as app.js expects; this just gives it a
+   header/hero/section/footer shell in the warm editorial palette
+   defined as --tv-* custom properties on #vLogin above.
+================================================================ */
+#vLogin{ scroll-behavior:smooth; }
+#vLogin section{ scroll-margin-top:5.5rem; }
+@media (prefers-reduced-motion: reduce){
+  #vLogin{ scroll-behavior:auto; }
+}
+
+#vLogin .tv-container{
+  width:100%;max-width:72rem;margin-inline:auto;padding-inline:1.5rem;
+}
+@media(min-width:720px){ #vLogin .tv-container{ padding-inline:2.5rem; } }
+
+#vLogin .tv-eyebrow{
+  display:inline-flex;align-items:center;gap:0.6em;
+  font-size:0.72rem;letter-spacing:0.16em;text-transform:uppercase;
+  color:var(--tv-accent);font-weight:700;margin-bottom:0.7rem;
+}
+#vLogin .tv-eyebrow::before{
+  content:'';width:1.4em;height:1px;background:var(--tv-brass);display:inline-block;
+}
+#vLogin .tv-section-head{
+  display:flex;flex-direction:column;max-width:42rem;margin:0 auto 2rem;text-align:left;
+}
+#vLogin .tv-section-head--center{ margin-inline:auto;text-align:center;align-items:center; }
+#vLogin .tv-title{
+  font-family:var(--tv-font-display);font-weight:400;
+  font-size:clamp(1.6rem,3.2vw,2.3rem);line-height:1.15;color:var(--tv-ink);
+}
+
+/* ---- Header / nav ---- */
+#vLogin .tv-header{
+  position:sticky;top:0;z-index:50;
+  background:color-mix(in srgb, var(--tv-bg) 90%, transparent);
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  border-bottom:1px solid transparent;
+  transition:border-color .25s ease, background .25s ease;
+}
+#vLogin .tv-header.is-scrolled{
+  border-bottom-color:var(--tv-line);
+  background:color-mix(in srgb, var(--tv-bg) 97%, transparent);
+}
+#vLogin .tv-nav-row{ display:flex;align-items:center;justify-content:space-between;padding-block:0.85rem; }
+#vLogin .tv-brand{
+  font-family:var(--tv-font-display);font-size:1.3rem;letter-spacing:0.03em;
+  text-decoration:none;color:var(--tv-ink);display:flex;align-items:baseline;gap:0.45rem;
+}
+#vLogin .tv-brand small{
+  font-size:0.56rem;letter-spacing:0.2em;text-transform:uppercase;
+  color:var(--tv-ink-faint);font-weight:700;white-space:nowrap;
+  display:none;
+}
+@media(min-width:480px){ #vLogin .tv-brand small{ display:inline; } }
+#vLogin .tv-nav-links{ display:none;align-items:center;gap:1.75rem; }
+#vLogin .tv-nav-links a{
+  text-decoration:none;font-size:0.88rem;font-weight:700;color:var(--tv-ink);
+  position:relative;padding-block:0.3rem;
+}
+#vLogin .tv-nav-links a::after{
+  content:'';position:absolute;left:0;right:100%;bottom:0;height:2px;background:var(--tv-accent);
+  transition:right .4s cubic-bezier(.2,.8,.2,1);
+}
+#vLogin .tv-nav-links a:hover::after{ right:0; }
+#vLogin .tv-nav-actions{ display:flex;align-items:center;gap:0.6rem; }
+#vLogin .tv-nav-toggle{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:2.4rem;height:2.4rem;border-radius:999px;
+  border:1px solid var(--tv-line);background:var(--tv-surface);cursor:pointer;
+}
+#vLogin .tv-nav-toggle svg{ width:1.05rem;height:1.05rem;color:var(--tv-ink); }
+#vLogin .tv-nav-toggle .tv-icon-close{ display:none; }
+#vLogin .tv-nav-toggle[aria-expanded="true"] .tv-icon-open{ display:none; }
+#vLogin .tv-nav-toggle[aria-expanded="true"] .tv-icon-close{ display:block; }
+#vLogin .tv-mobile-panel{
+  display:none;flex-direction:column;gap:0.2rem;
+  padding-block:0.4rem 1.2rem;border-top:1px solid var(--tv-line);
+}
+#vLogin .tv-mobile-panel.is-open{ display:flex; }
+#vLogin .tv-mobile-panel a{
+  text-decoration:none;color:var(--tv-ink);padding:0.8rem 0.2rem;
+  font-size:0.98rem;font-weight:700;border-bottom:1px solid var(--tv-line);
+}
+#vLogin .tv-mobile-panel .tv-btn{ margin-top:0.8rem; }
+@media(min-width:960px){
+  #vLogin .tv-nav-links{ display:flex; }
+  #vLogin .tv-nav-toggle{ display:none; }
+  #vLogin .tv-mobile-panel{ display:none !important; }
+}
+
+/* ---- Buttons ---- */
+#vLogin .tv-btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:0.5em;
+  padding:0.8em 1.6em;border-radius:999px;font-size:0.9rem;font-weight:700;
+  letter-spacing:0.01em;text-decoration:none;cursor:pointer;border:1px solid transparent;
+  transition:transform .4s cubic-bezier(.2,.8,.2,1), background .2s ease, border-color .2s ease, color .2s ease;
+}
+#vLogin .tv-btn:active{ transform:scale(.97); }
+#vLogin .tv-btn-primary{ background:var(--tv-accent);color:#F7F4EF; }
+#vLogin .tv-btn-primary:hover{ background:var(--tv-accent-ink); }
+#vLogin .tv-btn-ghost{ background:transparent;border-color:var(--tv-ink-faint);color:var(--tv-ink); }
+#vLogin .tv-btn-ghost:hover{ border-color:var(--tv-ink); }
+#vLogin .tv-btn-block{ width:100%; }
+
+/* ---- Hero ---- */
+#vLogin .tv-hero{ padding-block:clamp(2.5rem,7vw,4.5rem) clamp(2.5rem,6vw,3.5rem); }
+#vLogin .tv-hero-grid{ display:grid;gap:2rem;grid-template-columns:1fr;align-items:end; }
+@media(min-width:900px){ #vLogin .tv-hero-grid{ grid-template-columns:1.5fr 1fr;gap:3rem; } }
+#vLogin .tv-hero-headline{
+  font-family:var(--tv-font-display);font-weight:400;
+  font-size:clamp(2rem,5.6vw,3.4rem);line-height:1.06;letter-spacing:-0.01em;
+  color:var(--tv-ink);margin-block:0.7rem 1rem;
+}
+#vLogin .tv-hero-headline em{ font-style:italic;color:var(--tv-accent); }
+#vLogin .tv-lede{ color:var(--tv-ink-soft);font-size:1rem;max-width:34em; }
+#vLogin .tv-hero-actions{ display:flex;flex-wrap:wrap;gap:0.8rem;margin-top:1.5rem; }
+#vLogin .tv-hero-card{
+  background:var(--tv-surface);border:1px solid var(--tv-line);border-radius:3px;
+  padding:1.4rem;display:flex;flex-direction:column;gap:0.9rem;
+}
+#vLogin .tv-hero-card dl{ display:grid;gap:0.7rem; }
+#vLogin .tv-row{ display:flex;justify-content:space-between;gap:1rem;font-size:0.88rem; }
+#vLogin .tv-row dt{ color:var(--tv-ink-soft); }
+#vLogin .tv-row dd{ margin:0;font-weight:700;text-align:right;color:var(--tv-ink); }
+
+/* ---- Demo videos (two-up) ---- */
+#vLogin .tv-demo-grid{ display:grid;gap:1.75rem;grid-template-columns:1fr; }
+@media(min-width:720px){ #vLogin .tv-demo-grid{ grid-template-columns:1fr 1fr; } }
+#vLogin .tv-demo-card{ text-align:center; }
+#vLogin .tv-demo-card figcaption{
+  margin-top:0.9rem;font-size:0.85rem;font-weight:700;color:var(--tv-ink-soft);
+  letter-spacing:0.02em;
+}
+#vLogin .tv-demo-card .vlogin-demo-video-wrap{ margin:0; }
+
+/* ---- Process steps ---- */
+#vLogin .tv-process-list{
+  display:grid;gap:1px;grid-template-columns:1fr;
+  background:var(--tv-line);border:1px solid var(--tv-line);
+}
+@media(min-width:800px){ #vLogin .tv-process-list{ grid-template-columns:repeat(3,1fr); } }
+#vLogin .tv-process-item{
+  background:var(--tv-bg);padding:1.75rem 1.5rem;
+  display:flex;flex-direction:column;gap:0.6rem;
+}
+#vLogin .tv-process-item .tv-index{ font-family:var(--tv-font-display);font-size:1.5rem;color:var(--tv-brass); }
+#vLogin .tv-process-item h3{ font-size:1.02rem;font-weight:800;color:var(--tv-ink); }
+#vLogin .tv-process-item p{ color:var(--tv-ink-soft);font-size:0.92rem;line-height:1.5; }
+
+/* ---- Section-alt background band ---- */
+#vLogin .tv-section{ padding-block:clamp(2.75rem,6vw,4.5rem); }
+#vLogin .tv-section-alt{ background:var(--tv-surface);border-block:1px solid var(--tv-line); }
+
+/* ---- Footer ---- */
+#vLogin .tv-footer{
+  background:var(--tv-bg-deep);border-top:1px solid var(--tv-line);
+  padding-block:2.5rem 1.5rem;margin-left:-24px;margin-right:-24px;
+}
+#vLogin .tv-footer-grid{ display:grid;gap:2rem;grid-template-columns:1fr; }
+@media(min-width:800px){ #vLogin .tv-footer-grid{ grid-template-columns:1.3fr .9fr .9fr; } }
+#vLogin .tv-footer-grid h4{
+  font-size:0.74rem;text-transform:uppercase;letter-spacing:0.13em;
+  color:var(--tv-ink-faint);margin-bottom:0.8rem;
+}
+#vLogin .tv-footer-grid ul{ list-style:none;margin:0;padding:0; }
+#vLogin .tv-footer-grid li{ margin-bottom:0.5rem; }
+#vLogin .tv-footer-grid a{ text-decoration:none;font-size:0.9rem;color:var(--tv-ink); }
+#vLogin .tv-footer-grid a:hover{ color:var(--tv-accent); }
+#vLogin .tv-footer-brand p{ color:var(--tv-ink-soft);font-size:0.9rem;margin-top:0.7rem;max-width:26em; }
+#vLogin .tv-footer-bottom{
+  margin-top:2rem;padding-top:1.25rem;border-top:1px solid var(--tv-line);
+  display:flex;flex-wrap:wrap;justify-content:space-between;gap:0.6rem;
+  font-size:0.78rem;color:var(--tv-ink-faint);
+}
+
+@media(min-width:860px){
+  #vLogin .tv-container{ padding-inline:2.5rem; }
 }

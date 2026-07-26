@@ -2890,7 +2890,12 @@ function showView(view){
   // the right-side controls into two rows instead of one. Went unnoticed
   // while that row only ever held hidden elements — not anymore now that
   // #vLoginAdminTrigger renders there.
-  document.querySelector('.head').style.display=isDash?'none':'flex';
+  // The redesigned marketing homepage (isLogin + no salon context) carries
+  // its own sticky header now (#tvHeader) — showing the shared app .head
+  // bar above it would stack two navigations. A salon-scoped staff/owner
+  // login (isLogin with a loginSalonContext) still has no header of its
+  // own, so it keeps the shared bar exactly as before.
+  document.querySelector('.head').style.display=(isDash || (isLogin && !loginSalonContext))?'none':'flex';
   if(!isDash){closeSide();['modal','workerModal','breakModal','salonModal','userModal'].forEach(closeModal);}
   $('gear').style.display='none';
   updateNavMenu();
@@ -5550,6 +5555,31 @@ async function boot(){
   });
   $('vLoginFormOv')?.addEventListener('click', () => $('vLoginFormOverlay')?.classList.remove('show'));
   $('loginModalClose')?.addEventListener('click', () => $('vLoginFormOverlay')?.classList.remove('show'));
+  // Every other "Accedi" CTA on the redesigned marketing homepage (hero,
+  // hero card, mobile menu, CTA banner) just proxy-clicks the one real
+  // trigger above instead of duplicating its loginRoleContext/overlay logic.
+  document.querySelectorAll('#vLoginMarketing [data-tv-login]').forEach(btn => {
+    btn.addEventListener('click', () => $('vLoginTopLoginTrigger')?.click());
+  });
+
+  // ---- Public homepage header: scroll shadow + mobile nav toggle ----
+  const tvHeader = $('tvHeader');
+  if (tvHeader) {
+    const onTvScroll = () => tvHeader.classList.toggle('is-scrolled', window.scrollY > 8);
+    document.addEventListener('scroll', onTvScroll, { passive: true });
+    onTvScroll();
+  }
+  const tvToggle = $('tvNavToggle');
+  const tvPanel = $('tvMobilePanel');
+  if (tvToggle && tvPanel) {
+    const closeTvPanel = () => { tvToggle.setAttribute('aria-expanded', 'false'); tvPanel.classList.remove('is-open'); };
+    tvToggle.addEventListener('click', () => {
+      const open = tvToggle.getAttribute('aria-expanded') === 'true';
+      tvToggle.setAttribute('aria-expanded', String(!open));
+      tvPanel.classList.toggle('is-open', !open);
+    });
+    tvPanel.addEventListener('click', e => { if (e.target.tagName === 'A') closeTvPanel(); });
+  }
 
   $('vLoginSignupTrigger')?.addEventListener('click', () => {
     suStep=0;
