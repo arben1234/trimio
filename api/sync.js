@@ -291,6 +291,12 @@ async function handleSignupSalon(body, kvUrl, kvToken, req) {
   // the three known values, rather than rejecting the whole signup over it.
   const logo = (typeof body.logo === 'string' ? body.logo.trim() : '').slice(0, 2000);
   const category = ['uomini', 'donne', 'unisex'].includes(body.category) ? body.category : 'unisex';
+  // Free-text description the owner gives of their own salon (what it is,
+  // what it offers) — shown to admin in the "Nuove Richieste" review so a
+  // wrong category pick (e.g. Donne clicked by mistake on a men's barber
+  // shop) can be caught and corrected before activation, not just trusted
+  // blindly from the 3-button picker alone.
+  const description = (typeof body.description === 'string' ? body.description.trim() : '').slice(0, 1000);
 
   // Every field below is mandatory in the signup wizard — reject a bare
   // API call that skips the client-side checks the same way, rather than
@@ -401,7 +407,7 @@ async function handleSignupSalon(body, kvUrl, kvToken, req) {
       id: 'salon' + Date.now(),
       name: salonName, slug,
       city, address, phone: salonPhone, promo: '',
-      bgImage: '', logo, gallery: [], themeColor: '#e5c158', category,
+      bgImage: '', logo, gallery: [], themeColor: '#e5c158', category, description,
       closedDays: [], bookingDays: 30,
       services: DEFAULT_SERVICES.map(s => ({ ...s })),
       workers: [],
@@ -437,7 +443,9 @@ async function handleSignupSalon(body, kvUrl, kvToken, req) {
        <li><b>Proprietario:</b> ${escapeHtml(ownerName)} (${escapeHtml(username)}, ${escapeHtml(ownerPhone)})</li>
        <li><b>Email:</b> ${escapeHtml(email)}</li>
        <li><b>Indirizzo:</b> ${escapeHtml(address)}, ${escapeHtml(city)}</li>
-       <li><b>Barbieri dichiarati:</b> ${declaredWorkerCount}</li>
+       <li><b>Categoria:</b> ${escapeHtml(category)}</li>
+       <li><b>Operatori dichiarati:</b> ${declaredWorkerCount}</li>
+       ${description ? `<li><b>Descrizione fornita dal proprietario:</b> ${escapeHtml(description)}</li>` : ''}
      </ul>
      <p>Vai su TRIMIO → <b>Nuove Richieste</b> per esaminare e approvare la richiesta.</p>`);
   return { status: 200, json: { success: true } };

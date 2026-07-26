@@ -4360,21 +4360,34 @@ function renderPendingSaloni(){
     $('pendingSaloniList').innerHTML = `<div class="empty"><div class="empty-ic">✅</div><div class="empty-t">Nessuna nuova richiesta in attesa</div></div>`;
     return;
   }
-  $('pendingSaloniList').innerHTML = pending.map(s=>`
+  $('pendingSaloniList').innerHTML = pending.map(s=>{
+    const cat=SALON_CATEGORIES.find(c=>c.id===(s.category||'unisex'))||SALON_CATEGORIES[0];
+    return `
     <div class="salon-item" style="flex-direction:column; align-items:stretch; gap:10px;">
       <div class="si-info">
-        <div class="si-name">${escapeHtml(s.name)}</div>
+        <div class="si-name">${s.logo?`<img src="${escapeHtml(s.logo)}" alt="" style="width:28px;height:28px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:6px;">`:''}${escapeHtml(s.name)} <span style="font-size:11px; font-weight:700; color:#71717a;">· ${cat.ic} ${cat.label}</span></div>
         <div class="si-slug">Proprietario: ${escapeHtml(s.ownerName||'—')} · ${escapeHtml(s.ownerUsername||'—')}</div>
         <div class="si-stats">
           Email: ${escapeHtml(s.email||'—')}<br>
           Indirizzo: ${escapeHtml(s.address||'—')}, ${escapeHtml(s.city||'—')} · Tel: ${escapeHtml(s.phone||'—')}<br>
           Operatori dichiarati: ${s.billing.declaredWorkerCount||1} · Canone stimato: €${feeForWorkerCount(s.billing.declaredWorkerCount||1)}/mese<br>
           Contratto firmato da: ${escapeHtml(s.billing.contractSignedName||'—')} il ${s.billing.contractSignedAt?new Date(s.billing.contractSignedAt).toLocaleString('it-IT'):'—'}
+          ${s.description?`<br><i>"${escapeHtml(s.description)}"</i> — descrizione fornita dal proprietario, verifica che la categoria sopra sia corretta.`:''}
         </div>
       </div>
-      <button class="btn btn-main" data-approve="${s.id}">✅ Approva e invia credenziali</button>
+      <div style="display:flex; gap:8px;">
+        <button class="btn btn-ghost" style="flex:1" data-edit-pending="${s.id}">✏️ Correggi prima di approvare</button>
+        <button class="btn btn-main" style="flex:1" data-approve="${s.id}">✅ Approva e invia credenziali</button>
+      </div>
     </div>
-  `).join('');
+  `;}).join('');
+  // Same "Nuovo/Modifica Salone" modal used everywhere else — already covers
+  // category/logo/description among the rest, so a wrongly-picked category
+  // (e.g. Donne clicked by mistake on a men's barber shop) can be corrected
+  // here before the owner ever sees their live page.
+  $('pendingSaloniList').querySelectorAll('[data-edit-pending]').forEach(b=>b.addEventListener('click', ()=>{
+    openSalonModal(b.dataset.editPending);
+  }));
   $('pendingSaloniList').querySelectorAll('[data-approve]').forEach(b=>b.addEventListener('click', async()=>{
     const s = STATE.salons.find(x=>x.id===b.dataset.approve); if(!s) return;
     b.disabled = true; b.textContent = 'Approvazione in corso…';
@@ -4648,6 +4661,7 @@ async function suOtpResendClick(){
 }
 function suNext1(){
   if($('suSalonName').value.trim().length<2)return showErr('suErr','Inserisci il nome del salone');
+  if($('suDescription').value.trim().length<10)return showErr('suErr','Descrivi brevemente il tuo salone (almeno 10 caratteri)');
   const email=$('suEmail').value.trim(),emailConfirm=$('suEmailConfirm').value.trim();
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return showErr('suErr','Inserisci un indirizzo email valido');
   if(email.toLowerCase()!==emailConfirm.toLowerCase())return showErr('suErr','Le due email inserite non coincidono');
@@ -4675,6 +4689,7 @@ async function suSubmit(){
     salonName:$('suSalonName').value.trim(),
     logo:$('suLogo').value.trim(),
     category:suCategory,
+    description:$('suDescription').value.trim(),
     email:$('suEmail').value.trim(),
     city:$('suCity').value.trim(),
     address:$('suAddress').value.trim(),
@@ -5697,6 +5712,7 @@ async function boot(){
     if($('suLogo'))$('suLogo').value='';
     if($('suLogoPreview'))$('suLogoPreview').style.display='none';
     if($('suLogoStatus'))$('suLogoStatus').textContent='';
+    if($('suDescription'))$('suDescription').value='';
     suCategory='unisex';renderSuCategoryPicker();
     renderSuStep();
     if($('suStepDone'))$('suStepDone').style.display='none';

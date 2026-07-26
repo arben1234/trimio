@@ -305,7 +305,7 @@ body{background:#f1f5f9;min-height:100vh;display:flex;align-items:center;justify
 #vLogin .hp-value-grid .hp-value-card:nth-child(4){--accent:var(--tv-accent);}
 #vLogin .hp-value-ic{
   background:linear-gradient(155deg,var(--tv-accent-soft),var(--tv-accent-soft-bg));
-  box-shadow:none;color:var(--tv-accent-ink);
+  box-shadow:none;color:var(--tv-accent);
 }
 #vLogin .hp-value-t{color:var(--tv-ink);}
 #vLogin .hp-value-d{color:var(--tv-ink-soft);}
@@ -895,8 +895,11 @@ body{background:#f1f5f9;min-height:100vh;display:flex;align-items:center;justify
 #vLogin .hp-ad-banner .ad-glow{
   background: radial-gradient(circle, rgba(165,122,63,0.18) 0%, transparent 70%);
 }
+/* Text-on-badge, not icon-on-badge — accent-soft-bg/accent-ink are both
+   dark-on-dark now that the palette deepened, so this one needs its own
+   readable combo instead of reusing those two tokens directly. */
 #vLogin .hp-ad-banner .ad-tag{
-  background: var(--tv-accent-soft-bg); color: var(--tv-accent-ink);
+  background: rgba(92,140,123,.18); color: #A8CDBF;
   border: 1px solid var(--tv-accent-soft);
 }
 #vLogin .hp-ad-banner h3{ font-family: var(--tv-font-display); color: var(--tv-ink); font-weight: 400; }
@@ -1357,19 +1360,23 @@ body{
    scoped on #vLogin itself so it cascades to the login/signup modals
    (DOM descendants of #vLogin) without leaking into #vHome/#vDash. */
 #vLogin{
-  --tv-bg:#F0E8E1;
-  --tv-bg-deep:#E6DAD0;
-  --tv-surface:#FBF7F3;
-  --tv-line:#DDD0C4;
-  --tv-ink:#262019;
-  --tv-ink-soft:#6E6255;
-  --tv-ink-faint:#948674;
-  --tv-accent:#3B6357;
-  --tv-accent-ink:#1F3A32;
-  --tv-accent-soft:#C7D9CF;
-  --tv-accent-soft-bg:#E4EBE6;
-  --tv-brass:#A57A3F;
-  --tv-focus:#B0522E;
+  /* Same warm cream/green/brass family as before, just deepened — a darker,
+     moodier take rather than a different scheme. --tv-ink flips light (it's
+     now text-on-dark), so every component built on these tokens repaints
+     itself with no further changes needed. */
+  --tv-bg:#211B15;
+  --tv-bg-deep:#171310;
+  --tv-surface:#2B241D;
+  --tv-line:#473C30;
+  --tv-ink:#F0E6D8;
+  --tv-ink-soft:#C7B9A5;
+  --tv-ink-faint:#93866F;
+  --tv-accent:#5C8C7B;
+  --tv-accent-ink:#436357;
+  --tv-accent-soft:#3A5348;
+  --tv-accent-soft-bg:#2C3B33;
+  --tv-brass:#C79A5C;
+  --tv-focus:#D97A52;
   --tv-font-display:Georgia,'Iowan Old Style','Palatino Linotype','Book Antiqua','Noto Serif',serif;
   position:relative;
   margin:-24px -24px 0;
@@ -1385,16 +1392,16 @@ body{
   content:'';position:absolute;left:0;bottom:0;width:38px;height:3px;border-radius:3px;
   background:linear-gradient(90deg,var(--tv-accent),var(--tv-brass));
 }
-#vLogin .field label{color:var(--tv-accent-ink);font-weight:700;}
+#vLogin .field label{color:var(--tv-accent);font-weight:700;}
 #vLogin .field input{
   background:var(--tv-surface);
   border:1.5px solid var(--tv-line);
   color:var(--tv-ink);
 }
 #vLogin .field input::placeholder{color:var(--tv-ink-faint);}
-#vLogin .field input:focus{background:#fff;border-color:var(--tv-accent);}
+#vLogin .field input:focus{background:var(--tv-bg-deep);border-color:var(--tv-accent);}
 #vLogin .link{color:var(--tv-ink-soft);}
-#vLogin .err{background:rgba(176,82,46,.12);color:#8a3a1f;}
+#vLogin .err{background:rgba(217,122,82,.16);color:#F0A98A;}
 #vLogin .btn-main{
   background:var(--tv-accent) !important;
   color:#F7F4EF !important;

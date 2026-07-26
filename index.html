@@ -41,7 +41,7 @@
     l.href='/api/manifest?start='+encodeURIComponent(start);
   })();
   </script>
-  <link rel="stylesheet" href="/css/style.css?v=202607261600">
+  <link rel="stylesheet" href="/css/style.css?v=202607261700">
   <!-- Firebase Compatibility SDKs -->
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
@@ -434,14 +434,16 @@
               <a href="#vLoginFooter">Contatti</a>
             </nav>
             <div class="tv-nav-actions">
-              <!-- Staff login (owner/barber) is the primary marketing CTA;
-                   admin login is a separate, deliberately low-key entry
-                   point — same as it always was, just relocated out of the
-                   shared app .head bar (now hidden on this page) and into
-                   this header. tryLogin()'s role checks in js/app.js key off
-                   loginRoleContext, set by each trigger's own handler. -->
-              <button type="button" class="tv-admin-link" id="vLoginAdminTrigger">🔒 Admin</button>
-              <button type="button" class="tv-btn tv-btn-primary" id="vLoginTopLoginTrigger">Accedi</button>
+              <!-- Top-right header slot is the admin entry point — owner/
+                   barber access ("Accedi al tuo salone") lives further down
+                   in the hero, its own clearly-labeled CTA, so this slot
+                   doesn't need to double as both. The real
+                   #vLoginTopLoginTrigger (owner login) now lives on that
+                   hero button instead; every other "Accedi al tuo
+                   salone"/"Accedi al pannello" CTA still proxy-clicks it via
+                   [data-tv-login]. tryLogin()'s role checks in js/app.js key
+                   off loginRoleContext, set by each trigger's own handler. -->
+              <button type="button" class="tv-btn tv-btn-primary" id="vLoginAdminTrigger">Accedi</button>
               <button type="button" class="tv-nav-toggle" id="tvNavToggle" aria-expanded="false" aria-controls="tvMobilePanel" aria-label="Apri il menu">
                 <svg class="tv-icon-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
                 <svg class="tv-icon-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/></svg>
@@ -455,8 +457,7 @@
             <a href="#tvSupporto">Supporto</a>
             <a href="#tvSaloniPartner">Saloni partner</a>
             <a href="#vLoginFooter">Contatti</a>
-            <button type="button" class="tv-btn tv-btn-primary tv-btn-block" data-tv-login>Accedi</button>
-            <button type="button" class="tv-admin-link tv-admin-link--mobile" data-tv-admin-login>🔒 Accesso Amministratore</button>
+            <button type="button" class="tv-btn tv-btn-primary tv-btn-block" data-tv-login>Accedi al tuo salone</button>
           </nav>
         </header>
 
@@ -468,7 +469,7 @@
               <h1 class="tv-hero-headline">La piattaforma che fa crescere <em>il tuo salone.</em></h1>
               <p class="tv-lede">Prenotazioni online 24 ore su 24, calendario e staff sempre sotto controllo, promemoria automatici per i clienti. Tutto in un'unica piattaforma pensata per saloni e centri professionali.</p>
               <div class="tv-hero-actions">
-                <button type="button" class="tv-btn tv-btn-primary" data-tv-login>Accedi al tuo salone</button>
+                <button type="button" class="tv-btn tv-btn-primary" id="vLoginTopLoginTrigger">Accedi al tuo salone</button>
                 <a class="tv-btn tv-btn-ghost" href="#tvDemo">Scopri come funziona</a>
               </div>
             </div>
@@ -846,6 +847,11 @@
               <div class="field">
                 <label>Categoria del salone *</label>
                 <div id="suCategoryPicker" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
+              </div>
+              <div class="field">
+                <label>Descrivi il tuo salone *</label>
+                <textarea id="suDescription" rows="3" placeholder="Che tipo di salone è, a chi si rivolge, cosa offre..." required style="width:100%; resize:vertical; background:rgba(255,255,255,.07); border:1.5px solid rgba(255,255,255,.16); border-radius:10px; padding:10px 12px; color:#fff; font:inherit;"></textarea>
+                <div style="font-size:11px; color:#a1a1aa; margin-top:4px;">Ci aiuta a verificare che la categoria scelta sopra sia corretta prima di approvare il salone.</div>
               </div>
               <div class="field"><label>Email del salone *</label><input type="email" id="suEmail" placeholder="info@ilmiosalone.it" required></div>
               <div class="field"><label>Conferma email *</label><input type="email" id="suEmailConfirm" placeholder="Ripeti l'indirizzo email" required></div>
@@ -1447,6 +1453,6 @@
      own "Save as PDF" print target produces a clean report. -->
 <div id="printableStats"></div>
 
-<script src="/js/app.min.js?v=20260726_0003"></script>
+<script src="/js/app.min.js?v=20260726_0004"></script>
 </body>
 </html>
