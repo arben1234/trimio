@@ -1,0 +1,21 @@
+# Daily 07:00 UTC reminder pass — mirrors the cron that used to run as a
+# Vercel Hobby-plan cron in vercel.json before the app moved off Vercel
+# hosting to the VPS. The endpoint is idempotent (sent-once flags per
+# booking), so this runs alongside hourly-reminders.yml with no risk of
+# duplicate sends.
+name: Daily reminders
+
+on:
+  schedule:
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+
+jobs:
+  send-reminders:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger reminder check
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          curl -fsSL --max-time 60 -H "Authorization: Bearer $CRON_SECRET" "https://trimio.org/api/send-reminders"

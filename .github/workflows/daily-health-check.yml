@@ -1,0 +1,20 @@
+# Daily 05:30 UTC health/billing check — mirrors the cron that used to run
+# as a Vercel Hobby-plan cron in vercel.json before the app moved off Vercel
+# hosting to the VPS. Also drives the manual-track monthly billing
+# warning/suspension pass (see CLAUDE.md).
+name: Daily health check
+
+on:
+  schedule:
+    - cron: '30 5 * * *'
+  workflow_dispatch:
+
+jobs:
+  daily-health-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger daily health check
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          curl -fsSL --max-time 60 -H "Authorization: Bearer $CRON_SECRET" "https://trimio.org/api/daily-health-check"
