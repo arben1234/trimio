@@ -915,6 +915,35 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
   ok(salonsAfter.some(s => s.id === 'sReal'), 'a malformed salons payload is rejected instead of overwriting salons_db with garbage');
 });
 
+section('api/sync.js — HARDENING: a new booking must be submitted with status exactly \'confirmed\' (phantom-booking slot-squat regression)');
+await withFakeKv(makeFakeRedis(), async (fake) => {
+  fake.strings.set('salons_db', JSON.stringify([{ id: 'sPh', name: 'Salon Phantom', workers: [{ id: 'wPh', name: 'Worker Phantom' }], services: [{ name: 'Taglio', price: 20, dur: '30 min' }] }]));
+  const handler = await freshImport('api/sync.js');
+
+  // An unauthenticated caller submitting a "new" booking with no status
+  // (or an unrecognized one) used to sail through every check keyed off
+  // `status !== 'cancelled'` and permanently claim the slot lock (PERSIST,
+  // no TTL) — invisible in the dashboard (list filters/action buttons key
+  // off status === 'confirmed'), with no way for staff to ever free it.
+  const noStatus = { id: 'phantom-1', salonId: 'sPh', workerId: 'wPh', dateISO: '2030-07-07', time: '09:00', service: 'Taglio' };
+  const r1 = mkRes();
+  await handler({ method: 'POST', body: { bookings: [noStatus], salons: [] } }, r1.obj);
+  ok(r1.body.conflicts.some(c => c.id === 'phantom-1' && c.error === 'invalid_booking'), 'a new booking with no status is rejected as invalid_booking');
+  ok(!fake.hashes.get('bookings')?.has('phantom-1'), 'the statusless booking is never written to the bookings hash');
+  ok(!fake.strings.has('lock:sPh:wPh:2030-07-07:09:00'), 'the statusless booking never claims the slot lock');
+
+  const garbageStatus = { id: 'phantom-2', salonId: 'sPh', workerId: 'wPh', dateISO: '2030-07-07', time: '09:00', status: 'pwned', service: 'Taglio' };
+  const r2 = mkRes();
+  await handler({ method: 'POST', body: { bookings: [garbageStatus], salons: [] } }, r2.obj);
+  ok(r2.body.conflicts.some(c => c.id === 'phantom-2' && c.error === 'invalid_booking'), 'a new booking with an unrecognized status is rejected as invalid_booking');
+
+  // The slot must still be genuinely free for a real, properly-confirmed booking afterwards.
+  const realBooking = { id: 'real-1', salonId: 'sPh', workerId: 'wPh', dateISO: '2030-07-07', time: '09:00', status: 'confirmed', service: 'Taglio', name: 'Real Customer' };
+  const r3 = mkRes();
+  await handler({ method: 'POST', body: { bookings: [realBooking], salons: [] } }, r3.obj);
+  ok(r3.body.success === true && r3.body.conflicts.length === 0, 'a genuinely confirmed booking for the same slot still succeeds normally after the phantom attempts were rejected');
+});
+
 section('api/sync.js — HARDENING: an anonymous booking\'s text fields are type/length-capped (storage-inflation DoS regression)');
 await withFakeKv(makeFakeRedis(), async (fake) => {
   fake.strings.set('salons_db', JSON.stringify([{ id: 'sCap', name: 'Salon Cap', workers: [{ id: 'wCap', name: 'Worker Cap' }], services: [{ name: 'Taglio', price: 20, dur: '30 min' }] }]));
@@ -1363,6 +1392,53 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
   ok(!salonsAfter.some(s => s.id === 'salonPP2'), 'the salon is genuinely deleted regardless');
 });
 
+section('api/sync.js — cancel_billing_subscription recovers when the PayPal subscription is already CANCELLED at PayPal (stuck-owner regression)');
+await withFakeKv(makeFakeRedis(), async (fake) => {
+  const prevId = process.env.PAYPAL_CLIENT_ID;
+  const prevSecret = process.env.PAYPAL_CLIENT_SECRET;
+  const prevSessionSecret = process.env.SESSION_SECRET;
+  process.env.PAYPAL_CLIENT_ID = 'test-client-id';
+  process.env.PAYPAL_CLIENT_SECRET = 'test-client-secret';
+  process.env.SESSION_SECRET = 'test-only-secret-for-session-tokens';
+  const underlyingFetch = fake.fetchImpl;
+  globalThis.fetch = async (url, opts) => {
+    const u = String(url);
+    if (u.includes('/v1/oauth2/token')) {
+      return { ok: true, status: 200, json: async () => ({ access_token: 'fake-token', expires_in: 3600 }) };
+    }
+    if (u.includes('/v1/billing/subscriptions/dead-sub-1/cancel')) {
+      // Real PayPal rejects cancelling an already-terminal subscription —
+      // if the fix below regresses to calling this unconditionally, this
+      // failure response makes the test fail instead of silently passing.
+      return { ok: false, status: 422, text: async () => JSON.stringify({ name: 'UNPROCESSABLE_ENTITY', message: 'Subscription status is not cancellable' }) };
+    }
+    if (u.includes('/v1/billing/subscriptions/dead-sub-1')) {
+      return { ok: true, status: 200, text: async () => JSON.stringify({ id: 'dead-sub-1', status: 'CANCELLED' }) };
+    }
+    return underlyingFetch(url, opts);
+  };
+  try {
+    fake.strings.set('salons_db', JSON.stringify([{
+      id: 'salonStuck', name: 'Salon Stuck',
+      billing: { autopay: true, paypalSubscriptionId: 'dead-sub-1', declaredWorkerCount: 2, paidThroughMonth: '2026-01' }
+    }]));
+    const handler = await freshImport('api/sync.js');
+    const ownerToken = issueSessionToken({ role: 'owner', salonId: 'salonStuck' });
+
+    const r1 = mkRes();
+    await handler({ method: 'POST', headers: { authorization: `Bearer ${ownerToken}` }, body: { action: 'cancel_billing_subscription', salonId: 'salonStuck' } }, r1.obj);
+    ok(r1.status === 200 && r1.body.success === true, 'cancelling autopay succeeds even when the PayPal subscription is already CANCELLED at PayPal');
+
+    const salonAfter = JSON.parse(fake.strings.get('salons_db')).find(s => s.id === 'salonStuck');
+    eq(salonAfter.billing.autopay, false, 'autopay is cleared locally');
+    eq(salonAfter.billing.paypalSubscriptionId, null, 'the dead subscription id is cleared, unblocking future retries instead of staying permanently stuck');
+  } finally {
+    restoreEnv('PAYPAL_CLIENT_ID', prevId);
+    restoreEnv('PAYPAL_CLIENT_SECRET', prevSecret);
+    restoreEnv('SESSION_SECRET', prevSessionSecret);
+  }
+});
+
 section('api/sync.js — HARDENING: an existing salon cannot steal another salon\'s slug or ownerUsername (URL/QR-hijack regression)');
 await withFakeKv(makeFakeRedis(), async (fake) => {
   const prevSecret = process.env.SESSION_SECRET;
@@ -1543,6 +1619,53 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
   } finally {
     restoreEnv('SESSION_SECRET', prevSecret);
   }
+});
+
+section('lib/auth.js — admin_self password change preserves unrelated admin_db fields (field-wipe regression)');
+await withFakeKv(makeFakeRedis(), async (fake) => {
+  // admin_self used to build a brand-new {username, password} object instead
+  // of spreading the existing admin record — silently wiping
+  // homepagePhotos/homepageAd/cached PayPal product+plan ids every time an
+  // admin changed their own credentials.
+  fake.strings.set('admin_db', JSON.stringify({
+    username: 'admin', password: 'admin123',
+    homepagePhotos: ['photo1.jpg', 'photo2.jpg'],
+    homepageAd: { title: 'Promo', active: true },
+    paypalProductId: 'PROD-123', paypalPlanId: 'PLAN-456'
+  }));
+  const handler = await freshImport('api/sync.js');
+  const r = mkRes();
+  await handler({ method: 'POST', body: { action: 'change_password', type: 'admin_self', currentPassword: 'admin123', newUsername: 'boss2', newPassword: 'newSecret9' } }, r.obj);
+  eq(r.status, 200, 'admin_self password change succeeds');
+  const adminAfter = JSON.parse(fake.strings.get('admin_db'));
+  eq(adminAfter.username, 'boss2', 'the username is actually updated');
+  eq(adminAfter.homepagePhotos, ['photo1.jpg', 'photo2.jpg'], 'homepagePhotos survives an admin_self password change');
+  eq(adminAfter.homepageAd, { title: 'Promo', active: true }, 'homepageAd survives an admin_self password change');
+  eq(adminAfter.paypalProductId, 'PROD-123', 'the cached PayPal product id survives an admin_self password change');
+  eq(adminAfter.paypalPlanId, 'PLAN-456', 'the cached PayPal plan id survives an admin_self password change');
+});
+
+section('lib/auth.js — change_password fails safely (not silently) when the per-salon lock is already held (lost-update regression)');
+await withFakeKv(makeFakeRedis(), async (fake) => {
+  fake.strings.set('salons_db', JSON.stringify([
+    { id: 'sLock', name: 'Salon Lock', ownerUsername: 'lockowner', ownerPassword: 'oldPass123', workers: [] }
+  ]));
+  const handler = await freshImport('api/sync.js');
+
+  // Simulate a concurrent writer (e.g. a bulk salon save, or another
+  // password change) already holding this salon's lock.
+  fake.strings.set('lock:billing:sLock', '1');
+
+  const r = mkRes();
+  await handler({ method: 'POST', body: {
+    action: 'change_password', type: 'self', role: 'owner', salonId: 'sLock',
+    currentPassword: 'oldPass123', newPassword: 'newPass456'
+  } }, r.obj);
+  eq(r.status, 503, 'the password change reports service_unavailable instead of proceeding unlocked');
+  eq(r.body.success, false, 'the password change does not report success while blocked on the lock');
+
+  const salonAfter = JSON.parse(fake.strings.get('salons_db')).find(s => s.id === 'sLock');
+  eq(salonAfter.ownerPassword, 'oldPass123', 'the old password is left completely untouched when the lock could not be acquired');
 });
 
 section('lib/auth.js — passwords are hashed at rest, never plaintext (stored-credential-leak regression)');
@@ -2102,6 +2225,233 @@ await withFakeKv(makeFakeRedis(), async (fake) => {
     restoreEnv('CRON_SECRET', prevCronSecret);
   }
 });
+
+section('api/send-reminders.js — HARDENING: a reminder that fails on every channel is NOT marked permanently sent (silent-failure regression)');
+await withFakeKv(makeFakeRedis(), async (fake) => {
+  const prevVapid = process.env.VAPID_PRIVATE_KEY;
+  const prevSid = process.env.TWILIO_ACCOUNT_SID;
+  const prevToken = process.env.TWILIO_AUTH_TOKEN;
+  const prevFrom = process.env.TWILIO_FROM;
+  const prevCronSecret = process.env.CRON_SECRET;
+  const RealDate = Date;
+  try {
+    delete process.env.VAPID_PRIVATE_KEY; // no push subscriptions possible either way
+    process.env.TWILIO_ACCOUNT_SID = 'ACtest';
+    process.env.TWILIO_AUTH_TOKEN = 'tokentest';
+    process.env.TWILIO_FROM = 'TRIMIO';
+    delete process.env.CRON_SECRET;
+
+    const FIXED_MS = RealDate.UTC(2030, 0, 15, 9, 0, 0); // 10:00 in Rome (CET, winter, no DST)
+    class FixedDate extends RealDate {
+      constructor(...args) { super(...(args.length ? args : [FIXED_MS])); }
+      static now() { return FIXED_MS; }
+    }
+    globalThis.Date = FixedDate;
+
+    fake.strings.set('salons_db', JSON.stringify([{ id: 'sR2', name: 'Salon R2', workers: [{ id: 'wR2', name: 'Worker R2' }] }]));
+    const bookingId = 'bkRemFail1';
+    fake.hashes.set('bookings', new Map([[bookingId, JSON.stringify({
+      id: bookingId, status: 'confirmed', salonId: 'sR2', workerId: 'wR2', dateISO: '2030-01-16',
+      time: '10:00', service: 'Taglio', dateLabel: 'domani', name: 'Cliente Test', phone: '3331112222', workerName: 'Worker R2'
+    })]]));
+
+    // No push subscription exists (VAPID unconfigured) and Twilio itself
+    // rejects every send attempt — simulates a real transient failure
+    // (Twilio outage/misconfiguration) on every available channel.
+    const underlyingFetch = fake.fetchImpl;
+    globalThis.fetch = async (url, opts) => {
+      if (String(url).includes('api.twilio.com')) return { ok: false, status: 500, text: async () => 'Twilio down' };
+      return underlyingFetch(url, opts);
+    };
+
+    const handler = await freshImport('api/send-reminders.js');
+    const r = mkRes();
+    await handler({ headers: {} }, r.obj);
+    eq(r.status, 200, 'reminder run completes successfully even when every send attempt fails');
+
+    const stored = JSON.parse(fake.hashes.get('bookings').get(bookingId));
+    eq(stored.reminderSent, undefined, 'reminderSent is NOT set when delivery failed on every channel — the customer got nothing, so the cron should retry rather than silently give up forever');
+  } finally {
+    globalThis.Date = RealDate;
+    restoreEnv('VAPID_PRIVATE_KEY', prevVapid);
+    restoreEnv('TWILIO_ACCOUNT_SID', prevSid);
+    restoreEnv('TWILIO_AUTH_TOKEN', prevToken);
+    restoreEnv('TWILIO_FROM', prevFrom);
+    restoreEnv('CRON_SECRET', prevCronSecret);
+  }
+});
+
+section('api/daily-health-check.js — HARDENING: a billing warning/suspension is not silently treated as delivered when the email actually failed (silent-suspension regression)');
+await withFakeKv(makeFakeRedis(), async (fake) => {
+  const prevResendKey = process.env.RESEND_API_KEY;
+  const prevCronSecret = process.env.CRON_SECRET;
+  const RealDate = Date;
+  try {
+    process.env.RESEND_API_KEY = 'test-resend-key';
+    // The detailed response body (including `problems`) is only returned to
+    // an authenticated caller — set a secret and authenticate as the real
+    // cron would, so this test can actually inspect it.
+    process.env.CRON_SECRET = 'test-cron-secret';
+    // Day 3 of the month, well inside Italy's 8:00-20:00 window — lands in
+    // the "send warning" branch (days 2-5), not the suspend branch (day 6+).
+    const FIXED_MS = RealDate.UTC(2030, 0, 3, 10, 0, 0);
+    class FixedDate extends RealDate {
+      constructor(...args) { super(...(args.length ? args : [FIXED_MS])); }
+      static now() { return FIXED_MS; }
+    }
+    globalThis.Date = FixedDate;
+
+    fake.strings.set('salons_db', JSON.stringify([{
+      id: 'sBill1', name: 'Salon Bill Fail', email: 'owner@example.com', inactive: false,
+      billing: { declaredWorkerCount: 2, paidThroughMonth: '2029-12', pendingApproval: false }
+    }]));
+
+    const underlyingFetch = fake.fetchImpl;
+    globalThis.fetch = async (url, opts) => {
+      // Resend's shared sandbox sender rejecting a real owner's address —
+      // the exact live constraint documented in CLAUDE.md.
+      if (String(url).includes('api.resend.com')) return { ok: false, status: 403, text: async () => 'sandbox sender restricted' };
+      return underlyingFetch(url, opts);
+    };
+
+    const handler = await freshImport('api/daily-health-check.js');
+    const r = mkRes();
+    await handler({ headers: { authorization: 'Bearer test-cron-secret' } }, r.obj);
+    eq(r.status, 200, 'health check run completes successfully even when the warning email fails to send');
+
+    const salonAfter = JSON.parse(fake.strings.get('salons_db')).find(s => s.id === 'sBill1');
+    eq(salonAfter.billing.lastWarningEmailSentDate, '2030-01-03', 'the attempt is still recorded (so it is not retried every run that day), even though delivery failed');
+    ok(r.body.problems && r.body.problems.some(p => p.includes('Salon Bill Fail') && p.toLowerCase().includes('email')),
+      'the failed email delivery is surfaced in the health-check problems list for admin visibility, instead of being silently treated as if the owner was warned');
+  } finally {
+    globalThis.Date = RealDate;
+    restoreEnv('RESEND_API_KEY', prevResendKey);
+    restoreEnv('CRON_SECRET', prevCronSecret);
+  }
+});
+
+section('js/app.js — showView() closes altModal/reviewsModal/qrModal/myBookingsModal on a real view switch (stale-modal-over-new-view regression)');
+{
+  // The main sandbox at the top of this file permanently stubs showView()
+  // to a no-op counter (needed so login-flow tests don't trigger real
+  // rendering) — so exercising the REAL showView() needs its own fresh VM
+  // context with a fresh DOM mock, loaded from the unmodified app.js source
+  // exactly like the main one, but never stubbed.
+  const freshElementCache = new Map();
+  function freshMakeElement(id) {
+    const el = {
+      id, value: '', textContent: '', innerHTML: '', style: {}, dataset: {},
+      _classes: new Set(),
+      classList: {
+        add: (...c) => c.forEach(x => el._classes.add(x)),
+        remove: (...c) => c.forEach(x => el._classes.delete(x)),
+        toggle: (c, force) => { if (force === undefined) { el._classes.has(c) ? el._classes.delete(c) : el._classes.add(c); } else { force ? el._classes.add(c) : el._classes.delete(c); } },
+        contains: (c) => el._classes.has(c)
+      },
+      children: [], addEventListener: () => {}, removeEventListener: () => {},
+      appendChild: (child) => { el.children.push(child); return child; },
+      querySelector: () => freshMakeElement('__anon__'), querySelectorAll: () => [],
+      click: () => {}, remove: () => {}, scrollIntoView: () => {}, focus: () => {}
+    };
+    return el;
+  }
+  function freshGetElementById(id) {
+    if (!freshElementCache.has(id)) freshElementCache.set(id, freshMakeElement(id));
+    return freshElementCache.get(id);
+  }
+  const freshSandbox = {
+    console,
+    window: { storage: undefined, AudioContext: undefined, addEventListener: () => {}, atob: (s) => Buffer.from(s, 'base64').toString('binary'), navigator: { standalone: false }, matchMedia: undefined, scrollTo: () => {} },
+    document: { getElementById: freshGetElementById, querySelector: () => freshMakeElement('__anon__'), querySelectorAll: () => [], addEventListener: () => {}, createElement: () => freshMakeElement('__anon__') },
+    navigator: { clipboard: {} },
+    location: { hash: '' },
+    localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+    fetch: async () => ({ ok: false, status: 503, json: async () => null, text: async () => 'mocked' }),
+    setTimeout, clearTimeout, setInterval, clearInterval,
+    Date, Math, JSON, Object, Array, String, Number, Boolean, parseInt, parseFloat, isNaN, encodeURIComponent, decodeURIComponent
+  };
+  freshSandbox.globalThis = freshSandbox;
+  const freshContext = vm.createContext(freshSandbox);
+  new vm.Script(appJsCode, { filename: appJsPath }).runInContext(freshContext);
+
+  // vHome/vCustomer/vLogin/vDash themselves need the 'on'/no-'on' dance
+  // showView() itself performs — pre-seed them so showView() doesn't throw
+  // reading properties of a view it assumes already exists.
+  ['vHome', 'vCustomer', 'vLogin', 'vDash'].forEach(id => freshGetElementById(id));
+
+  const modalIds = ['altModal', 'reviewsModal', 'qrModal', 'myBookingsModal'];
+  modalIds.forEach(id => freshGetElementById(id).classList.add('show'));
+  ok(modalIds.every(id => freshGetElementById(id).classList.contains('show')), 'setup: all four modals start open');
+
+  freshContext.showView('vCustomer');
+  ok(modalIds.every(id => !freshGetElementById(id).classList.contains('show')), 'showView() to a real (non-dash) view closes all four previously-stray modals');
+}
+
+section('js/app.js — initCloudSync() still applies the cloud salons on a normal (non-racing) fetch (recency-guard-refactor regression)');
+{
+  // Fresh VM context/DOM mock again (same reasoning as the showView() test
+  // above) — this exercises the real initCloudSync(), not the stub. Scope
+  // is deliberately narrow: it proves the if/!data.salons/else-if recency-
+  // guard restructuring didn't break the common single-fetch case (still
+  // applies cloud salons, still doesn't wrongly re-upload local state when
+  // the cloud already has data). The actual race this fix targets — a
+  // slower initial fetch resolving after a faster poll/modal fetch already
+  // applied fresher data — needs lastSalonsFetchAppliedAt/pollSync, both
+  // (Stray "Initial sync fetch failed: HTTP 503" console noise that may
+  // appear while this section runs is the PREVIOUS test's own fresh
+  // context settling its own boot()-triggered background fetch late, not
+  // an error from this test's context — each fresh VM context here gets
+  // its own independent boot()/initCloudSync()/pollSync() cycle.)
+  // private closure state with no exported hook to drive from outside.
+  const freshElementCache2 = new Map();
+  function freshMakeElement2(id) {
+    const el = {
+      id, value: '', textContent: '', innerHTML: '', style: {}, dataset: {},
+      _classes: new Set(),
+      classList: { add: () => {}, remove: () => {}, toggle: () => {}, contains: () => false },
+      children: [], addEventListener: () => {}, removeEventListener: () => {},
+      appendChild: (child) => { el.children.push(child); return child; },
+      querySelector: () => freshMakeElement2('__anon__'), querySelectorAll: () => [],
+      click: () => {}, remove: () => {}, scrollIntoView: () => {}, focus: () => {}
+    };
+    return el;
+  }
+  function freshGetElementById2(id) {
+    if (!freshElementCache2.has(id)) freshElementCache2.set(id, freshMakeElement2(id));
+    return freshElementCache2.get(id);
+  }
+  const cloudSalons = [{ id: 'sCloud', name: 'Cloud Salon', ownerUsername: 'cloudowner', ownerPassword: 'x', workers: [] }];
+  const freshSandbox2 = {
+    console,
+    window: { storage: undefined, AudioContext: undefined, addEventListener: () => {}, atob: (s) => Buffer.from(s, 'base64').toString('binary'), navigator: { standalone: false }, matchMedia: undefined, scrollTo: () => {} },
+    document: { getElementById: freshGetElementById2, querySelector: () => freshMakeElement2('__anon__'), querySelectorAll: () => [], addEventListener: () => {}, createElement: () => freshMakeElement2('__anon__') },
+    navigator: { clipboard: {} },
+    location: { hash: '', origin: 'http://localhost:3000', href: 'http://localhost:3000/' },
+    localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+    fetch: async () => ({ ok: true, status: 200, json: async () => ({ salons: cloudSalons, bookings: [] }) }),
+    setTimeout, clearTimeout, setInterval, clearInterval,
+    Date, Math, JSON, Object, Array, String, Number, Boolean, parseInt, parseFloat, isNaN, encodeURIComponent, decodeURIComponent
+  };
+  freshSandbox2.globalThis = freshSandbox2;
+  const freshContext2 = vm.createContext(freshSandbox2);
+  // boot() auto-runs at the bottom of app.js and itself calls
+  // initCloudSync() once already — loading app.js here already exercises
+  // one full cycle against our mock fetch. The explicit call below is a
+  // second, deliberately redundant one (proving the guarded logic is safe
+  // to invoke more than once, not just correct on a lone call).
+  new vm.Script(appJsCode, { filename: appJsPath }).runInContext(freshContext2);
+  new vm.Script('var __STATE__ = STATE;', { filename: 'export-state-shim.js' }).runInContext(freshContext2);
+
+  freshContext2.initCloudSync();
+  // initialCloudSync (the fetch promise) is itself a top-level `let`, same
+  // reason it needs the same export-shim trick as STATE above — read it
+  // via a follow-up script in the SAME context right after the call that
+  // assigns it, rather than trying to access it as a context property.
+  new vm.Script('var __SYNC_PROMISE__ = initialCloudSync;', { filename: 'export-promise-shim.js' }).runInContext(freshContext2);
+  await freshContext2.__SYNC_PROMISE__;
+
+  eq(freshContext2.__STATE__.salons, cloudSalons, 'a normal (non-racing) initial sync still applies the cloud salons to STATE');
+}
 
 /* ================================================================
    11. OPTIONAL — api/subscribe.js AGAINST THE REAL VERCEL/UPSTASH KV

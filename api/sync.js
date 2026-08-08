@@ -883,6 +883,21 @@ async function handleCreateBillingCheckoutSession(body, kvUrl, kvToken, req) {
           return { status: 200, json: { success: true, url: approveLink.href } };
         }
         // No approve link for some reason — fall through and create fresh.
+      } else if (staleStatus === 'CANCELLED' || staleStatus === 'EXPIRED') {
+        // Already terminal at PayPal — nothing to cancel (PayPal's /cancel
+        // endpoint only accepts ACTIVE/SUSPENDED and rejects a call against
+        // either of these). This used to fall into the branch below, which
+        // called cancelPaypalSubscription anyway, got back `false` from
+        // PayPal's rejection, and aborted with paypal_error — permanently:
+        // the id was never cleared, so every retry (and the separate
+        // "Disattiva" cancel-subscription action, which has the same stale-
+        // id problem) hit the exact same dead end forever, with no way for
+        // the owner to recover from the dashboard. Falling through here
+        // lets a fresh subscription be created below, which immediately
+        // overwrites billing.paypalSubscriptionId with the new id (the
+        // persisted-pending write further down), so the dead one is
+        // naturally dropped from tracking rather than needing an explicit
+        // clear here.
       } else if (staleStatus) {
         // SUSPENDED or any other cancellable-but-not-pending/active state.
         // PayPal can auto-resume a SUSPENDED subscription once the owner
@@ -999,8 +1014,35 @@ async function handleCancelBillingSubscription(body, kvUrl, kvToken, req) {
       return { status: 409, json: { success: false, error: 'no_subscription' } };
     }
 
-    const cancelled = await cancelPaypalSubscription(salon.billing.paypalSubscriptionId, 'Disattivato dal proprietario dal pannello TRIMIO');
-    if (!cancelled) return { status: 502, json: { success: false, error: 'paypal_error' } };
+    // Check the real status before attempting a cancel — PayPal's /cancel
+    // endpoint only accepts ACTIVE/SUSPENDED and rejects a call against a
+    // subscription that's already CANCELLED/EXPIRED (e.g. the owner
+    // cancelled it directly on paypal.com, per the "manage your card at
+    // paypal.com/myaccount/autopay" self-service path this dashboard
+    // itself points them to, before the CANCELLED webhook landed here).
+    // This used to call cancelPaypalSubscription unconditionally, get back
+    // `false` from PayPal's rejection, and abort with paypal_error without
+    // ever clearing autopay/paypalSubscriptionId — permanently stranding
+    // the owner: every retry of this same button hit the identical dead
+    // end, with no way to recover short of manual KV editing. An already-
+    // terminal subscription is treated as already-cancelled instead.
+    let staleStatus = null;
+    try {
+      const staleSub = await paypalFetch(`/v1/billing/subscriptions/${encodeURIComponent(salon.billing.paypalSubscriptionId)}`);
+      staleStatus = staleSub && staleSub.status;
+    } catch (err) {
+      if (err.status !== 404) {
+        console.error('[BILLING] Could not verify subscription status before cancelling:', err.message);
+        return { status: 502, json: { success: false, error: 'paypal_error' } };
+      }
+      // Confirmed 404 — genuinely gone, treat as already cancelled below.
+    }
+    if (staleStatus === 'ACTIVE' || staleStatus === 'SUSPENDED') {
+      const cancelled = await cancelPaypalSubscription(salon.billing.paypalSubscriptionId, 'Disattivato dal proprietario dal pannello TRIMIO');
+      if (!cancelled) return { status: 502, json: { success: false, error: 'paypal_error' } };
+    }
+    // staleStatus is null (404), CANCELLED, or EXPIRED here — already dead
+    // at PayPal, nothing left to cancel; fall through to clear local state.
 
     // autopay reflected immediately rather than waiting for the CANCELLED
     // webhook — the owner is looking at this screen right now and the
@@ -1471,17 +1513,27 @@ export default async function handler(req, res) {
               // trusted from the client.
               nb.price = svcPrice(salonForVac, nb.service);
               nb.dur = svcDurMin(salonForVac, nb.service);
-              // "Fatto"/completed must only ever be reached by first
-              // creating a booking normally (status 'confirmed') and later
-              // transitioning it via the existing-booking update branch
-              // below, which already rejects marking a future appointment
-              // completed. A brand-new booking submitted directly with
-              // status:'completed' skipped that check entirely — no
-              // legitimate client ever does this (manual staff bookings and
-              // customer bookings both always create as 'confirmed'), so
-              // this is rejected outright rather than re-implementing the
-              // future-date check a second time here.
-              if (nb.status === 'completed') {
+              // A brand-new booking must always start life as exactly
+              // 'confirmed' — no legitimate client ever creates one with any
+              // other status (manual staff bookings and customer bookings
+              // both always POST status:'confirmed'; "Fatto"/completed is
+              // only ever reached later via the existing-booking update
+              // branch below, which already rejects marking a future
+              // appointment completed). Every check further down this
+              // branch (vacation/off-day/break, the duration-aware overlap
+              // check) was keyed off `nb.status !== 'cancelled'`, treating
+              // an omitted/blank/garbage status identically to a real
+              // confirmed booking — but tryAcquireSlotLock/promoteLock/
+              // hsetBooking below never gated on status at all, and the
+              // client's own list filters hide anything whose status isn't
+              // exactly 'confirmed' from staff (no cancel/complete buttons
+              // render for it). An unauthenticated caller could exploit
+              // that gap to plant a permanent, invisible phantom booking —
+              // its slot lock is PERSISTed (no TTL) and nothing in the app
+              // could ever free it. Rejecting anything but 'confirmed'
+              // outright closes this instead of re-deriving status further
+              // down.
+              if (nb.status !== 'confirmed') {
                 conflicts.push({ id: nb.id, error: 'invalid_booking' });
                 continue;
               }

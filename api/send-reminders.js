@@ -153,13 +153,15 @@ export default async function handler(req, res) {
           }
         }
       }
+      let smsDelivered = false;
       if (delivered === 0 && bk.phone) {
         try {
-          if (await sendCustomerText(bk.phone, body)) { sent++; smsSent++; }
+          if (await sendCustomerText(bk.phone, body)) { sent++; smsSent++; smsDelivered = true; }
         } catch (err) {
           console.error('[REMINDER] SMS fallback failed:', err.message);
         }
       }
+      return delivered > 0 || smsDelivered;
     };
 
     for (const bk of dueTomorrow) {
@@ -170,16 +172,24 @@ export default async function handler(req, res) {
       if (!(await claimReminderOnce(kvUrl, kvToken, bk.id, 'tomorrow'))) continue;
       const salon = salons.find(s => s.id === bk.salonId);
       const firstName = (bk.name || '').trim().split(' ')[0] || 'cliente';
-      await notifyBooking(bk, `Gentile ${firstName}! Ti ricordiamo che domani alle ore ${bk.time} hai un appuntamento prenotato con ${bk.workerName}, presso il salone ${salon ? salon.name : 'TRIMIO'}. Grazie per la fiducia!`);
-      await markReminderSent(kvUrl, kvToken, bk.id, 'reminderSent');
+      const delivered = await notifyBooking(bk, `Gentile ${firstName}! Ti ricordiamo che domani alle ore ${bk.time} hai un appuntamento prenotato con ${bk.workerName}, presso il salone ${salon ? salon.name : 'TRIMIO'}. Grazie per la fiducia!`);
+      // Only the 1h claimReminderOnce lock (above) is meant to survive a
+      // genuine delivery failure — the permanent *Sent flag used to be set
+      // unconditionally, so a transient push error (anything but 410/404)
+      // combined with a failed/unconfigured SMS fallback permanently marked
+      // the booking as reminded with no retry and no visibility anywhere,
+      // even though the customer got nothing. Only mark it permanently sent
+      // once something actually delivered; otherwise the claim lock expires
+      // in an hour and the next cron run retries.
+      if (delivered) await markReminderSent(kvUrl, kvToken, bk.id, 'reminderSent');
     }
 
     for (const bk of dueToday) {
       if (!(await claimReminderOnce(kvUrl, kvToken, bk.id, 'today'))) continue;
       const salon = salons.find(s => s.id === bk.salonId);
       const firstName = (bk.name || '').trim().split(' ')[0] || 'cliente';
-      await notifyBooking(bk, `Gentile ${firstName}! Ti ricordiamo il tuo appuntamento di oggi alle ore ${bk.time} con ${bk.workerName}, presso il salone ${salon ? salon.name : 'TRIMIO'}. A presto!`);
-      await markReminderSent(kvUrl, kvToken, bk.id, 'sameDayReminderSent');
+      const delivered = await notifyBooking(bk, `Gentile ${firstName}! Ti ricordiamo il tuo appuntamento di oggi alle ore ${bk.time} con ${bk.workerName}, presso il salone ${salon ? salon.name : 'TRIMIO'}. A presto!`);
+      if (delivered) await markReminderSent(kvUrl, kvToken, bk.id, 'sameDayReminderSent');
     }
 
     if (deadEndpoints.size > 0) {

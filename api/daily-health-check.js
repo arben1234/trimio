@@ -302,9 +302,21 @@ export default async function handler(req, res) {
               || freshSalon.billing.autopay || freshSalon.billing.paidThroughMonth >= currentMonth
               || freshSalon.billing.lastWarningEmailSentDate === todayISO) continue;
           const fee = feeForWorkerCount(Math.max((freshSalon.workers || []).length, freshSalon.billing.declaredWorkerCount || 0));
-          await sendEmail(freshSalon.email, 'TRIMIO — Pagamento canone mensile in sospeso',
+          const emailSent = await sendEmail(freshSalon.email, 'TRIMIO — Pagamento canone mensile in sospeso',
             `<p>Ciao,</p><p>Il canone mensile di €${fee} per <b>${escapeHtml(freshSalon.name)}</b> risulta non ancora saldato per ${currentMonth}. ` +
             `Il servizio verrà sospeso se il pagamento non risulta entro il giorno 5 del mese.</p>`);
+          // sendEmail() never throws — it returns false on any failure
+          // (including Resend's shared sandbox sender only being able to
+          // reach the account's own verified address until a sending
+          // domain is verified, a currently-live constraint per CLAUDE.md).
+          // This return value used to be discarded entirely: the flag below
+          // was stamped and, days later, the salon suspended exactly as if
+          // the owner had actually been warned — with nothing anywhere
+          // telling admin the email never actually left. Surfacing the
+          // failure here means it shows up in admin's daily digest instead.
+          if (!emailSent) {
+            problems.push(`Salone "${freshSalon.name}": email di avviso pagamento NON inviata (controlla configurazione Resend) — il proprietario potrebbe non essere stato avvisato`);
+          }
           freshSalon.billing.lastWarningEmailSentDate = todayISO;
           await setSalonsDb(kvUrl, kvToken, freshSalons);
         } finally {
@@ -321,9 +333,12 @@ export default async function handler(req, res) {
               || freshSalon.inactive) continue;
           freshSalon.inactive = true;
           freshSalon.billing.suspendedByBilling = true;
-          await sendEmail(freshSalon.email, 'TRIMIO — Servizio sospeso per mancato pagamento',
+          const emailSent = await sendEmail(freshSalon.email, 'TRIMIO — Servizio sospeso per mancato pagamento',
             `<p>Ciao,</p><p>Il servizio TRIMIO per <b>${escapeHtml(freshSalon.name)}</b> è stato sospeso per mancato pagamento del canone di ${currentMonth}. ` +
             `Contattaci non appena effettuato il pagamento per riattivarlo.</p>`);
+          if (!emailSent) {
+            problems.push(`Salone "${freshSalon.name}": sospeso per mancato pagamento, ma l'email di notifica NON è stata inviata (controlla configurazione Resend)`);
+          }
           await setSalonsDb(kvUrl, kvToken, freshSalons);
         } finally {
           await releaseBillingLock(kvUrl, kvToken, salon.id);

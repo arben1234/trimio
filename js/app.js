@@ -910,6 +910,15 @@ function initCloudSync() {
   updateUIStatus(true);
 
   // Initial load from Vercel Cloud Blob with cache-busting to bypass browser cache
+  // Same "most-recently-STARTED request wins" discipline lastSalonsFetchAppliedAt
+  // documents above, applied here too — this used to be the one fetch that
+  // unconditionally overwrote STATE.salons regardless of timing. A session
+  // restored from localStorage renders the dashboard almost instantly while
+  // this request is still in flight; if the user opens/saves an edit (via
+  // openSalonModal's own faster targeted fetch, or the 6s poll) before this
+  // slower initial request resolves, it could land afterward and silently
+  // revert STATE.salons back to the pre-edit snapshot it originally fetched.
+  const initialSyncStartedAt = Date.now();
   initialCloudSync = fetch(syncUrl('/api/sync?t=' + Date.now()), { cache: 'no-store', headers: authHeaders() })
     .then(r => {
       if (!r.ok) {
@@ -924,11 +933,16 @@ function initCloudSync() {
         if (handleSessionExpiredIfNeeded(data)) return;
         // Safeguard: Only update salons if the cloud database contains them.
         // If the cloud is brand new and empty, upload our local salons to initialize it.
-        if (data.salons && data.salons.length > 0) {
+        if (!data.salons || data.salons.length === 0) {
+          if (STATE.salons && STATE.salons.length > 0) saveState(); // Upload local salons to seed the cloud database
+        } else if (initialSyncStartedAt >= lastSalonsFetchAppliedAt) {
           STATE.salons = data.salons;
-        } else if (STATE.salons && STATE.salons.length > 0) {
-          saveState(); // Upload local salons to seed the cloud database
+          lastSalonsFetchAppliedAt = initialSyncStartedAt;
         }
+        // else: the cloud does have salons, but a fetch that started later
+        // (poll tick or a modal's own targeted refetch) already applied
+        // fresher data — skip silently rather than overwrite it with this
+        // slower, now-stale response.
 
         // Admin username: adopt whatever the server has (so a username
         // change made from any device is picked up everywhere). The password
@@ -2942,7 +2956,14 @@ function showView(view){
   // login (isLogin with a loginSalonContext) still has no header of its
   // own, so it keeps the shared bar exactly as before.
   document.querySelector('.head').style.display=(isDash || (isLogin && !loginSalonContext))?'none':'flex';
-  if(!isDash){closeSide();['modal','workerModal','breakModal','salonModal','userModal'].forEach(closeModal);}
+  // altModal/reviewsModal/qrModal/myBookingsModal live outside every
+  // .view container (fixed-position overlays toggled purely via their own
+  // .show class), so switching views/salons never auto-hid them the way a
+  // .view{display:none} rule does for the other five — e.g. a customer with
+  // "Le mie prenotazioni" open, then navigating to a different salon (hash
+  // change/QR scan) or back, used to leave it on screen showing the PREVIOUS
+  // salon's stale booking data over the newly rendered page underneath.
+  if(!isDash){closeSide();['modal','workerModal','breakModal','salonModal','userModal','altModal','reviewsModal','qrModal','myBookingsModal'].forEach(closeModal);}
   $('gear').style.display='none';
   updateNavMenu();
   const hBack = $('hBack');
