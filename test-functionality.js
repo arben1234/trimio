@@ -166,7 +166,7 @@ ok(X.STATE.salons.every(s => s.id && s.slug && s.ownerUsername && s.ownerPasswor
 ok(X.STATE.salons.every(s => Array.isArray(s.workers) && s.workers.length > 0), 'every salon has at least one worker');
 ok(X.STATE.salons.every(s => s.workers.every(w => w.username && w.password)), 'every worker has username/password');
 ok(X.DEFAULT_SERVICES.length === 4 && X.DEFAULT_SERVICES.every(s => s.name && s.price > 0), 'DEFAULT_SERVICES well-formed');
-ok(X.DEFAULT_SLOTS.length === 16, `DEFAULT_SLOTS has 16 entries (found ${X.DEFAULT_SLOTS.length})`);
+ok(X.DEFAULT_SLOTS.length === 25, `DEFAULT_SLOTS has 25 entries, 09:00-21:00 every 30min (found ${X.DEFAULT_SLOTS.length})`);
 
 const allUsernames = X.STATE.salons.flatMap(s => [s.ownerUsername, ...s.workers.map(w => w.username)]);
 eq(new Set(allUsernames).size, allUsernames.length, 'no duplicate usernames across owners/workers');
@@ -193,7 +193,7 @@ eq(X.getDistance(45, 9, 45, 9), 0, 'getDistance() of identical points is 0');
 ok(X.isValidItalianPhone('+39 035 123 4567'), 'isValidItalianPhone() accepts +39 with spaces');
 ok(X.isValidItalianPhone('3331234567'), 'isValidItalianPhone() accepts a bare 10-digit mobile number');
 ok(X.isValidItalianPhone('02-1234567'), 'isValidItalianPhone() accepts dashes as separators');
-ok(!X.isValidItalianPhone(''), 'isValidItalianPhone() rejects an empty string');
+ok(X.isValidItalianPhone(''), 'isValidItalianPhone() treats an empty string as valid — the field is optional (client-side "facoltativo"), unlike the server-side persistence check below');
 ok(!X.isValidItalianPhone('abc'), 'isValidItalianPhone() rejects non-numeric input');
 ok(!X.isValidItalianPhone('123'), 'isValidItalianPhone() rejects an implausibly short number');
 
